@@ -62,7 +62,7 @@ object Notifier {
             if (isToday && inWindow && ready && (state.morningDate != r.localDate || state.morningState != stateKey)) {
                 val firstToday = state.morningDate != r.localDate
                 val n = NotificationCompat.Builder(ctx, CH_MORNING)
-                    .setSmallIcon(R.drawable.ic_launcher_foreground)
+                    .setSmallIcon(R.drawable.ic_stat_pulse)
                     .setContentTitle((if (r.provisional) "Provisional · " else "") + r.headline)
                     .setContentText(r.recommendation.suggestion)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(r.recommendation.suggestion))
@@ -83,7 +83,7 @@ object Notifier {
         val units = settings.units
         fresh.forEach { a ->
             val n = NotificationCompat.Builder(ctx, CH_RUNS)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_pulse)
                 .setContentTitle("Run report ready")
                 .setContentText("${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)} · ${Format.shortDate(a.localDate)}")
                 .setContentIntent(openApp(ctx)).setAutoCancel(true)

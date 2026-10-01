@@ -174,10 +174,11 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "create-token":
         print(create_token(cfg.data_dir, args.name))
-        print("Shown once. Enter it in the app under Settings → Backend.", file=sys.stderr)
+        print(f"Shown once. Saved (hashed) in {cfg.data_dir}/device_tokens.json. The API only accepts it if it runs "
+              f"with RSK_DATA_DIR={cfg.data_dir}. Enter it in the app under Settings → Connection.", file=sys.stderr)
         return 0
     if args.cmd == "revoke-token":
-        print(f"revoked {revoke_token(cfg.data_dir, args.name)}")
+        print(f"revoked {revoke_token(cfg.data_dir, args.name)} token(s) named {args.name!r} in {cfg.data_dir}")
         return 0
     if args.cmd == "sync":
         return cmd_sync(cfg, args.loop)

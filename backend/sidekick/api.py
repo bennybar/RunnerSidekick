@@ -212,6 +212,29 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         return with_narrative(conn, body)
 
+    @app.get("/v1/trends")
+    def get_trends(days: Literal[7, 28, 90] = 28, conn=Depends(db)):
+        from .trends import build_trends
+        return build_trends(conn, cfg.source, today(conn), days, synthetic)
+
+    @app.get("/v1/weekly/latest")
+    def latest_weekly(conn=Depends(db)):
+        from .weekly import regenerate_weeklies
+        with lock_reports:
+            regenerate_weeklies(conn, cfg.source, today(conn), synthetic)
+        r = conn.execute("SELECT body_json FROM report WHERE type='weekly' ORDER BY subject_key DESC, revision DESC LIMIT 1").fetchone()
+        if not r:
+            raise HTTPException(404, "no completed week yet")
+        return with_narrative(conn, json.loads(r["body_json"]))
+
+    @app.get("/v1/reports/{rtype}/{key}/revisions")
+    def revisions(rtype: str, key: str, conn=Depends(db)):
+        """All stored revisions of one report, newest first, so earlier versions stay browsable."""
+        return [{"id": r["id"], "revision": r["revision"], "generated_at": r["generated_at"], "data_cutoff": r["data_cutoff"],
+                 "algorithm_version": json.loads(r["algorithm_version"])}
+                for r in conn.execute("SELECT id, revision, generated_at, data_cutoff, algorithm_version FROM report"
+                                      " WHERE type=? AND subject_key=? ORDER BY revision DESC", (rtype, key))]
+
     @app.get("/v1/insights")
     def get_insights(conn=Depends(db)):
         with lock_reports:

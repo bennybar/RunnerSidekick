@@ -71,6 +71,18 @@ def fmt_dur(s: float) -> str:
 
 # ---------------------------------------------------------------- I1 intensity distribution
 
+def zone_time(r: RunData, floors: list[float]) -> list[float]:
+    """Moving seconds below zone 1 and in zones 1..5 (index 0..5) for one run; stops, gaps and invalid HR excluded."""
+    zt = [0.0] * 6
+    if not r.samples:
+        return zt
+    for i, wi in enumerate(rn._weights(r.samples)):
+        h = r.samples.hr[i]
+        if wi > 0 and h is not None and 60 <= h <= 220:
+            zt[sum(1 for f in floors if h >= f)] += wi
+    return zt
+
+
 def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     q = "How is your running time spread across heart-rate zones?"
     if not zones or not zones.get("floors"):
@@ -85,12 +97,7 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     hard_runs = 0
     per_run = []
     for r in usable:
-        w = rn._weights(r.samples)
-        zt = [0.0] * 6
-        for i, wi in enumerate(w):
-            h = r.samples.hr[i]
-            if wi > 0 and h is not None and 60 <= h <= 220:
-                zt[sum(1 for f in floors if h >= f)] += wi
+        zt = zone_time(r, floors)
         tot = sum(zt)
         if tot <= 0:
             continue

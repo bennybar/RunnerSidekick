@@ -499,3 +499,5 @@ def regenerate(conn, source: str, synthetic: bool, changed_dates: set[str], chan
     if changed_dates or changed_activities or not conn.execute("SELECT 1 FROM report WHERE type='insights' AND subject_key=?",
                                                                (today.isoformat(),)).fetchone():
         build_insights(conn, source, today, synthetic)
+    from .weekly import regenerate_weeklies
+    regenerate_weeklies(conn, source, today, synthetic)
