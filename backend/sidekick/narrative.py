@@ -14,12 +14,13 @@ import hashlib
 import json
 import logging
 import re
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from .db import utc_now
+from pymongo.database import Database
+
+from .db import next_id, one, plain, put, utc_now
 from .reports import fmt_delta, fmt_value
 
 log = logging.getLogger(__name__)
@@ -192,36 +193,42 @@ class AiConfig:
     max_output_tokens: int = 700
 
 
-def cached(conn: sqlite3.Connection, report: dict, model: str) -> dict | None:
-    r = conn.execute("SELECT * FROM narrative WHERE report_type=? AND subject_key=? AND input_hash=? AND model=? AND prompt_version=?",
-                     (report["type"], _key(report), report["input_hash"], model, PROMPT_VERSION)).fetchone()
-    return dict(r) if r else None
+def _nkey(report: dict, model: str) -> dict:
+    return {"report_type": report["type"], "subject_key": _key(report), "input_hash": report["input_hash"], "model": model,
+            "prompt_version": PROMPT_VERSION}
+
+
+def cached(conn: Database, report: dict, model: str) -> dict | None:
+    return one(conn.narrative, _nkey(report, model))
 
 
 def _key(report: dict) -> str:
     return report["activity"]["source_id"] if report["type"] == "post_run" else report["local_date"]
 
 
-def calls_today(conn: sqlite3.Connection) -> int:
+def calls_today(conn: Database) -> int:
     """AI calls made today by any feature (narrative and coach share one budget)."""
     day = datetime.now(timezone.utc).date().isoformat()
-    return conn.execute("SELECT COUNT(*) FROM ai_call WHERE substr(created_at, 1, 10)=?", (day,)).fetchone()[0]
+    return conn.ai_call.count_documents({"created_at": {"$gte": day}})
 
 
-def reserve_call(conn: sqlite3.Connection, feature: str, limit: int) -> int | None:
-    """Records an AI call before it is made; None when today's budget is used up."""
-    with conn:
-        if calls_today(conn) >= limit:
-            return None
-        return conn.execute("INSERT INTO ai_call (feature, created_at) VALUES (?,?)", (feature, utc_now())).lastrowid
+def reserve_call(conn: Database, feature: str, limit: int) -> int | None:
+    """Records an AI call before it is made; None when today's budget is used up. Claim first, then check, so two
+    concurrent requests can't both take the last call."""
+    cid = next_id(conn, "ai_call")
+    conn.ai_call.insert_one({"id": cid, "feature": feature, "created_at": utc_now(), "outcome": None})
+    day = datetime.now(timezone.utc).date().isoformat()
+    if conn.ai_call.count_documents({"created_at": {"$gte": day}, "id": {"$lte": cid}}) > limit:
+        conn.ai_call.delete_one({"id": cid})
+        return None
+    return cid
 
 
-def finish_call(conn: sqlite3.Connection, call_id: int, outcome: str) -> None:
-    with conn:
-        conn.execute("UPDATE ai_call SET outcome=? WHERE id=?", (outcome, call_id))
+def finish_call(conn: Database, call_id: int, outcome: str) -> None:
+    conn.ai_call.update_one({"id": call_id}, {"$set": {"outcome": outcome}})
 
 
-def generate(conn: sqlite3.Connection, report: dict, cfg: AiConfig, provider: Provider | None = None, force: bool = False) -> dict:
+def generate(conn: Database, report: dict, cfg: AiConfig, provider: Provider | None = None, force: bool = False) -> dict:
     """Generate (or return cached) narrative for this report revision. Never raises; failures are recorded."""
     if not cfg.enabled:
         return {"status": "disabled"}
@@ -245,15 +252,9 @@ def generate(conn: sqlite3.Connection, report: dict, cfg: AiConfig, provider: Pr
         status, detail = "failed", type(e).__name__
     finish_call(conn, call, status)
     log.info("narrative %s for %s/%s: %s", status, report["type"], _key(report), detail or "")
-    with conn:
-        conn.execute(
-            "INSERT INTO narrative (report_type, subject_key, input_hash, provider, model, prompt_version, status, detail,"
-            " output_json, bundle_sha256, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-            " ON CONFLICT (report_type, subject_key, input_hash, model, prompt_version) DO UPDATE SET status=excluded.status,"
-            " detail=excluded.detail, output_json=excluded.output_json, created_at=excluded.created_at",
-            (report["type"], _key(report), report["input_hash"], provider.name, cfg.model, PROMPT_VERSION, status, detail,
-             json.dumps(output) if output else None,
-             hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest(), utc_now()))
+    put(conn.narrative, _nkey(report, cfg.model), {
+        "provider": provider.name, "status": status, "detail": detail, "output": plain(output) if output else None,
+        "bundle_sha256": hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest(), "created_at": utc_now()})
     return view(cached(conn, report, cfg.model))
 
 
@@ -261,7 +262,7 @@ def view(row: dict) -> dict:
     v = {"status": row["status"], "provider": row["provider"], "model": row["model"], "prompt_version": row["prompt_version"],
          "generated_at": row["created_at"]}
     if row["status"] == "ok":
-        v.update(json.loads(row["output_json"]))
+        v.update(row["output"])
     else:
         v["detail"] = row["detail"]
     return v

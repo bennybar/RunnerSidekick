@@ -1,13 +1,13 @@
 """Regressions for the second external review (2026-10-01)."""
-import json
 from datetime import date, datetime, timedelta
 
+from helpers import set_plan
 from sidekick import focus as fc
 from sidekick import reports as rp
 from sidekick.analytics import insights as ins
 from sidekick.connectors.base import Samples
 from sidekick.connectors.fixture import FixtureConnector
-from sidekick.db import connect
+from sidekick.db import connect, set_setting, user_db_name
 from sidekick.sync import run_sync
 
 ANCHOR = date(2026, 9, 30)
@@ -15,15 +15,13 @@ LAST_WEEK = fc.week_start(ANCHOR) - timedelta(days=7)
 
 
 def synced(tmp_path):
-    conn = connect(tmp_path / "t.db")
+    conn = connect(user_db_name(1, "fixture"))
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 60, 3, max_backfill_days=90)
     return conn
 
 
 def set_zones(conn, floors):
-    with conn:
-        conn.execute("INSERT INTO user_settings VALUES ('source_hr_zones', ?) ON CONFLICT (key) DO UPDATE SET value_json=excluded.value_json",
-                     (json.dumps({"floors": floors, "method": "HR_MAX", "max_hr": 189}),))
+    set_setting(conn, "source_hr_zones", {"floors": floors, "method": "HR_MAX", "max_hr": 189})
 
 
 def test_runs_without_heart_rate_do_not_crash_intensity():
@@ -44,8 +42,7 @@ def test_recovery_focus_counts_only_zones_4_and_5(tmp_path):
 
 def test_recovery_without_zones_is_unavailable_not_achieved(tmp_path):
     conn = synced(tmp_path)
-    with conn:
-        conn.execute("DELETE FROM user_settings WHERE key='source_hr_zones'")
+    conn.user_settings.delete_one({"key": "source_hr_zones"})
     r = fc.evaluate(conn, "fixture", LAST_WEEK, "recovery", ANCHOR)
     assert r["status"] == "unavailable"
 
@@ -53,9 +50,8 @@ def test_recovery_without_zones_is_unavailable_not_achieved(tmp_path):
 def test_no_zones_preference_is_respected(tmp_path):
     conn = synced(tmp_path)
     set_zones(conn, [95, 113, 132, 151, 170])
-    with conn:
-        conn.execute("INSERT INTO user_settings VALUES ('hr_zone_source', '\"none\"')")
-        conn.execute("INSERT INTO day_plan VALUES (?, 'easy', 40, 'x')", (ANCHOR.isoformat(),))
+    set_setting(conn, "hr_zone_source", "none")
+    set_plan(conn, ANCHOR.isoformat(), "easy", 40)
     m = rp.build_morning(conn, "fixture", ANCHOR, True)
     assert "bpm" not in m["recommendation"]["suggestion"]
     assert rp.hr_zones(conn) is None
@@ -63,8 +59,7 @@ def test_no_zones_preference_is_respected(tmp_path):
 
 def test_zone_change_revises_the_morning_target(tmp_path):
     conn = synced(tmp_path)
-    with conn:
-        conn.execute("INSERT INTO day_plan VALUES (?, 'easy', 40, 'x')", (ANCHOR.isoformat(),))
+    set_plan(conn, ANCHOR.isoformat(), "easy", 40)
     set_zones(conn, [95, 113, 132, 151, 170])
     a = rp.build_morning(conn, "fixture", ANCHOR, True)
     set_zones(conn, [95, 113, 142, 160, 175])

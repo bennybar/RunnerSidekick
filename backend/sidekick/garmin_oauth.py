@@ -59,10 +59,9 @@ def start(app_conn, user_id: int, client_id: str | None, redirect_uri: str) -> s
     if not client_id:
         raise NotConfigured("Garmin sign-in isn't available yet: the Garmin developer program access is pending.")
     state, verifier = pysecrets.token_urlsafe(24), code_verifier()
-    with app_conn:
-        app_conn.execute("DELETE FROM oauth_states WHERE created_at < ?",
-                         ((datetime.now(timezone.utc) - timedelta(seconds=STATE_TTL_S)).isoformat().replace("+00:00", "Z"),))
-        app_conn.execute("INSERT INTO oauth_states VALUES (?,?,?,?)", (state, user_id, verifier, utc_now()))
+    app_conn.oauth_states.delete_many({"created_at": {"$lt": (datetime.now(timezone.utc) - timedelta(seconds=STATE_TTL_S)).isoformat()
+                                                                 .replace("+00:00", "Z")}})
+    app_conn.oauth_states.insert_one({"state": state, "user_id": user_id, "code_verifier": verifier, "created_at": utc_now()})
     return AUTHORIZE_URL + "?" + urlencode({
         "client_id": client_id, "response_type": "code", "code_challenge": code_challenge(verifier),
         "code_challenge_method": "S256", "redirect_uri": redirect_uri, "state": state})
@@ -92,9 +91,7 @@ def _store_tokens(user_dir: Path, tok: dict, extra: dict | None = None) -> dict:
 
 def complete(app_conn, state: str, code: str, client_id: str, client_secret: str, redirect_uri: str, user_dir_for) -> int:
     """Callback: validate state, exchange the code, store tokens in the user's folder. Returns the user id."""
-    row = app_conn.execute("SELECT * FROM oauth_states WHERE state=?", (state,)).fetchone()
-    with app_conn:
-        app_conn.execute("DELETE FROM oauth_states WHERE state=?", (state,))  # single use
+    row = app_conn.oauth_states.find_one_and_delete({"state": state})  # single use
     if row is None:
         raise OAuthError("This sign-in link has expired or was already used. Please try again from the app.")
     created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))

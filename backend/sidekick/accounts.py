@@ -1,27 +1,25 @@
-"""Users, invites and app sessions (data/app.db). Each user's health data lives in its own folder
-data/users/<id>/ (own SQLite database and Garmin tokens), so users can't see each other's data and an account
-can be deleted by removing one folder.
+"""Users, invites and app sessions (the `<prefix>_app` MongoDB database). Each user's health data lives in its own
+database (`<prefix>_u<id>_<source>`) and their Garmin tokens in data/users/<id>/, so users can't see each other's
+data and an account is deleted by dropping one database and one folder.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import secrets
 import shutil
-import sqlite3
 from pathlib import Path
 
-from .db import APP_MIGRATIONS_DIR, connect, utc_now
+from pymongo.database import Database
+
+from .db import app_name, client, connect, db_prefix, many, next_id, one, utc_now
 
 OWNER_ROLE = "owner"
 
 
-def app_db(data_dir: Path) -> sqlite3.Connection:
-    conn = connect(data_dir / "app.db", APP_MIGRATIONS_DIR)
-    migrate_single_user_layout(conn, data_dir)
-    return conn
+def app_db(data_dir: Path | None = None) -> Database:
+    return connect(app_name())
 
 
 def user_dir(data_dir: Path, user_id: int) -> Path:
@@ -31,39 +29,21 @@ def user_dir(data_dir: Path, user_id: int) -> Path:
     return d
 
 
-def owner(conn) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM users WHERE role=? AND deleted_at IS NULL ORDER BY id LIMIT 1", (OWNER_ROLE,)).fetchone()
+def owner(conn: Database) -> dict | None:
+    return one(conn.users, {"role": OWNER_ROLE, "deleted_at": None}, sort=[("id", 1)])
 
 
-def ensure_owner(conn) -> sqlite3.Row:
+def ensure_owner(conn: Database) -> dict:
     o = owner(conn)
     if o is None:
-        with conn:
-            conn.execute("INSERT INTO users (role, name, created_at) VALUES (?, 'Owner', ?)", (OWNER_ROLE, utc_now()))
+        conn.users.insert_one({"id": next_id(conn, "users"), "email": None, "google_sub": None, "name": "Owner", "role": OWNER_ROLE,
+                               "created_at": utc_now(), "deleted_at": None})
         o = owner(conn)
     return o
 
 
-def migrate_single_user_layout(conn, data_dir: Path) -> None:
-    """One-time move from the single-user layout (data/garmin.db, data/garmin_tokens, data/device_tokens.json)
-    into data/users/<owner>/. Existing app tokens keep working: their hashes become owner sessions."""
-    legacy = [data_dir / n for n in ("garmin.db", "fixture.db", "garmin_tokens")]
-    tokens_file = data_dir / "device_tokens.json"
-    if not any(p.exists() for p in legacy) and not tokens_file.exists():
-        return
-    o = ensure_owner(conn)
-    dest = user_dir(data_dir, o["id"])
-    for p in legacy:
-        for suffix in ("", "-wal", "-shm"):
-            src = p.with_name(p.name + suffix)
-            if src.exists() and not (dest / src.name).exists():
-                shutil.move(str(src), str(dest / src.name))
-    if tokens_file.exists():
-        with conn:
-            for t in json.loads(tokens_file.read_text()):
-                conn.execute("INSERT OR IGNORE INTO sessions (user_id, name, token_sha256, created_at, revoked_at) VALUES (?,?,?,?,?)",
-                             (o["id"], t["name"], t["sha256"], t["created_at"], t["revoked_at"]))
-        tokens_file.rename(tokens_file.with_name("device_tokens.json.migrated"))
+def user(conn: Database, user_id: int) -> dict | None:
+    return one(conn.users, {"id": user_id})
 
 
 # ---------------------------------------------------------------- sessions
@@ -72,31 +52,28 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_session(conn, user_id: int, name: str) -> str:
+def create_session(conn: Database, user_id: int, name: str) -> str:
     token = "rsk_" + secrets.token_urlsafe(32)
-    with conn:
-        conn.execute("INSERT INTO sessions (user_id, name, token_sha256, created_at) VALUES (?,?,?,?)", (user_id, name, _hash(token), utc_now()))
+    conn.sessions.insert_one({"id": next_id(conn, "sessions"), "user_id": user_id, "name": name, "token_sha256": _hash(token),
+                              "created_at": utc_now(), "last_used_at": None, "revoked_at": None})
     return token
 
 
-def verify_session(conn, token: str) -> sqlite3.Row | None:
+def verify_session(conn: Database, token: str) -> dict | None:
     digest = _hash(token)
-    r = conn.execute("SELECT s.id AS session_id, s.token_sha256, u.* FROM sessions s JOIN users u ON u.id = s.user_id"
-                     " WHERE s.token_sha256=? AND s.revoked_at IS NULL AND u.deleted_at IS NULL", (digest,)).fetchone()
-    if r is None or not hmac.compare_digest(r["token_sha256"], digest):
+    s = one(conn.sessions, {"token_sha256": digest, "revoked_at": None})
+    if s is None or not hmac.compare_digest(s["token_sha256"], digest):
         return None
-    with conn:
-        conn.execute("UPDATE sessions SET last_used_at=? WHERE id=?", (utc_now(), r["session_id"]))
-    return r
+    u = one(conn.users, {"id": s["user_id"], "deleted_at": None})
+    if u is None:
+        return None
+    conn.sessions.update_one({"id": s["id"]}, {"$set": {"last_used_at": utc_now()}})
+    return {**u, "session_id": s["id"]}
 
 
-def revoke_sessions(conn, user_id: int, name: str | None = None) -> int:
-    q, args = "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL", [utc_now(), user_id]
-    if name:
-        q += " AND name=?"
-        args.append(name)
-    with conn:
-        return conn.execute(q, args).rowcount
+def revoke_sessions(conn: Database, user_id: int, name: str | None = None) -> int:
+    q = {"user_id": user_id, "revoked_at": None, **({"name": name} if name else {})}
+    return conn.sessions.update_many(q, {"$set": {"revoked_at": utc_now()}}).modified_count
 
 
 # ---------------------------------------------------------------- invites and sign-in
@@ -105,55 +82,56 @@ def normalise_email(email: str) -> str:
     return email.strip().lower()
 
 
-def add_invite(conn, email: str) -> None:
-    with conn:
-        conn.execute("INSERT OR IGNORE INTO invites (email, created_at) VALUES (?,?)", (normalise_email(email), utc_now()))
+def add_invite(conn: Database, email: str) -> None:
+    conn.invites.update_one({"email": normalise_email(email)}, {"$setOnInsert": {"created_at": utc_now(), "used_at": None}}, upsert=True)
 
 
-def remove_invite(conn, email: str) -> int:
-    with conn:
-        return conn.execute("DELETE FROM invites WHERE email=? AND used_at IS NULL", (normalise_email(email),)).rowcount
+def remove_invite(conn: Database, email: str) -> int:
+    return conn.invites.delete_one({"email": normalise_email(email), "used_at": None}).deleted_count
 
 
-def set_owner_email(conn, email: str) -> None:
+def set_owner_email(conn: Database, email: str) -> None:
     o = ensure_owner(conn)
-    with conn:
-        conn.execute("UPDATE users SET email=? WHERE id=?", (normalise_email(email), o["id"]))
+    conn.users.update_one({"id": o["id"]}, {"$set": {"email": normalise_email(email)}})
 
 
 class NotInvited(Exception):
     pass
 
 
-def sign_in_with_google(conn, claims: dict) -> sqlite3.Row:
+def sign_in_with_google(conn: Database, claims: dict) -> dict:
     """claims: a verified Google ID token payload. Existing users (by Google subject or email) sign in; new users
     need an unused invite for their verified email."""
     if not claims.get("email_verified"):
         raise NotInvited("Google account email is not verified")
     email, sub = normalise_email(claims["email"]), claims["sub"]
-    u = conn.execute("SELECT * FROM users WHERE (google_sub=? OR email=?) AND deleted_at IS NULL", (sub, email)).fetchone()
-    with conn:
-        if u is None:
-            inv = conn.execute("SELECT * FROM invites WHERE email=? AND used_at IS NULL", (email,)).fetchone()
-            if inv is None:
-                raise NotInvited("This Google account hasn't been invited yet")
-            conn.execute("INSERT INTO users (email, google_sub, name, created_at) VALUES (?,?,?,?)", (email, sub, claims.get("name"), utc_now()))
-            conn.execute("UPDATE invites SET used_at=? WHERE email=?", (utc_now(), email))
-        else:
-            conn.execute("UPDATE users SET google_sub=?, name=COALESCE(name, ?) WHERE id=?", (sub, claims.get("name"), u["id"]))
-    return conn.execute("SELECT * FROM users WHERE google_sub=? AND deleted_at IS NULL", (sub,)).fetchone()
+    u = one(conn.users, {"$or": [{"google_sub": sub}, {"email": email}], "deleted_at": None})
+    if u is None:
+        if one(conn.invites, {"email": email, "used_at": None}) is None:
+            raise NotInvited("This Google account hasn't been invited yet")
+        conn.users.insert_one({"id": next_id(conn, "users"), "email": email, "google_sub": sub, "name": claims.get("name"),
+                               "role": "member", "created_at": utc_now(), "deleted_at": None})
+        conn.invites.update_one({"email": email}, {"$set": {"used_at": utc_now()}})
+    else:
+        conn.users.update_one({"id": u["id"]}, {"$set": {"google_sub": sub, "name": u.get("name") or claims.get("name")}})
+    return one(conn.users, {"google_sub": sub, "deleted_at": None})
 
 
-def delete_user(conn, data_dir: Path, user_id: int) -> None:
-    """Removes the user's data folder (health data, Garmin tokens) and sessions; keeps a tombstone row."""
+def delete_user(conn: Database, data_dir: Path, user_id: int) -> None:
+    """Drops the user's databases and token folder and their sessions; keeps a tombstone record."""
+    prefix = f"{db_prefix()}_u{user_id}_"
+    for name in client().list_database_names():
+        if name.startswith(prefix):
+            client().drop_database(name)
     shutil.rmtree(data_dir / "users" / str(user_id), ignore_errors=True)
-    with conn:
-        conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
-        conn.execute("DELETE FROM oauth_states WHERE user_id=?", (user_id,))
-        conn.execute("UPDATE users SET deleted_at=?, email=NULL, google_sub=NULL, name=NULL WHERE id=?", (utc_now(), user_id))
+    conn.sessions.delete_many({"user_id": user_id})
+    conn.oauth_states.delete_many({"user_id": user_id})
+    conn.users.update_one({"id": user_id}, {"$set": {"deleted_at": utc_now(), "email": None, "google_sub": None, "name": None}})
 
 
-def list_users(conn) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT u.id, u.email, u.name, u.role, u.created_at, COUNT(s.id) AS sessions FROM users u"
-        " LEFT JOIN sessions s ON s.user_id=u.id AND s.revoked_at IS NULL WHERE u.deleted_at IS NULL GROUP BY u.id ORDER BY u.id")]
+def list_users(conn: Database) -> list[dict]:
+    out = []
+    for u in many(conn.users, {"deleted_at": None}, sort=[("id", 1)]):
+        out.append({k: u.get(k) for k in ("id", "email", "name", "role", "created_at")} |
+                   {"sessions": conn.sessions.count_documents({"user_id": u["id"], "revoked_at": None})})
+    return out

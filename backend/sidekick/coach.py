@@ -22,7 +22,7 @@ from statistics import median
 from . import focus as fc
 from . import reports as rp
 from .analytics import running as rn
-from .db import utc_now
+from .db import many, next_id, one, plain, utc_now
 from .narrative import OpenAIProvider
 
 log = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
             if v:
                 b.fact(f"predicted_{k}", f"Garmin predicted {label} time", rp.fmt_duration_s(v), v)
 
-    ins = conn.execute("SELECT body_json FROM report WHERE type='insights' ORDER BY local_date DESC, revision DESC LIMIT 1").fetchone()
-    for i in json.loads(ins["body_json"])["insights"] if ins else []:
+    ins = rp.latest_body(conn, "insights")
+    for i in ins["insights"] if ins else []:
         if i["verdict"] == "not_enough_data":
             continue
         b.item(f"insight:{i['id']}", "insight", question=i["question"], verdict=i["verdict"], headline=i["headline"],
@@ -165,10 +165,8 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
 
     for k in range(4):
         ws = fc.week_start(today) - timedelta(days=7 * (k + 1))
-        r = conn.execute("SELECT body_json FROM report WHERE type='weekly' AND subject_key=? ORDER BY revision DESC LIMIT 1",
-                         (ws.isoformat(),)).fetchone()
-        if r:
-            w = json.loads(r["body_json"])
+        w = rp.latest_body(conn, "weekly", {"subject_key": ws.isoformat()})
+        if w:
             b.item(f"week:{k + 1}", "weekly_review", weeks_ago=k + 1, headline=w["headline"],
                    findings=[f["statement"] for f in w["findings"]], next_week_focus=w["next_week_focus"]["text"])
 
@@ -181,11 +179,9 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
         b.item("focus:last_week", "weekly_focus", focus=e["title"], status=e.get("status"), summary=e.get("summary"))
 
     acts = list(reversed(rp.activities(conn, source, (today - timedelta(days=42)).isoformat(), today.isoformat())))[:10]
-    rpes = {r["activity_source_id"]: r["rpe"] for r in conn.execute("SELECT * FROM activity_effort")}
+    rpes = {r["activity_source_id"]: r["rpe"] for r in many(conn.activity_effort)}
     for n, a in enumerate(acts, start=1):
-        rep = conn.execute("SELECT body_json FROM report WHERE type='post_run' AND subject_key=? ORDER BY revision DESC LIMIT 1",
-                           (a["source_id"],)).fetchone()
-        body = json.loads(rep["body_json"]) if rep else {}
+        body = rp.latest_body(conn, "post_run", {"subject_key": a["source_id"]}) or {}
         local = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         pace = rn.moving_pace(a["distance_m"], a["moving_s"])
         intent = (body.get("intent") or {})
@@ -205,12 +201,11 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
         local = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         hours.append(local.hour)
     beds = []
-    for r in conn.execute("SELECT start_utc, utc_offset_s FROM sleep_session WHERE source=? AND is_nap=0 AND wake_date>=?",
-                          (source, (today - timedelta(days=28)).isoformat())):
+    for r in many(conn.sleep_session, {"source": source, "is_nap": False, "wake_date": {"$gte": (today - timedelta(days=28)).isoformat()}}):
         t = datetime.fromisoformat(r["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=r["utc_offset_s"] or 0)
         beds.append(t.hour + t.minute / 60 + (24 if t.hour < 12 else 0))
     sleep = [v for k, v in rp.series(conn, source, "sleep_duration", today.isoformat()).items() if k >= (today - timedelta(days=28)).isoformat()]
-    cis = [dict(r) for r in conn.execute("SELECT * FROM checkin WHERE deleted=0 AND local_date>=?", ((today - timedelta(days=28)).isoformat(),))]
+    cis = many(conn.checkin, {"deleted": False, "local_date": {"$gte": (today - timedelta(days=28)).isoformat()}})
     b.item("habits:summary", "habits", runs_last_6_weeks=len(hours),
            evening_runs_share=f"{round(100 * sum(1 for h in hours if h >= 17) / len(hours))}%" if hours else None,
            check_ins_last_4_weeks=len(cis), pain_or_illness_days=sum(1 for c in cis if c["pain"] or c["illness"]),
@@ -304,17 +299,15 @@ def input_hash(b: Bundle, model: str) -> str:
 
 
 def latest(conn, ok_only: bool = False) -> dict | None:
-    q = "SELECT * FROM coach_analysis" + (" WHERE status='ok'" if ok_only else "") + " ORDER BY id DESC LIMIT 1"
-    r = conn.execute(q).fetchone()
-    return dict(r) if r else None
+    return one(conn.coach_analysis, {"status": "ok"} if ok_only else {}, sort=[("id", -1)])
 
 
 def view(row: dict, evidence_targets: dict | None = None) -> dict:
     v = {"status": row["status"], "model": row["model"], "generated_at": row["created_at"], "key_source": row["key_source"],
          "prompt_version": row["prompt_version"]}
     if row["status"] == "ok":
-        v.update(json.loads(row["output_json"]))
-        v["targets"] = json.loads(row["targets_json"] or "{}")
+        v.update(row["output"])
+        v["targets"] = row.get("targets") or {}
     else:
         v["detail"] = row["detail"]
     return v
@@ -324,9 +317,9 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
     """Generate (or reuse) the coach analysis for the current evidence. Never raises; failures are recorded."""
     b = build_bundle(conn, source, today)
     h = input_hash(b, model)
-    hit = conn.execute("SELECT * FROM coach_analysis WHERE input_hash=? AND status='ok'", (h,)).fetchone()
+    hit = one(conn.coach_analysis, {"input_hash": h, "status": "ok"}, sort=[("id", -1)])
     if hit:
-        return view(dict(hit))
+        return view(hit)
     from .narrative import finish_call, reserve_call
     call = reserve_call(conn, "coach", budget)
     status, out, detail = "ok", None, None
@@ -349,8 +342,7 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
     targets = {f"run:{n}": {"type": "run", "id": a["source_id"], "date": a["local_date"]} for n, a in enumerate(acts, start=1)}
     targets.update({k: {"type": "insight", "id": k.split(":", 1)[1]} for k in b.items if k.startswith("insight:")})
     targets.update({k: {"type": "insights_tab"} for k in b.items if k.startswith(("week:", "focus:", "garmin:"))})
-    with conn:
-        conn.execute("INSERT INTO coach_analysis (input_hash, model, prompt_version, status, detail, output_json, targets_json, key_source, created_at)"
-                     " VALUES (?,?,?,?,?,?,?,?,?)", (h, model, PROMPT_VERSION, status, detail, json.dumps(out) if out else None,
-                                                     json.dumps(targets), key_source, utc_now()))
+    conn.coach_analysis.insert_one({"id": next_id(conn, "coach_analysis"), "input_hash": h, "model": model, "prompt_version": PROMPT_VERSION,
+                                    "status": status, "detail": detail, "output": plain(out) if out else None, "targets": targets,
+                                    "key_source": key_source, "created_at": utc_now()})
     return view(latest(conn))

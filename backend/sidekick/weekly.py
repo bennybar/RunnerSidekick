@@ -3,11 +3,11 @@ check-ins and a next-week focus. Deterministic, revisioned like the other report
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta
 from statistics import median
 
 from . import reports as rp
+from .db import many, one
 from .analytics import baseline as bl
 from .analytics import insights as ins
 
@@ -24,7 +24,7 @@ def _runs(conn, source, start: str, end: str) -> list[ins.RunData]:
     for a in rp.activities(conn, source, start, end):
         local = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         out.append(ins.RunData(a["source_id"], a["local_date"], local.replace(tzinfo=None), a.get("device_id"), a["distance_m"],
-                               a["moving_s"], json.loads(a["garmin_metrics_json"]).get("activityTrainingLoad"),
+                               a["moving_s"], (a["garmin_metrics"] or {}).get("activityTrainingLoad"),
                                rp.samples_for(conn, a["id"]), [], "steady"))
     return out
 
@@ -121,7 +121,7 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
                                observed={"value": med, "unit": bl.THRESHOLDS[m]["unit"]}, status="learning", n=len(vals)))
 
     # Check-ins
-    cis = [dict(r) for r in conn.execute("SELECT * FROM checkin WHERE deleted=0 AND local_date BETWEEN ? AND ?", (wid, we.isoformat()))]
+    cis = many(conn.checkin, {"deleted": False, "local_date": {"$gte": wid, "$lte": we.isoformat()}})
     flagged_days = sorted({c["local_date"] for c in cis if c["pain"] or c["illness"]})
     if cis:
         en = [c["energy"] for c in cis if c["energy"]]
@@ -132,8 +132,8 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
 
     focus = next_week_focus(flagged_days, ratio, hard, zones, len(week))
     from . import focus as fc
-    chosen = conn.execute("SELECT kind, params_json FROM weekly_focus WHERE week_start=?", (wid,)).fetchone()
-    focus_result = fc.evaluate(conn, source, ws, chosen["kind"], we + timedelta(days=1), json.loads(chosen["params_json"])) if chosen else None
+    chosen = one(conn.weekly_focus, {"week_start": wid})
+    focus_result = fc.evaluate(conn, source, ws, chosen["kind"], we + timedelta(days=1), chosen["params"]) if chosen else None
     if focus_result:
         findings.insert(0, _f(f"w:{wid}:focus", "focus", "weekly_focus", f"Your focus: {focus_result['title']}",
                               focus_result["summary"] + (" " + focus_result["felt"] if focus_result.get("felt") else ""),
@@ -177,10 +177,11 @@ def next_week_focus(flagged_days: list[str], ratio: float | None, hard: float | 
 def regenerate_weeklies(conn, source: str, today: date, synthetic: bool) -> None:
     """Build the last completed week's review (revision if inputs changed); create missing older ones once."""
     last_complete = week_start(today) - timedelta(days=7)
-    first = conn.execute("SELECT MIN(local_date) d FROM daily_observation WHERE source=?", (source,)).fetchone()["d"]
+    r = conn.daily_observation.find_one({"source": source}, sort=[("local_date", 1)])
+    first = r["local_date"] if r else None
     if not first:
         return
-    existing = {r["subject_key"] for r in conn.execute("SELECT DISTINCT subject_key FROM report WHERE type='weekly'")}
+    existing = set(conn.report.distinct("subject_key", {"type": "weekly"}))
     ws = week_start(date.fromisoformat(first))
     while ws <= last_complete:
         recent = (today - (ws + timedelta(days=6))).days <= FREEZE_AFTER_DAYS

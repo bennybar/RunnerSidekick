@@ -12,16 +12,16 @@
   rebuild-reports        regenerate reports after an algorithm change (new revisions; old ones kept)
   audit [--out PATH]     field-coverage audit of stored data (no values, no credentials)
   serve [--host --port]  run the API (default 127.0.0.1:8765)
+  migrate-sqlite [--replace]  one-time import of the old SQLite files into MongoDB (the files are left untouched)
 
-No configuration needed: data lives in <repo>/data and the source is Garmin. (Overrides for tests/demo only:
-RSK_SOURCE=fixture, RSK_DATA_DIR=...)
+No configuration needed: records live in the local MongoDB, secrets and Garmin tokens in <repo>/data, and the source
+is Garmin. (Overrides for tests/demo only: RSK_SOURCE=fixture, RSK_DATA_DIR=..., RSK_MONGO_URI=..., RSK_DB_PREFIX=...)
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
-import json
 import logging
 import shutil
 import sys
@@ -37,7 +37,7 @@ from .auth import create_token, revoke_token
 from .config import SOURCE_FIXTURE, SOURCE_GARMIN, load_config
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
-from .db import connect
+from .db import connect, many, one
 from .sync import mark_reconnected, run_sync
 
 
@@ -75,8 +75,7 @@ def cmd_garmin_login(cfg) -> int:
     if not (cfg.garmin_token_dir / "garmin_tokens.json").exists():
         print("Login succeeded but tokens were not written; check permissions on", cfg.garmin_token_dir)
         return 1
-    conn = connect(cfg.data_dir / f"{SOURCE_GARMIN}.db")
-    mark_reconnected(conn, SOURCE_GARMIN)
+    mark_reconnected(connect(replace(cfg, source=SOURCE_GARMIN).db_name), SOURCE_GARMIN)
     print(f"Connected as {api.get_full_name() or 'Garmin user'}. Tokens stored in {cfg.garmin_token_dir} (0600).")
     return 0
 
@@ -90,12 +89,12 @@ def make_connector(cfg, conn):
 
 
 def cmd_sync(cfg, loop: bool) -> int:
-    conn = connect(cfg.db_path)
+    conn = connect(cfg.db_name)
     while True:
         c, today = make_connector(cfg, conn)
         res = run_sync(conn, c, today, cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days)
         rp.regenerate(conn, c.source, c.synthetic, res.changed_dates, res.changed_activities, today)
-        cp = conn.execute("SELECT oldest_done, backfill_target FROM sync_checkpoint WHERE source=? AND stream='days'", (c.source,)).fetchone()
+        cp = one(conn.sync_checkpoint, {"source": c.source, "stream": "days"})
         print(f"{res.outcome}: {res.days_fetched} days, {res.activities_fetched} activities fetched"
               + (f" — {res.detail}" if res.detail else "")
               + (f" | backfill at {cp['oldest_done']} (target {cp['backfill_target']})" if cp else ""))
@@ -106,44 +105,47 @@ def cmd_sync(cfg, loop: bool) -> int:
 
 def cmd_audit(cfg, out: str | None) -> int:
     """Coverage matrix from stored normalised records plus key names seen in raw payloads (names only)."""
-    conn = connect(cfg.db_path)
+    conn = connect(cfg.db_name)
+    src = {"source": cfg.source}
     lines = [f"# Data audit — source `{cfg.source}`" + (" (SYNTHETIC FIXTURE DATA)" if cfg.source == SOURCE_FIXTURE else ""), ""]
-    rng = conn.execute("SELECT MIN(local_date) a, MAX(local_date) b, COUNT(DISTINCT local_date) n FROM daily_observation WHERE source=?", (cfg.source,)).fetchone()
-    lines += [f"Generated {datetime.now().isoformat(timespec='minutes')}. Days fetched: {rng['n']} ({rng['a']} → {rng['b']}).", "",
+    days = sorted(conn.daily_observation.distinct("local_date", src))
+    lines += [f"Generated {datetime.now().isoformat(timespec='minutes')}. Days fetched: {len(days)} "
+              f"({days[0] if days else None} → {days[-1] if days else None}).", "",
               "## Daily metrics", "", "| Metric | Method | Measured days | Not measured | Coverage |", "|---|---|---|---|---|"]
-    for r in conn.execute("SELECT metric, GROUP_CONCAT(DISTINCT method) method, SUM(state='measured') m, SUM(state!='measured') x,"
-                          " COUNT(*) n FROM daily_observation WHERE source=? GROUP BY metric ORDER BY metric", (cfg.source,)):
-        lines.append(f"| {r['metric']} | {r['method'] or '—'} | {r['m']} | {r['x']} | {100 * r['m'] / r['n']:.0f}% |")
-    acts = conn.execute("SELECT * FROM activity WHERE source=?", (cfg.source,)).fetchall()
+    for r in conn.daily_observation.aggregate([{"$match": src}, {"$group": {
+            "_id": "$metric", "methods": {"$addToSet": "$method"}, "n": {"$sum": 1},
+            "m": {"$sum": {"$cond": [{"$eq": ["$state", "measured"]}, 1, 0]}}}}, {"$sort": {"_id": 1}}]):
+        method = ",".join(sorted(x for x in r["methods"] if x)) or "—"
+        lines.append(f"| {r['_id']} | {method} | {r['m']} | {r['n'] - r['m']} | {100 * r['m'] / r['n']:.0f}% |")
+    acts = many(conn.activity, src)
     lines += ["", f"## Activities ({len(acts)})", "", "| Sport | Count |", "|---|---|"]
     for k, v in Counter(a["sport"] for a in acts).most_common():
         lines.append(f"| {k} | {v} |")
     runs = [a for a in acts if a["sport"] != "other"]
     if runs:
+        ids = [a["id"] for a in runs]
         lines += ["", "### Run field presence", "", "| Field | Present |", "|---|---|"]
         for f in ("distance_m", "elapsed_s", "moving_s", "timer_s", "avg_hr", "max_hr", "elevation_gain_m", "avg_cadence_spm"):
             lines.append(f"| {f} | {sum(1 for a in runs if a[f] is not None)}/{len(runs)} |")
-        with_laps = conn.execute("SELECT COUNT(DISTINCT activity_id) n FROM activity_lap l JOIN activity a ON a.id=l.activity_id WHERE a.source=?", (cfg.source,)).fetchone()["n"]
-        lines.append(f"| laps | {with_laps}/{len(runs)} |")
+        lines.append(f"| laps | {len(conn.activity_lap.distinct('activity_id', {'activity_id': {'$in': ids}}))}/{len(runs)} |")
         sample_cov = Counter()
         n_s = 0
-        for r in conn.execute("SELECT s.samples_json FROM activity_samples s JOIN activity a ON a.id=s.activity_id WHERE a.source=?", (cfg.source,)):
-            d = json.loads(r["samples_json"])
+        for r in conn.activity_samples.find({"activity_id": {"$in": ids}}, {"_id": 0}):
             n_s += 1
             for k in ("hr", "speed", "dist", "elev", "cad"):
-                if any(v is not None for v in d[k]):
+                if any(v is not None for v in r["samples"][k]):
                     sample_cov[k] += 1
         lines.append(f"| samples | {n_s}/{len(runs)} |")
         for k in ("hr", "speed", "dist", "elev", "cad"):
             lines.append(f"| samples.{k} | {sample_cov[k]}/{n_s} |")
-        gm = Counter(k for a in runs for k in json.loads(a["garmin_metrics_json"]))
+        gm = Counter(k for a in runs for k in (a["garmin_metrics"] or {}))
         lines += ["", "### Garmin-generated activity metrics present", ""] + [f"- {k}: {v}/{len(runs)}" for k, v in gm.most_common()]
     lines += ["", "## Raw payload top-level keys (names only)", ""]
-    for kind, in conn.execute("SELECT DISTINCT kind FROM raw_payload WHERE source=?", (cfg.source,)).fetchall():
+    for kind in sorted(conn.raw_payload.distinct("kind", src)):
         keys = Counter()
         n = 0
-        for r in conn.execute("SELECT payload_json FROM raw_payload WHERE source=? AND kind=? LIMIT 30", (cfg.source, kind)):
-            p = json.loads(r["payload_json"])
+        for r in conn.raw_payload.find({**src, "kind": kind}, {"_id": 0, "payload": 1}, limit=30):
+            p = r["payload"]
             n += 1
             if isinstance(p, dict):
                 keys.update(p.keys())
@@ -161,21 +163,13 @@ def cmd_audit(cfg, out: str | None) -> int:
 
 
 def user_cfg(cfg, user_id: int | None):
-    """Config pointed at one user's data folder (the owner when user_id is None)."""
-    a = accounts.app_db(cfg.data_dir)
-    try:
-        uid = user_id if user_id is not None else accounts.ensure_owner(a)["id"]
-    finally:
-        a.close()
-    return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, uid)), uid
+    """Config pointed at one user's database and token folder (the owner when user_id is None)."""
+    uid = user_id if user_id is not None else accounts.ensure_owner(accounts.app_db())["id"]
+    return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, uid), user_id=uid), uid
 
 
 def cmd_sync_all(cfg, loop: bool, only_user: int | None) -> int:
-    a = accounts.app_db(cfg.data_dir)
-    try:
-        users = [u["id"] for u in accounts.list_users(a)] if only_user is None else [only_user]
-    finally:
-        a.close()
+    users = [u["id"] for u in accounts.list_users(accounts.app_db())] if only_user is None else [only_user]
     worst = 0
     for uid in users:
         ucfg, _ = user_cfg(cfg, uid)
@@ -208,30 +202,36 @@ def main(argv=None) -> int:
     sub.add_parser("users")
     sub.add_parser("set-owner-email").add_argument("email")
     p = sub.add_parser("serve"); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8765)
+    sub.add_parser("migrate-sqlite").add_argument("--replace", action="store_true", help="overwrite data already in MongoDB")
     args = ap.parse_args(argv)
     cfg = load_config()
 
-    if args.cmd in ("invite", "users", "set-owner-email"):
-        a = accounts.app_db(cfg.data_dir)
+    if args.cmd == "migrate-sqlite":
+        from .migrate_sqlite import NotEmpty, migrate_all
         try:
-            if args.cmd == "users":
-                for u in accounts.list_users(a):
-                    print(f"{u['id']:>3}  {u['role']:<6}  {u['email'] or '(no email yet)':<32}  {u['sessions']} active token(s)")
-            elif args.cmd == "set-owner-email":
-                accounts.set_owner_email(a, args.email)
-                print(f"Owner can now sign in with Google as {accounts.normalise_email(args.email)}.")
-            elif args.action == "list":
-                for r in a.execute("SELECT * FROM invites ORDER BY created_at"):
-                    print(f"{r['email']:<32}  {'used ' + r['used_at'] if r['used_at'] else 'not used yet'}")
-            elif not args.email:
-                print("email required"); return 2
-            elif args.action == "add":
-                accounts.add_invite(a, args.email)
-                print(f"Invited {accounts.normalise_email(args.email)}. They can now sign in with Google in the app.")
-            else:
-                print(f"removed {accounts.remove_invite(a, args.email)} unused invite(s)")
-        finally:
-            a.close()
+            lines = migrate_all(cfg.data_dir, replace=args.replace)
+        except NotEmpty as e:
+            print(e); return 1
+        print("\n".join(lines) or "No SQLite files found in " + str(cfg.data_dir))
+        return 0
+    if args.cmd in ("invite", "users", "set-owner-email"):
+        a = accounts.app_db()
+        if args.cmd == "users":
+            for u in accounts.list_users(a):
+                print(f"{u['id']:>3}  {u['role']:<6}  {u['email'] or '(no email yet)':<32}  {u['sessions']} active token(s)")
+        elif args.cmd == "set-owner-email":
+            accounts.set_owner_email(a, args.email)
+            print(f"Owner can now sign in with Google as {accounts.normalise_email(args.email)}.")
+        elif args.action == "list":
+            for r in many(a.invites, sort=[("created_at", 1)]):
+                print(f"{r['email']:<32}  {'used ' + r['used_at'] if r['used_at'] else 'not used yet'}")
+        elif not args.email:
+            print("email required"); return 2
+        elif args.action == "add":
+            accounts.add_invite(a, args.email)
+            print(f"Invited {accounts.normalise_email(args.email)}. They can now sign in with Google in the app.")
+        else:
+            print(f"removed {accounts.remove_invite(a, args.email)} unused invite(s)")
         return 0
     if args.cmd == "sync":
         return cmd_sync_all(cfg, args.loop, args.user)
@@ -261,9 +261,9 @@ def main(argv=None) -> int:
         print(f"revoked {revoke_token(cfg.data_dir, args.name, uid)} token(s) named {args.name!r}")
         return 0
     if args.cmd == "rebuild-reports":
-        conn = connect(ucfg.db_path)
+        conn = connect(ucfg.db_name)
         c, today = make_connector(ucfg, conn)
-        sids = [r[0] for r in conn.execute("SELECT source_id FROM activity WHERE source=? ORDER BY start_utc", (c.source,))]
+        sids = [r["source_id"] for r in many(conn.activity, {"source": c.source}, sort=[("start_utc", 1)])]
         rp.regenerate(conn, c.source, c.synthetic, set(), sids, today)
         print(f"rebuilt {len(sids)} run reports and recent morning reports (unchanged inputs keep their revision)")
         return 0

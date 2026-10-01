@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 from datetime import date, timedelta
 from statistics import median, pstdev
 
@@ -16,7 +15,7 @@ from .analytics import baseline as bl
 from .analytics import running as rn
 from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
-from .db import utc_now
+from .db import get_setting, many, next_id, one, plain, utc_now
 
 REPORT_VERSION = "report-2.2"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
@@ -60,53 +59,44 @@ def fmt_pace(s_per_km: float) -> str:
 # ---------------------------------------------------------------- queries
 
 def series(conn, source: str, metric: str, until: str, method: str | None = None) -> dict[str, float]:
-    q = "SELECT local_date, value FROM daily_observation WHERE source=? AND metric=? AND state='measured' AND local_date<=?"
-    args = [source, metric, until]
+    q = {"source": source, "metric": metric, "state": "measured", "local_date": {"$lte": until}}
     if method:
-        q += " AND method=?"
-        args.append(method)
-    return {r["local_date"]: r["value"] for r in conn.execute(q, args)}
+        q["method"] = method
+    return {r["local_date"]: r["value"] for r in conn.daily_observation.find(q, {"_id": 0, "local_date": 1, "value": 1})}
 
 
-def day_obs(conn, source: str, d: str) -> dict[str, sqlite3.Row]:
-    return {r["metric"]: r for r in conn.execute("SELECT * FROM daily_observation WHERE source=? AND local_date=?", (source, d))}
+def day_obs(conn, source: str, d: str) -> dict[str, dict]:
+    return {r["metric"]: r for r in many(conn.daily_observation, {"source": source, "local_date": d})}
 
 
 def checkin_for(conn, d: str) -> dict | None:
-    r = conn.execute("SELECT * FROM checkin WHERE local_date=? AND deleted=0 ORDER BY client_updated_at DESC LIMIT 1", (d,)).fetchone()
-    if not r:
-        return None
-    c = dict(r)
-    c["tags"] = json.loads(c.pop("tags_json"))
-    c["pain"], c["illness"], c["deleted"] = bool(c["pain"]), bool(c["illness"]), bool(c["deleted"])
-    return c
+    return one(conn.checkin, {"local_date": d, "deleted": False}, sort=[("client_updated_at", -1)])
 
 
 def activities(conn, source: str, start: str, end: str) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT * FROM activity WHERE source=? AND local_date BETWEEN ? AND ? AND sport!='other' ORDER BY start_utc", (source, start, end))]
+    return many(conn.activity, {"source": source, "local_date": {"$gte": start, "$lte": end}, "sport": {"$ne": "other"}},
+                sort=[("start_utc", 1)])
 
 
 def activity_by_source_id(conn, source: str, sid: str) -> dict | None:
-    r = conn.execute("SELECT * FROM activity WHERE source=? AND source_id=?", (source, sid)).fetchone()
-    return dict(r) if r else None
+    return one(conn.activity, {"source": source, "source_id": sid})
 
 
 def laps_for(conn, aid: int) -> list[dict]:
-    return [dict(r) for r in conn.execute("SELECT * FROM activity_lap WHERE activity_id=? ORDER BY idx", (aid,))]
+    return many(conn.activity_lap, {"activity_id": aid}, sort=[("idx", 1)])
 
 
 def samples_for(conn, aid: int) -> Samples | None:
-    r = conn.execute("SELECT samples_json FROM activity_samples WHERE activity_id=?", (aid,)).fetchone()
-    return Samples.from_json(json.loads(r["samples_json"])) if r else None
+    r = one(conn.activity_samples, {"activity_id": aid})
+    return Samples.from_json(r["samples"]) if r else None
 
 
 def device_era_start(conn, source: str, d: date) -> date | None:
     """First day of the device era containing d, inferred from activity device IDs (daily payloads carry none).
     The era starts the day after the last run recorded by a different device. Precision is limited to the days
     between runs."""
-    rows = conn.execute("SELECT local_date, device_id FROM activity WHERE source=? AND device_id IS NOT NULL ORDER BY start_utc",
-                        (source,)).fetchall()
+    rows = list(conn.activity.find({"source": source, "device_id": {"$ne": None}}, {"_id": 0, "local_date": 1, "device_id": 1},
+                                   sort=[("start_utc", 1)]))
     if not rows:
         return None
     ds = d.isoformat()
@@ -114,11 +104,6 @@ def device_era_start(conn, source: str, d: date) -> date | None:
     current = before[-1]["device_id"] if before else rows[0]["device_id"]
     others = [r["local_date"] for r in before if r["device_id"] != current]
     return date.fromisoformat(max(others)) + timedelta(days=1) if others else None
-
-
-def get_setting(conn, key: str, default):
-    r = conn.execute("SELECT value_json FROM user_settings WHERE key=?", (key,)).fetchone()
-    return json.loads(r["value_json"]) if r else default
 
 
 def hr_zones(conn) -> dict | None:
@@ -129,7 +114,7 @@ def hr_zones(conn) -> dict | None:
 
 
 def data_cutoff(conn, source: str) -> str | None:
-    r = conn.execute("SELECT last_success_at FROM source_connection WHERE source=?", (source,)).fetchone()
+    r = one(conn.source_connection, {"source": source})
     return r["last_success_at"] if r else None
 
 
@@ -140,20 +125,23 @@ def input_hash(inputs: object) -> str:
 
 
 def save_report(conn, rtype: str, key: str, local_date: str, body: dict, ihash: str, cutoff: str | None) -> dict:
-    prev = conn.execute("SELECT id, revision, input_hash, body_json FROM report WHERE type=? AND subject_key=? ORDER BY revision DESC LIMIT 1",
-                        (rtype, key)).fetchone()
+    prev = one(conn.report, {"type": rtype, "subject_key": key}, sort=[("revision", -1)])
     if prev and prev["input_hash"] == ihash:
-        return json.loads(prev["body_json"])
+        return prev["body"]
     rev = (prev["revision"] + 1) if prev else 1
     body.update(revision=rev, input_hash=ihash, generated_at=utc_now(), data_cutoff=cutoff, algorithm_version=ALGORITHMS)
-    with conn:
-        cur = conn.execute(
-            "INSERT INTO report (type, subject_key, local_date, revision, generated_at, data_cutoff, input_hash, algorithm_version, body_json)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
-            (rtype, key, local_date, rev, body["generated_at"], cutoff or "", ihash, json.dumps(ALGORITHMS), "{}"))
-        body["id"] = cur.lastrowid
-        conn.execute("UPDATE report SET body_json=? WHERE id=?", (json.dumps(body), cur.lastrowid))
+    body["id"] = next_id(conn, "report")
+    body = plain(body)
+    conn.report.insert_one({"id": body["id"], "type": rtype, "subject_key": key, "local_date": local_date, "revision": rev,
+                            "generated_at": body["generated_at"], "data_cutoff": cutoff or "", "input_hash": ihash,
+                            "algorithm_version": ALGORITHMS, "body": body})
     return body
+
+
+def latest_body(conn, rtype: str, filt: dict | None = None) -> dict | None:
+    """Body of the newest report of a type (by date, then revision)."""
+    r = one(conn.report, {"type": rtype, **(filt or {})}, sort=[("local_date", -1), ("revision", -1)])
+    return r["body"] if r else None
 
 
 # ---------------------------------------------------------------- morning report
@@ -268,7 +256,7 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     rec = recommend(signals, checkin, has_overnight, any_baseline)
     running_days = get_setting(conn, "running_days", [0, 2, 4, 5])
     rec["planned_run_day"] = d.weekday() in running_days
-    plan_row = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (ds,)).fetchone()
+    plan_row = one(conn.day_plan, {"local_date": ds})
     plan = {"kind": plan_row["kind"], "minutes": plan_row["minutes"]} if plan_row else None
     zones = hr_zones(conn)
     rec["plan"] = plan
@@ -530,7 +518,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             })
     week_start = d - timedelta(days=d.weekday())
     week_acts = activities(conn, source, week_start.isoformat(), a["local_date"])
-    rpe = conn.execute("SELECT rpe FROM activity_effort WHERE activity_source_id=?", (sid,)).fetchone()
+    rpe = one(conn.activity_effort, {"activity_source_id": sid})
     effort = None
     if rpe and a["moving_s"]:
         effort = {"rpe": rpe["rpe"], "session_rpe_load": round(rpe["rpe"] * a["moving_s"] / 60.0),
@@ -541,7 +529,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                                         "elapsed_s", "moving_s", "timer_s", "avg_hr", "max_hr", "elevation_gain_m",
                                         "elevation_loss_m", "avg_cadence_spm")},
         "pace_moving_s_per_km": pace, "pace_basis": "moving",
-        "garmin_metrics": json.loads(a["garmin_metrics_json"]),
+        "garmin_metrics": a["garmin_metrics"],
         "splits": [{**rn.as_dict(s), **{k: v for k, v in dt.items() if k != "idx"}}
                    for s, dt in zip(splits, details or [{}] * len(splits))],
         "story": story, "best_efforts": best_efforts,
@@ -558,10 +546,10 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
 
 def run_intent(conn, a: dict) -> dict | None:
     """User-stated intent, else pre-filled from the day's plan (marked as such)."""
-    r = conn.execute("SELECT * FROM run_intent WHERE activity_source_id=?", (a["source_id"],)).fetchone()
+    r = one(conn.run_intent, {"activity_source_id": a["source_id"]})
     if r:
         return {"kind": r["kind"], "note": r["note"], "source": r["source"]}
-    p = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (a["local_date"],)).fetchone()
+    p = one(conn.day_plan, {"local_date": a["local_date"]})
     if p and p["kind"] != "rest":
         return {"kind": "easy" if p["kind"] == "easy" else p["kind"], "note": None, "source": "plan"}
     return infer_intent(conn, a)
@@ -630,32 +618,30 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
         an = run_analysis(conn, a)
         local = _dt.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         runs.append(ins.RunData(a["source_id"], a["local_date"], local.replace(tzinfo=None), a.get("device_id"), a["distance_m"],
-                                a["moving_s"], json.loads(a["garmin_metrics_json"]).get("activityTrainingLoad"),
+                                a["moving_s"], (a["garmin_metrics"] or {}).get("activityTrainingLoad"),
                                 samples_for(conn, a["id"]), rn.splits_from_laps(laps_for(conn, a["id"])), an["classification"]["kind"]))
         if an["decoupling"]["eligible"]:
             drifts.append((a["local_date"], a["source_id"], an["decoupling"]["decoupling_pct"]))
     since = (today - timedelta(days=120)).isoformat()
     obs: dict[str, dict[str, float]] = {}
-    for r in conn.execute("SELECT local_date, metric, value FROM daily_observation WHERE source=? AND state='measured' AND local_date>=?",
-                          (source, since)):
+    for r in conn.daily_observation.find({"source": source, "state": "measured", "local_date": {"$gte": since}},
+                                         {"_id": 0, "local_date": 1, "metric": 1, "value": 1}):
         obs.setdefault(r["metric"], {})[r["local_date"]] = r["value"]
     bedtimes = {}
-    for r in conn.execute("SELECT wake_date, start_utc, utc_offset_s FROM sleep_session WHERE source=? AND is_nap=0 AND wake_date>=?", (source, since)):
+    for r in many(conn.sleep_session, {"source": source, "is_nap": False, "wake_date": {"$gte": since}}):
         st = _dt.fromisoformat(r["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=r["utc_offset_s"] or 0)
         bedtimes[r["wake_date"]] = st.hour + st.minute / 60 + (24 if st.hour < 12 else 0)
     zones = hr_zones(conn)
     items = ins.compute_all(runs, obs, bedtimes, zones, drifts, today)
     # Confidence: a pattern is "consistent" only if an insights report from >= 14 days earlier reached the same verdict.
-    prev = conn.execute("SELECT body_json FROM report WHERE type='insights' AND local_date<=? ORDER BY local_date DESC, revision DESC LIMIT 1",
-                        ((today - timedelta(days=14)).isoformat(),)).fetchone()
-    prev_v = {i["id"]: i["verdict"] for i in json.loads(prev["body_json"])["insights"]} if prev else {}
+    prev = latest_body(conn, "insights", {"local_date": {"$lte": (today - timedelta(days=14)).isoformat()}})
+    prev_v = {i["id"]: i["verdict"] for i in prev["insights"]} if prev else {}
     for i in items:
         i["confidence"] = None if i["verdict"] == "not_enough_data" else ("consistent" if prev_v.get(i["id"]) == i["verdict"] else "emerging")
     # Novelty vs the most recent earlier snapshot, and the runner's own dismissals / "working on it"
-    last = conn.execute("SELECT body_json FROM report WHERE type='insights' AND local_date<? ORDER BY local_date DESC, revision DESC LIMIT 1",
-                        (today.isoformat(),)).fetchone()
-    last_i = {i["id"]: i for i in json.loads(last["body_json"])["insights"]} if last else {}
-    states = {r["insight_id"]: dict(r) for r in conn.execute("SELECT * FROM insight_state")}
+    last = latest_body(conn, "insights", {"local_date": {"$lt": today.isoformat()}})
+    last_i = {i["id"]: i for i in last["insights"]} if last else {}
+    states = {r["insight_id"]: r for r in many(conn.insight_state)}
     for i in items:
         p = last_i.get(i["id"])
         i["novelty"] = ("new" if p is None or (p["verdict"] != "pattern" and i["verdict"] == "pattern") else
@@ -675,7 +661,7 @@ def regenerate(conn, source: str, synthetic: bool, changed_dates: set[str], chan
                morning_lookback_days: int = 7) -> None:
     """Regenerate reports affected by new/changed inputs. Morning reports older than the lookback stay as they were,
     except on first generation (backfill), so the journal reflects what was known at the time."""
-    existing = {r["subject_key"] for r in conn.execute("SELECT DISTINCT subject_key FROM report WHERE type='morning'")}
+    existing = set(conn.report.distinct("subject_key", {"type": "morning"}))
     dates = set(changed_dates) | {today.isoformat()}
     # A changed day also changes the baseline of the following days within the lookback
     for ds in sorted(dates):
@@ -691,8 +677,7 @@ def regenerate(conn, source: str, synthetic: bool, changed_dates: set[str], chan
             build_morning(conn, source, dd, synthetic)
     for sid in changed_activities:
         build_post_run(conn, source, sid, synthetic)
-    if changed_dates or changed_activities or not conn.execute("SELECT 1 FROM report WHERE type='insights' AND subject_key=?",
-                                                               (today.isoformat(),)).fetchone():
+    if changed_dates or changed_activities or not conn.report.find_one({"type": "insights", "subject_key": today.isoformat()}):
         build_insights(conn, source, today, synthetic)
     from .weekly import regenerate_weeklies
     regenerate_weeklies(conn, source, today, synthetic)

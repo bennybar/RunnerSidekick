@@ -1,6 +1,6 @@
 """Runtime configuration, read from environment variables.
 
-Secrets (Garmin tokens, device-token hashes) live in <repo>/data, which is gitignored and never committed.
+Records live in MongoDB (see db.py). Secrets and Garmin tokens live in <repo>/data, which is gitignored and never committed.
 """
 
 from __future__ import annotations
@@ -22,10 +22,14 @@ class Config:
     refetch_days: int  # recent window re-fetched on every sync for late sleep / revised activities
     raw_retention_days: int
     request_spacing_s: float  # pause between Garmin requests during sync
+    user_id: int | None = None  # set per request/user; selects the user's own database
 
     @property
-    def db_path(self) -> Path:
-        return self.data_dir / f"{self.source}.db"
+    def db_name(self) -> str:
+        from .db import user_db_name
+        if self.user_id is None:
+            raise ValueError("no user selected")
+        return user_db_name(self.user_id, self.source)
 
     @property
     def garmin_token_dir(self) -> Path:

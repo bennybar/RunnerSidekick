@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from datetime import date, datetime, timedelta, timezone
@@ -26,7 +25,7 @@ from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
-from .db import connect, utc_now
+from .db import connect, many, one, put, put_if_newer, set_setting, utc_now
 from .sync import get_connection_row, run_sync
 
 log = logging.getLogger(__name__)
@@ -134,7 +133,7 @@ def verify_google_id_token(token: str) -> dict:
 
 def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token,
                coach_provider=None) -> FastAPI:
-    accounts.app_db(cfg.data_dir).close()  # create/migrate the accounts DB (and move a single-user layout into users/<owner>)
+    accounts.app_db()  # creates the accounts database's indexes
     synthetic = cfg.source == SOURCE_FIXTURE
     sync_locks: dict[int, threading.Lock] = {}
     running: set[int] = set()
@@ -142,25 +141,17 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def current_user(authorization: str | None = Header(default=None)):
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="invalid or missing token")
-        a = accounts.app_db(cfg.data_dir)
-        try:
-            u = accounts.verify_session(a, authorization[7:])
-        finally:
-            a.close()
+        u = accounts.verify_session(accounts.app_db(), authorization[7:])
         if u is None:
             raise HTTPException(status_code=401, detail="invalid or missing token")
         return u
 
     def user_cfg(user) -> Config:
-        """The same config, pointed at this user's own data folder."""
-        return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, user["id"]))
+        """The same config, pointed at this user's own database and token folder."""
+        return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, user["id"]), user_id=user["id"])
 
     def db(user=Depends(current_user)):
-        c = connect(user_cfg(user).db_path)
-        try:
-            yield c
-        finally:
-            c.close()
+        return connect(user_cfg(user).db_name)
 
     def tz(conn) -> ZoneInfo:
         return ZoneInfo(rp.get_setting(conn, "timezone", cfg.timezone))
@@ -182,7 +173,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def do_sync(ucfg: Config, user_id: int, force: bool = False) -> dict:
         with sync_locks.setdefault(user_id, threading.Lock()):
             running.add(user_id)
-            conn = connect(ucfg.db_path)
+            conn = connect(ucfg.db_name)
             try:
                 c = make_connector(conn, ucfg)
                 res = run_sync(conn, c, today(conn), cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days, force=force)
@@ -194,7 +185,6 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 log.exception("sync failed")
                 raise
             finally:
-                conn.close()
                 running.discard(user_id)
 
     lock_reports = threading.RLock()
@@ -208,12 +198,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "20")),
         )
 
-    def generate_bg(body: dict, key: tuple, db_path) -> None:
-        c = connect(db_path)
+    def generate_bg(body: dict, key: tuple, db_name: str) -> None:
+        c = connect(db_name)
         try:
             nv.generate(c, body, ai_config(c), provider=narrative_provider)
         finally:
-            c.close()
             inflight.discard(key)
 
     def with_narrative(conn, body: dict | None) -> dict | None:
@@ -231,21 +220,21 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         elif not ai.api_key and narrative_provider is None:
             body["narrative"] = {"status": "not_configured", "detail": "OPENAI_API_KEY is not set on the backend"}
         else:
-            key = (conn.execute("PRAGMA database_list").fetchone()["file"], body["type"], body["id"], ai.model)
+            key = (conn.name, body["type"], body["id"], ai.model)
             if key not in inflight:
                 inflight.add(key)
-                db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
-                threading.Thread(target=generate_bg, args=(body, key, db_path), daemon=True).start()
+                threading.Thread(target=generate_bg, args=(body, key, conn.name), daemon=True).start()
             body["narrative"] = {"status": "pending"}
         return body
 
     @api.get("/v1/status")
     def status(conn=Depends(db), user=Depends(current_user)):
         row = get_connection_row(conn, cfg.source)
-        latest = conn.execute("SELECT MAX(local_date) d FROM daily_observation WHERE source=? AND state='measured'", (cfg.source,)).fetchone()["d"]
-        latest_act = conn.execute("SELECT MAX(start_utc) s FROM activity WHERE source=?", (cfg.source,)).fetchone()["s"]
-        cps = {r["stream"]: dict(r) for r in conn.execute("SELECT * FROM sync_checkpoint WHERE source=?", (cfg.source,))}
-        job = conn.execute("SELECT * FROM sync_job WHERE source=? ORDER BY id DESC LIMIT 1", (cfg.source,)).fetchone()
+        lo = one(conn.daily_observation, {"source": cfg.source, "state": "measured"}, sort=[("local_date", -1)])
+        la = one(conn.activity, {"source": cfg.source}, sort=[("start_utc", -1)])
+        latest, latest_act = (lo or {}).get("local_date"), (la or {}).get("start_utc")
+        cps = {r["stream"]: r for r in many(conn.sync_checkpoint, {"source": cfg.source})}
+        job = one(conn.sync_job, {"source": cfg.source}, sort=[("id", -1)])
         return {
             "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)),
             "connection": {k: row[k] for k in ("state", "detail", "last_attempt_at", "last_success_at", "retry_not_before")} if row else
@@ -253,8 +242,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             "latest_observation_date": latest, "latest_activity_start": latest_act,
             "watch_sync_time": None,  # not exposed by the source; never guessed
             "backfill": cps.get("days"), "sync_running": user["id"] in running,
-            "last_job": dict(job) if job else None,
-            "capabilities": json.loads(row["capabilities_json"]) if row else {},
+            "last_job": job,
+            "capabilities": row.get("capabilities", {}) if row else {},
             "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),
         }
 
@@ -284,41 +273,34 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         from .weekly import regenerate_weeklies
         with lock_reports:
             regenerate_weeklies(conn, cfg.source, today(conn), synthetic)
-        r = conn.execute("SELECT body_json FROM report WHERE type='weekly' ORDER BY subject_key DESC, revision DESC LIMIT 1").fetchone()
+        r = one(conn.report, {"type": "weekly"}, sort=[("subject_key", -1), ("revision", -1)])
         if not r:
             raise HTTPException(404, "no completed week yet")
-        return with_narrative(conn, json.loads(r["body_json"]))
+        return with_narrative(conn, r["body"])
 
     @api.get("/v1/reports/{rtype}/{key}/revisions")
     def revisions(rtype: str, key: str, conn=Depends(db)):
         """All stored revisions of one report, newest first, so earlier versions stay browsable."""
         return [{"id": r["id"], "revision": r["revision"], "generated_at": r["generated_at"], "data_cutoff": r["data_cutoff"],
-                 "algorithm_version": json.loads(r["algorithm_version"])}
-                for r in conn.execute("SELECT id, revision, generated_at, data_cutoff, algorithm_version FROM report"
-                                      " WHERE type=? AND subject_key=? ORDER BY revision DESC", (rtype, key))]
+                 "algorithm_version": r["algorithm_version"]}
+                for r in conn.report.find({"type": rtype, "subject_key": key}, {"body": 0, "_id": 0}, sort=[("revision", -1)])]
 
     # ---------------------------------------------------------------- the intent → outcome loop
 
     @api.get("/v1/plan/{day}")
     def get_plan(day: str, conn=Depends(db)):
-        r = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (day,)).fetchone()
-        return dict(r) if r else None
+        return one(conn.day_plan, {"local_date": day})
 
     @api.put("/v1/plan/{day}")
     def put_plan(day: str, body: PlanIn, conn=Depends(db)):
         date.fromisoformat(day)
-        with conn:
-            conn.execute("INSERT INTO day_plan VALUES (?,?,?,?) ON CONFLICT (local_date) DO UPDATE SET kind=excluded.kind,"
-                         " minutes=excluded.minutes, client_updated_at=excluded.client_updated_at"
-                         " WHERE excluded.client_updated_at > day_plan.client_updated_at",
-                         (day, body.kind, body.minutes, body.client_updated_at))
+        put_if_newer(conn.day_plan, {"local_date": day}, {"kind": body.kind, "minutes": body.minutes, "client_updated_at": body.client_updated_at})
         with lock_reports:
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
 
     @api.delete("/v1/plan/{day}")
     def delete_plan(day: str, conn=Depends(db)):
-        with conn:
-            conn.execute("DELETE FROM day_plan WHERE local_date=?", (day,))
+        conn.day_plan.delete_one({"local_date": day})
         with lock_reports:
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
 
@@ -326,11 +308,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def put_intent(sid: str, body: IntentIn, conn=Depends(db)):
         if not rp.activity_by_source_id(conn, cfg.source, sid):
             raise HTTPException(404)
-        with conn:
-            conn.execute("INSERT INTO run_intent VALUES (?,?,?,?,?) ON CONFLICT (activity_source_id) DO UPDATE SET kind=excluded.kind,"
-                         " note=excluded.note, source='user', client_updated_at=excluded.client_updated_at"
-                         " WHERE excluded.client_updated_at > run_intent.client_updated_at",
-                         (sid, body.kind, body.note, "user", body.client_updated_at))
+        put_if_newer(conn.run_intent, {"activity_source_id": sid},
+                     {"kind": body.kind, "note": body.note, "source": "user", "client_updated_at": body.client_updated_at})
         with lock_reports:
             return rp.build_post_run(conn, cfg.source, sid, synthetic)
 
@@ -348,15 +327,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.put("/v1/insights/{insight_id}/state")
     def put_insight_state(insight_id: str, body: InsightStateIn, conn=Depends(db)):
-        with conn:
-            if body.state is None:
-                conn.execute("DELETE FROM insight_state WHERE insight_id=?", (insight_id,))
-            else:
-                cur = conn.execute("SELECT body_json FROM report WHERE type='insights' ORDER BY local_date DESC, revision DESC LIMIT 1").fetchone()
-                verdict = next((i["verdict"] for i in json.loads(cur["body_json"])["insights"] if i["id"] == insight_id), None) if cur else None
-                conn.execute("INSERT INTO insight_state VALUES (?,?,?,?) ON CONFLICT (insight_id) DO UPDATE SET state=excluded.state,"
-                             " verdict_at_dismissal=excluded.verdict_at_dismissal, updated_at=excluded.updated_at",
-                             (insight_id, body.state, verdict, utc_now()))
+        if body.state is None:
+            conn.insight_state.delete_one({"insight_id": insight_id})
+        else:
+            cur = rp.latest_body(conn, "insights")
+            verdict = next((i["verdict"] for i in cur["insights"] if i["id"] == insight_id), None) if cur else None
+            put(conn.insight_state, {"insight_id": insight_id}, {"state": body.state, "verdict_at_dismissal": verdict, "updated_at": utc_now()})
         with lock_reports:
             return rp.build_insights(conn, cfg.source, today(conn), synthetic)
 
@@ -364,16 +340,15 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     coach_inflight: set[str] = set()
 
-    def coach_bg(db_path: str, model: str, key: str, key_source: str, budget: int) -> None:
+    def coach_bg(db_name: str, model: str, key: str, key_source: str, budget: int) -> None:
         from . import coach as ch
-        c = connect(db_path)
+        c = connect(db_name)
         try:
             ch.run(c, cfg.source, today(c), model, key, key_source, provider=coach_provider, budget=budget)
         except Exception:
             log.exception("coach generation failed")
         finally:
-            c.close()
-            coach_inflight.discard(db_path)
+            coach_inflight.discard(db_name)
 
     @api.get("/v1/coach")
     def get_coach(conn=Depends(db), x_openai_key: str | None = Header(default=None)):
@@ -388,10 +363,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             return {"status": "not_configured", "detail": "No OpenAI key: add one in Settings or on the server"}
         b = ch.build_bundle(conn, cfg.source, today(conn))
         h = ch.input_hash(b, ai.model)
-        hit = conn.execute("SELECT * FROM coach_analysis WHERE input_hash=? AND status='ok' ORDER BY id DESC LIMIT 1", (h,)).fetchone()
+        hit = one(conn.coach_analysis, {"input_hash": h, "status": "ok"}, sort=[("id", -1)])
         if hit:
-            return ch.view(dict(hit))
-        db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+            return ch.view(hit)
+        db_path = conn.name
         last = ch.latest(conn)
         # The same evidence that just failed or hit the limit isn't retried for 30 minutes
         cooling = bool(last and last["status"] != "ok" and last["input_hash"] == h and
@@ -425,19 +400,19 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.get("/v1/reports")
     def list_reports(type: str | None = None, start: str | None = Query(default=None, alias="from"),
                      end: str | None = Query(default=None, alias="to"), limit: int = Query(default=60, le=500), conn=Depends(db)):
-        q = ("SELECT r.id, r.type, r.subject_key, r.local_date, r.revision, r.generated_at, r.body_json FROM report r"
-             " WHERE r.revision = (SELECT MAX(revision) FROM report x WHERE x.type=r.type AND x.subject_key=r.subject_key)")
-        args: list = []
+        match: dict = {}
         if type:
-            q += " AND r.type=?"; args.append(type)
-        if start:
-            q += " AND r.local_date>=?"; args.append(start)
-        if end:
-            q += " AND r.local_date<=?"; args.append(end)
-        q += " ORDER BY r.local_date DESC, r.id DESC LIMIT ?"; args.append(limit)
+            match["type"] = type
+        if start or end:
+            match["local_date"] = {**({"$gte": start} if start else {}), **({"$lte": end} if end else {})}
+        # Newest revision of each report only
+        rows = conn.report.aggregate([
+            {"$match": match}, {"$sort": {"revision": -1}},
+            {"$group": {"_id": {"t": "$type", "k": "$subject_key"}, "r": {"$first": "$$ROOT"}}}, {"$replaceRoot": {"newRoot": "$r"}},
+            {"$sort": {"local_date": -1, "id": -1}}, {"$limit": limit}])
         out = []
-        for r in conn.execute(q, args):
-            b = json.loads(r["body_json"])
+        for r in rows:
+            b = r["body"]
             title = b.get("headline")
             if r["type"] == "post_run":
                 a = b.get("activity") or {}
@@ -456,25 +431,24 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/reports/{report_id}")
     def get_report(report_id: int, conn=Depends(db)):
-        r = conn.execute("SELECT body_json FROM report WHERE id=?", (report_id,)).fetchone()
+        r = one(conn.report, {"id": report_id})
         if not r:
             raise HTTPException(404)
-        return with_narrative(conn, json.loads(r["body_json"]))
+        return with_narrative(conn, r["body"])
 
     @api.post("/v1/reports/{report_id}/narrative")
     def regenerate_narrative(report_id: int, conn=Depends(db)):
         """Explicit request: regenerate the narrative for this revision (counts against the daily budget)."""
-        r = conn.execute("SELECT body_json FROM report WHERE id=?", (report_id,)).fetchone()
+        r = one(conn.report, {"id": report_id})
         if not r:
             raise HTTPException(404)
-        return nv.generate(conn, json.loads(r["body_json"]), ai_config(conn), provider=narrative_provider, force=True)
+        return nv.generate(conn, r["body"], ai_config(conn), provider=narrative_provider, force=True)
 
     @api.get("/v1/activities")
     def list_activities(start: str | None = Query(default=None, alias="from"), end: str | None = Query(default=None, alias="to"), conn=Depends(db)):
         end = end or today(conn).isoformat()
         start = start or (date.fromisoformat(end) - timedelta(days=cfg.backfill_days)).isoformat()
-        rows = conn.execute("SELECT * FROM activity WHERE source=? AND local_date BETWEEN ? AND ? ORDER BY start_utc DESC",
-                            (cfg.source, start, end)).fetchall()
+        rows = many(conn.activity, {"source": cfg.source, "local_date": {"$gte": start, "$lte": end}}, sort=[("start_utc", -1)])
         return [{k: r[k] for k in ("source_id", "sport", "name", "start_utc", "utc_offset_s", "local_date", "distance_m",
                                    "elapsed_s", "moving_s", "avg_hr", "elevation_gain_m")} |
                 {"pace_moving_s_per_km": rp.rn.moving_pace(r["distance_m"], r["moving_s"]), "synthetic": synthetic} for r in rows]
@@ -491,40 +465,21 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.put("/v1/activities/{sid}/effort")
     def put_effort(sid: str, body: EffortIn, conn=Depends(db)):
-        with conn:
-            conn.execute("INSERT INTO activity_effort VALUES (?,?,?) ON CONFLICT (activity_source_id) DO UPDATE SET"
-                         " rpe=excluded.rpe, client_updated_at=excluded.client_updated_at WHERE excluded.client_updated_at > activity_effort.client_updated_at",
-                         (sid, body.rpe, body.client_updated_at))
+        put_if_newer(conn.activity_effort, {"activity_source_id": sid}, {"rpe": body.rpe, "client_updated_at": body.client_updated_at})
         return {"ok": True}
 
     @api.put("/v1/checkins/{cid}")
     def put_checkin(cid: str, body: CheckinIn, conn=Depends(db)):
         """Last-writer-wins on client_updated_at; a stale write is ignored and the stored version returned."""
-        with conn:
-            conn.execute(
-                "INSERT INTO checkin (id, local_date, energy, soreness, recovery, pain, illness, notes, tags_json, client_updated_at, received_at, deleted)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO UPDATE SET local_date=excluded.local_date, energy=excluded.energy,"
-                " soreness=excluded.soreness, recovery=excluded.recovery, pain=excluded.pain, illness=excluded.illness, notes=excluded.notes,"
-                " tags_json=excluded.tags_json, client_updated_at=excluded.client_updated_at, received_at=excluded.received_at, deleted=excluded.deleted"
-                " WHERE excluded.client_updated_at > checkin.client_updated_at",
-                (cid, body.local_date, body.energy, body.soreness, body.recovery, int(body.pain), int(body.illness), body.notes,
-                 json.dumps(body.tags), body.client_updated_at, utc_now(), int(body.deleted)))
-        r = dict(conn.execute("SELECT * FROM checkin WHERE id=?", (cid,)).fetchone())
-        r["tags"] = json.loads(r.pop("tags_json"))
-        r["pain"], r["illness"], r["deleted"] = bool(r["pain"]), bool(r["illness"]), bool(r["deleted"])
-        return r
+        put_if_newer(conn.checkin, {"id": cid}, {"local_date": body.local_date, "energy": body.energy, "soreness": body.soreness,
+                                                 "recovery": body.recovery, "pain": body.pain, "illness": body.illness, "notes": body.notes,
+                                                 "tags": body.tags, "client_updated_at": body.client_updated_at, "received_at": utc_now(),
+                                                 "deleted": body.deleted})
+        return one(conn.checkin, {"id": cid})
 
     @api.get("/v1/checkins")
     def list_checkins(start: str | None = Query(default=None, alias="from"), end: str | None = Query(default=None, alias="to"), conn=Depends(db)):
-        rows = conn.execute("SELECT * FROM checkin WHERE local_date BETWEEN ? AND ? ORDER BY local_date DESC",
-                            (start or "0000", end or "9999")).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["tags"] = json.loads(d.pop("tags_json"))
-            d["pain"], d["illness"], d["deleted"] = bool(d["pain"]), bool(d["illness"]), bool(d["deleted"])
-            out.append(d)
-        return out
+        return many(conn.checkin, {"local_date": {"$gte": start or "0000", "$lte": end or "9999"}}, sort=[("local_date", -1)])
 
     @api.get("/v1/settings")
     def get_settings(conn=Depends(db)):
@@ -547,15 +502,13 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 raise HTTPException(422, "unknown timezone")
         if body.running_days is not None and any(not 0 <= d <= 6 for d in body.running_days):
             raise HTTPException(422, "running_days are 0 (Mon) .. 6 (Sun)")
-        with conn:
-            for k, v in body.model_dump(exclude_unset=True).items():
-                if v is None:
-                    # An explicit null clears an optional setting; it never clears required ones
-                    if k in ("goal", "available_minutes", "goal_type"):
-                        conn.execute("DELETE FROM user_settings WHERE key=?", (k,))
-                    continue
-                conn.execute("INSERT INTO user_settings VALUES (?,?) ON CONFLICT (key) DO UPDATE SET value_json=excluded.value_json",
-                             (k, json.dumps(v)))
+        for k, v in body.model_dump(exclude_unset=True).items():
+            if v is None:
+                # An explicit null clears an optional setting; it never clears required ones
+                if k in ("goal", "available_minutes", "goal_type"):
+                    conn.user_settings.delete_one({"key": k})
+                continue
+            set_setting(conn, k, v)
         return get_settings(conn)
 
     @api.delete("/v1/data")
@@ -565,10 +518,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis"],
                   "all": ["raw_payload", "report", "narrative", "coach_analysis", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
-        with conn:
-            for t in tables:
-                conn.execute(f"DELETE FROM {t}")
-        conn.execute("VACUUM")
+        for t in tables:
+            conn[t].delete_many({})
         return {"deleted": tables}
 
     @api.get("/v1/export")
@@ -576,10 +527,9 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         out = {}
         for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings",
                   "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis"):
-            out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
-        out["activity_samples"] = [{"activity_id": r["activity_id"], "samples": json.loads(r["samples_json"])}
-                                   for r in conn.execute("SELECT * FROM activity_samples")]
-        out["reports"] = [json.loads(r["body_json"]) for r in conn.execute("SELECT body_json FROM report")]
+            out[t] = many(conn[t])
+        out["activity_samples"] = many(conn.activity_samples)
+        out["reports"] = [r["body"] for r in many(conn.report)]
         return {"mode": cfg.source, "synthetic": synthetic, "exported_at": utc_now(), "data": out}
 
     # ---------------------------------------------------------------- sign-in (public)
@@ -588,15 +538,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def auth_google(body: GoogleSignIn):
         """Exchange a Google ID token for an app token. Invite-only: new accounts need an invite for their email."""
         claims = google_verifier(body.id_token)
-        a = accounts.app_db(cfg.data_dir)
+        a = accounts.app_db()
         try:
-            try:
-                u = accounts.sign_in_with_google(a, claims)
-            except accounts.NotInvited as e:
-                raise HTTPException(403, str(e))
-            token = accounts.create_session(a, u["id"], body.device_name)
-        finally:
-            a.close()
+            u = accounts.sign_in_with_google(a, claims)
+        except accounts.NotInvited as e:
+            raise HTTPException(403, str(e))
+        token = accounts.create_session(a, u["id"], body.device_name)
         return {"token": token, "user": {"id": u["id"], "email": u["email"], "name": u["name"], "role": u["role"]}}
 
     # ---------------------------------------------------------------- official Garmin connection
@@ -604,13 +551,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.post("/v1/garmin/oauth/start")
     def garmin_start(user=Depends(current_user)):
         sec = secrets(cfg.data_dir)
-        a = accounts.app_db(cfg.data_dir)
         try:
-            return {"authorize_url": goauth.start(a, user["id"], sec.get("garmin_client_id"), GARMIN_REDIRECT_URI)}
+            return {"authorize_url": goauth.start(accounts.app_db(), user["id"], sec.get("garmin_client_id"), GARMIN_REDIRECT_URI)}
         except goauth.NotConfigured as e:
             raise HTTPException(503, str(e))
-        finally:
-            a.close()
 
     @app.get("/v1/garmin/oauth/callback", response_class=HTMLResponse)
     def garmin_callback(state: str = "", code: str = "", error: str = ""):
@@ -621,14 +565,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if error or not code or not state:
             return page("Garmin not connected", "The connection was cancelled or Garmin returned an error.")
         sec = secrets(cfg.data_dir)
-        a = accounts.app_db(cfg.data_dir)
         try:
-            goauth.complete(a, state, code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""), GARMIN_REDIRECT_URI,
+            goauth.complete(accounts.app_db(), state, code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""), GARMIN_REDIRECT_URI,
                             lambda uid: accounts.user_dir(cfg.data_dir, uid))
         except goauth.OAuthError as e:
             return page("Garmin not connected", str(e))
-        finally:
-            a.close()
         return page("Garmin connected", "Your Garmin account is linked.")
 
     @api.delete("/v1/garmin/connection")
@@ -647,11 +588,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             raise HTTPException(409, "the owner account can't be deleted from the app")
         sec = secrets(cfg.data_dir)
         goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))  # Garmin requires it
-        a = accounts.app_db(cfg.data_dir)
-        try:
-            accounts.delete_user(a, cfg.data_dir, user["id"])
-        finally:
-            a.close()
+        accounts.delete_user(accounts.app_db(), cfg.data_dir, user["id"])
         return {"deleted": True}
 
     app.include_router(api)

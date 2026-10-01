@@ -1,31 +1,30 @@
-import json
 import time
 from datetime import date
 
 from fastapi.testclient import TestClient
 
+from helpers import set_plan
 from sidekick import focus as fc
 from sidekick import reports as rp
 from sidekick.api import create_app
 from sidekick.auth import create_token
 from sidekick.config import Config
 from sidekick.connectors.fixture import FixtureConnector
-from sidekick.db import connect
+from sidekick.db import connect, set_setting, user_db_name
 from sidekick.sync import run_sync
 
 ANCHOR = date(2026, 9, 30)  # Wednesday; fixture runs Mon, Wed, Fri, Sat
 
 
 def synced(tmp_path):
-    conn = connect(tmp_path / "t.db")
+    conn = connect(user_db_name(1, "fixture"))
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 60, 3, max_backfill_days=90)
     rp.build_insights(conn, "fixture", ANCHOR, True)
     return conn
 
 
 def set_zones(conn):
-    conn.execute("INSERT INTO user_settings VALUES ('source_hr_zones', ?) ON CONFLICT (key) DO UPDATE SET value_json=excluded.value_json",
-                 (json.dumps({"floors": [95, 113, 132, 151, 170], "method": "HR_MAX", "max_hr": 189}),))
+    set_setting(conn, "source_hr_zones", {"floors": [95, 113, 132, 151, 170], "method": "HR_MAX", "max_hr": 189})
 
 
 def test_suggestion_speaks_to_the_planned_session():
@@ -43,7 +42,7 @@ def test_planned_easy_run_that_was_hard_is_flagged(tmp_path):
     conn = synced(tmp_path)
     set_zones(conn)
     sid = "fx-run-2026-09-28"
-    conn.execute("INSERT INTO day_plan VALUES ('2026-09-28', 'easy', 40, 'x')")
+    set_plan(conn, "2026-09-28", "easy", 40)
     r = rp.build_post_run(conn, "fixture", sid, True)
     assert r["intent"] == {"kind": "easy", "note": None, "source": "plan"}  # pre-filled from the plan
     flagged = [f for f in r["findings"] if f["metric"] == "intent_vs_actual"]
@@ -57,7 +56,7 @@ def test_focus_options_follow_data_and_goal(tmp_path):
     rp.build_insights(conn, "fixture", ANCHOR, True)
     kinds = [o["kind"] for o in fc.options(conn, "fixture", ANCHOR)]
     assert "consistency" in kinds or "easy_runs" in kinds
-    conn.execute("INSERT INTO user_settings VALUES ('goal_type', ?)", (json.dumps("consistency"),))
+    set_setting(conn, "goal_type", "consistency")
     assert fc.options(conn, "fixture", ANCHOR)[0]["kind"] == "consistency"
 
 
@@ -85,10 +84,10 @@ def test_insight_novelty_and_dismissal_lapse(tmp_path):
     nxt = {i["id"]: i for i in rp.build_insights(conn, "fixture", date(2026, 10, 1), True)["insights"]}
     assert any(i["novelty"] == "continuing" for i in nxt.values())
     pid = next(k for k, i in nxt.items() if i["verdict"] == "pattern")
-    conn.execute("INSERT INTO insight_state VALUES (?, 'dismissed', ?, 'x')", (pid, nxt[pid]["verdict"]))
+    conn.insight_state.insert_one({"insight_id": pid, "state": "dismissed", "verdict_at_dismissal": nxt[pid]["verdict"], "updated_at": "x"})
     again = {i["id"]: i for i in rp.build_insights(conn, "fixture", date(2026, 10, 1), True)["insights"]}
     assert again[pid]["user_state"] == "dismissed"
-    conn.execute("UPDATE insight_state SET verdict_at_dismissal='no_clear_pattern' WHERE insight_id=?", (pid,))
+    conn.insight_state.update_one({"insight_id": pid}, {"$set": {"verdict_at_dismissal": "no_clear_pattern"}})
     assert {i["id"]: i for i in rp.build_insights(conn, "fixture", date(2026, 10, 1), True)["insights"]}[pid]["user_state"] is None
 
 

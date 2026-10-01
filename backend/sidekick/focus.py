@@ -3,14 +3,13 @@ runs. Deterministic; each evaluation states its target, what was measured and on
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta
 from statistics import median
 
 from . import reports as rp
 from .analytics import insights as ins
 from .analytics import running as rn
-from .db import utc_now
+from .db import many, one, put, utc_now
 
 FOCUS_VERSION = "focus-1.0"
 FADE_TARGET_S = 5.0          # "even" = second half no more than 5 s/km slower than the first
@@ -77,9 +76,9 @@ def options(conn, source: str, today: date) -> list[dict]:
     goal = rp.get_setting(conn, "goal_type", None)
     zones = rp.hr_zones(conn)
     insights = {}
-    r = conn.execute("SELECT body_json FROM report WHERE type='insights' ORDER BY local_date DESC, revision DESC LIMIT 1").fetchone()
+    r = rp.latest_body(conn, "insights")
     if r:
-        insights = {i["id"]: i for i in json.loads(r["body_json"])["insights"]}
+        insights = {i["id"]: i for i in r["insights"]}
     garmin = rp.get_setting(conn, "garmin_fitness", None) or {}
     status = ((garmin.get("training_status") or {}).get("phrase") or "").split("_")[0]
     reasons: dict[str, str] = {}
@@ -99,8 +98,8 @@ def options(conn, source: str, today: date) -> list[dict]:
     reasons.setdefault("consistency", "Regular running is what makes every other trend in the app meaningful.")
     order = GOAL_ORDER.get(goal or "", list(reasons))
     # Reported pain or illness in the last 3 days comes first, as it does in the morning recommendation
-    flagged = conn.execute("SELECT 1 FROM checkin WHERE deleted=0 AND (pain=1 OR illness=1) AND local_date>=?",
-                           ((today - timedelta(days=3)).isoformat(),)).fetchone()
+    flagged = conn.checkin.find_one({"deleted": False, "$or": [{"pain": True}, {"illness": True}],
+                                     "local_date": {"$gte": (today - timedelta(days=3)).isoformat()}})
     if flagged:
         reasons["recovery"] = "You reported pain or feeling unwell in the last few days."
         order = ["recovery"] + [k for k in order if k != "recovery"]
@@ -114,7 +113,7 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date, params: dict |
     done = today > we
     runs = _runs(conn, source, ws, min(we, today))
     zones = rp.hr_zones(conn)
-    rpes = {r["activity_source_id"]: r["rpe"] for r in conn.execute("SELECT * FROM activity_effort")}
+    rpes = {r["activity_source_id"]: r["rpe"] for r in many(conn.activity_effort)}
     out = {"kind": kind, "title": KINDS.get(kind, kind), "week_start": ws.isoformat(), "complete": done, "runs": [],
            "algorithm_version": FOCUS_VERSION}
     if kind == "even_pacing":
@@ -197,21 +196,20 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date, params: dict |
 
 def current(conn, source: str, today: date) -> dict:
     ws = week_start(today)
-    row = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", (ws.isoformat(),)).fetchone()
+    row = one(conn.weekly_focus, {"week_start": ws.isoformat()})
     opts = options(conn, source, today)
     if row is None and opts:
         # Picked for the runner from the data; they can change it, but nothing is required
-        with conn:
-            conn.execute("INSERT OR IGNORE INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,?,?)",
-                         (ws.isoformat(), opts[0]["kind"], json.dumps({"auto": True, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])}),
-                          utc_now()))
-        row = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", (ws.isoformat(),)).fetchone()
-    prev = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", ((ws - timedelta(days=7)).isoformat(),)).fetchone()
+        conn.weekly_focus.update_one({"week_start": ws.isoformat()}, {"$setOnInsert": {
+            "kind": opts[0]["kind"], "params": {"auto": True, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])},
+            "chosen_at": utc_now()}}, upsert=True)
+        row = one(conn.weekly_focus, {"week_start": ws.isoformat()})
+    prev = one(conn.weekly_focus, {"week_start": (ws - timedelta(days=7)).isoformat()})
     return {
         "week_start": ws.isoformat(),
-        "current": ({**evaluate(conn, source, ws, row["kind"], today, json.loads(row["params_json"])),
-                     "auto": json.loads(row["params_json"]).get("auto", False)} if row else None),
-        "last_week": evaluate(conn, source, ws - timedelta(days=7), prev["kind"], today, json.loads(prev["params_json"])) if prev else None,
+        "current": ({**evaluate(conn, source, ws, row["kind"], today, row["params"]), "auto": row["params"].get("auto", False)}
+                    if row else None),
+        "last_week": evaluate(conn, source, ws - timedelta(days=7), prev["kind"], today, prev["params"]) if prev else None,
         "options": opts,
     }
 
@@ -219,7 +217,5 @@ def current(conn, source: str, today: date) -> dict:
 def choose(conn, ws: date, kind: str) -> None:
     if kind not in KINDS:
         raise ValueError(kind)
-    with conn:
-        params = json.dumps({"running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])})
-        conn.execute("INSERT INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,?,?) ON CONFLICT (week_start) DO UPDATE SET"
-                     " kind=excluded.kind, params_json=excluded.params_json, chosen_at=excluded.chosen_at", (ws.isoformat(), kind, params, utc_now()))
+    put(conn.weekly_focus, {"week_start": ws.isoformat()},
+        {"kind": kind, "params": {"running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])}, "chosen_at": utc_now()})

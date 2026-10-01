@@ -3,19 +3,20 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
+from helpers import add_checkin
 from sidekick import trends, weekly
 from sidekick.api import create_app
 from sidekick.auth import create_token
 from sidekick.config import Config
 from sidekick.connectors.fixture import FixtureConnector
-from sidekick.db import connect
+from sidekick.db import connect, user_db_name
 from sidekick.sync import run_sync
 
 ANCHOR = date(2026, 9, 30)  # a Wednesday
 
 
 def synced(tmp_path, days=60):
-    conn = connect(tmp_path / "t.db")
+    conn = connect(user_db_name(1, "fixture"))
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, days, 3, max_backfill_days=90)
     return conn
 
@@ -45,7 +46,8 @@ def test_weekly_volume_matches_hand_count(tmp_path):
     ws = date(2026, 9, 21)
     r = weekly.build_weekly(conn, "fixture", ws, True)
     vol = next(f for f in r["findings"] if f["metric"] == "weekly_moving_time")
-    rows = conn.execute("SELECT COUNT(*), SUM(moving_s) FROM activity WHERE local_date BETWEEN '2026-09-21' AND '2026-09-27'").fetchone()
+    acts = list(conn.activity.find({"local_date": {"$gte": "2026-09-21", "$lte": "2026-09-27"}}))
+    rows = (len(acts), sum(a["moving_s"] for a in acts))
     assert vol["observed"]["runs"] == rows[0] == 4  # fixture runs Mon, Wed, Fri, Sat
     assert vol["observed"]["value"] == rows[1]
     assert r["week_end"] == "2026-09-27" and r["next_week_focus"]["rule"].startswith("F")
@@ -53,13 +55,15 @@ def test_weekly_volume_matches_hand_count(tmp_path):
 
 def test_weekly_pain_takes_priority_and_old_weeks_are_frozen(tmp_path):
     conn = synced(tmp_path)
-    conn.execute("INSERT INTO checkin (id, local_date, energy, pain, client_updated_at, received_at) VALUES ('p','2026-09-23',3,1,'x','x')")
+    add_checkin(conn, "p", "2026-09-23", energy=3, pain=True)
     assert weekly.build_weekly(conn, "fixture", date(2026, 9, 21), True)["next_week_focus"]["rule"] == "F1"
     weekly.regenerate_weeklies(conn, "fixture", ANCHOR, True)
-    old = conn.execute("SELECT MAX(revision) FROM report WHERE type='weekly' AND subject_key='2026-08-10'").fetchone()[0]
-    conn.execute("INSERT INTO checkin (id, local_date, energy, pain, client_updated_at, received_at) VALUES ('q','2026-08-12',3,1,'x','x')")
+    def latest_rev():
+        return conn.report.find_one({"type": "weekly", "subject_key": "2026-08-10"}, sort=[("revision", -1)])["revision"]
+    old = latest_rev()
+    add_checkin(conn, "q", "2026-08-12", energy=3, pain=True)
     weekly.regenerate_weeklies(conn, "fixture", ANCHOR, True)
-    assert conn.execute("SELECT MAX(revision) FROM report WHERE type='weekly' AND subject_key='2026-08-10'").fetchone()[0] == old
+    assert latest_rev() == old
 
 
 def test_revisions_endpoint_lists_history(tmp_path):

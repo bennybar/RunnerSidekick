@@ -3,7 +3,6 @@ weekly running volume and pace-at-HR progress. Descriptive only; no conclusions 
 
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from statistics import median
 
@@ -61,8 +60,7 @@ def build_trends(conn, source: str, today: date, days: int, synthetic: bool) -> 
     for m, meta in DAILY_METRICS.items():
         method = None
         if m == "hrv_overnight_avg":  # comparable HRV only: the latest method in use
-            r = conn.execute("SELECT method FROM daily_observation WHERE source=? AND metric=? AND state='measured' "
-                             "ORDER BY local_date DESC LIMIT 1", (source, m)).fetchone()
+            r = conn.daily_observation.find_one({"source": source, "metric": m, "state": "measured"}, sort=[("local_date", -1)])
             method = r["method"] if r else None
         values = rp.series(conn, source, m, today.isoformat(), method)
         points, band = [], []
@@ -103,7 +101,7 @@ def rp_efficiency(conn, source: str, today: date) -> dict:
     for a in rp.activities(conn, source, (today - timedelta(days=120)).isoformat(), today.isoformat()):
         local = _dt.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         runs.append(ins.RunData(a["source_id"], a["local_date"], local.replace(tzinfo=None), a.get("device_id"), a["distance_m"],
-                                a["moving_s"], json.loads(a["garmin_metrics_json"]).get("activityTrainingLoad"),
+                                a["moving_s"], (a["garmin_metrics"] or {}).get("activityTrainingLoad"),
                                 rp.samples_for(conn, a["id"]), [], "steady"))
     out = ins.efficiency_trend(runs)
     # points carry source ids so the app can open the run
