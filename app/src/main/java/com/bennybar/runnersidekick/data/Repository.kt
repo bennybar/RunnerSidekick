@@ -11,6 +11,9 @@ import com.bennybar.runnersidekick.data.remote.ApiClient
 import com.bennybar.runnersidekick.data.remote.CheckinDto
 import com.bennybar.runnersidekick.data.remote.EffortIn
 import com.bennybar.runnersidekick.data.remote.InsightsReport
+import com.bennybar.runnersidekick.data.remote.RevisionInfo
+import com.bennybar.runnersidekick.data.remote.Trends
+import com.bennybar.runnersidekick.data.remote.WeeklyReport
 import com.bennybar.runnersidekick.data.remote.MorningReport
 import com.bennybar.runnersidekick.data.remote.ReportListItem
 import com.bennybar.runnersidekick.data.remote.SettingsDto
@@ -53,6 +56,26 @@ class Repository(
         observe("activities") { json.decodeFromString(ListSerializer(ActivitySummary.serializer()), it) }
 
     val insights: Flow<Cached<InsightsReport>?> = observe("insights") { json.decodeFromString<InsightsReport>(it) }
+    val weekly: Flow<Cached<WeeklyReport>?> = observe("weekly") { json.decodeFromString<WeeklyReport>(it) }
+
+    fun trends(days: Int): Flow<Cached<Trends>?> = observe("trends:$days") { json.decodeFromString<Trends>(it) }
+    fun day(date: String): Flow<Cached<MorningReport>?> = observe("day:$date") { json.decodeFromString<MorningReport>(it) }
+
+    suspend fun refreshTrends(days: Int) = put("trends:$days", api.getRaw("/v1/trends", mapOf("days" to "$days")))
+    suspend fun refreshDay(date: String) = put("day:$date", api.getRaw("/v1/today", mapOf("date" to date)))
+    suspend fun refreshWeekly() {
+        val body = runCatching { api.getRaw("/v1/weekly/latest") }.getOrElse { if (it is com.bennybar.runnersidekick.data.remote.ApiException.Http && it.code == 404) return else throw it }
+        put("weekly", body)
+    }
+
+    /** Earlier revisions of a report, newest first. Opening one caches it like any other report. */
+    suspend fun revisions(type: String, key: String): List<RevisionInfo> =
+        json.decodeFromString(ListSerializer(RevisionInfo.serializer()), api.getRaw("/v1/reports/$type/$key/revisions"))
+
+    suspend fun cacheRevision(id: Long, type: String, key: String, date: String, revision: Int) {
+        if (db.reports().get(id)?.json != null) return
+        cacheReport(id, type, key, date, revision, null, null, api.getRaw("/v1/reports/$id"))
+    }
 
     fun activity(id: String): Flow<Cached<ActivityDetail>?> = observe("activity:$id") { json.decodeFromString<ActivityDetail>(it) }
 
@@ -92,6 +115,7 @@ class Repository(
         cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, todayBody)
         put("activities", api.getRaw("/v1/activities"))
         put("insights", api.getRaw("/v1/insights"))
+        refreshWeekly()
         refreshJournal()
     }
 

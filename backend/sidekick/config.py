@@ -1,7 +1,6 @@
 """Runtime configuration, read from environment variables.
 
-Secrets (Garmin tokens, device-token hashes) live under the data directory, which
-defaults to ~/.runner-sidekick and is never inside the repository.
+Secrets (Garmin tokens, device-token hashes) live in <repo>/data, which is gitignored and never committed.
 """
 
 from __future__ import annotations
@@ -33,11 +32,17 @@ class Config:
         return self.data_dir / "garmin_tokens"
 
 
+# Fixed locations: the data folder always sits next to the code (<repo>/data), e.g. /var/www/RunnerSidekick/data on
+# the server. No environment setup is needed; RSK_* variables only exist as overrides for tests and demos.
+REPO_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = REPO_DIR / "data"
+
+
 def load_config() -> Config:
-    source = os.getenv("RSK_SOURCE", SOURCE_FIXTURE)
+    source = os.getenv("RSK_SOURCE", SOURCE_GARMIN)
     if source not in (SOURCE_GARMIN, SOURCE_FIXTURE):
         raise ValueError(f"RSK_SOURCE must be '{SOURCE_GARMIN}' or '{SOURCE_FIXTURE}', got {source!r}")
-    data_dir = Path(os.getenv("RSK_DATA_DIR", "~/.runner-sidekick")).expanduser()
+    data_dir = Path(os.getenv("RSK_DATA_DIR", str(DATA_DIR))).expanduser()
     data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     return Config(
         data_dir=data_dir,

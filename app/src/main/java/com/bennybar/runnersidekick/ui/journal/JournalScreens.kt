@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick.ui.journal
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LargeTopAppBar
@@ -11,6 +12,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.bennybar.runnersidekick.data.remote.InsightsReport
+import com.bennybar.runnersidekick.data.remote.WeeklyReport
 import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.insights.InsightCard
 import androidx.compose.foundation.layout.Arrangement
@@ -98,6 +100,7 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
                                     val (icon, shape, kind) = when (r.type) {
                                         "morning" -> Triple(Icons.Outlined.WbSunny, MaterialShapes.Sunny, "Morning briefing")
                                         "post_run" -> Triple(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided, "Run report")
+                                        "weekly" -> Triple(Icons.Outlined.CalendarMonth, MaterialShapes.Cookie12Sided, "Weekly review")
                                         else -> Triple(Icons.Outlined.Insights, MaterialShapes.Flower, "Insights update")
                                     }
                                     row(r.title ?: kind, overline = "$kind · ${Format.shortDate(r.localDate)}" + if (r.revision > 1) " · revised" else "",
@@ -130,13 +133,18 @@ private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 /** Shows a report exactly as generated at the time (its own revision), not recomputed with today's baselines. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReportScreen(id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: ReportVm = viewModel(key = "r$id", factory = factory { ReportVm(it, id) })) {
+fun ReportScreen(
+    id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit,
+    vm: ReportVm = viewModel(key = "r$id", factory = factory { ReportVm(it, id) }),
+) {
     val entity by vm.report.collectAsStateWithLifecycle()
+    val revisions by vm.revisions.collectAsStateWithLifecycle()
     var evidence by remember { mutableStateOf<Finding?>(null) }
     val body = entity?.json
     val morning = remember(body) { if (entity?.type == "morning" && body != null) runCatching { json.decodeFromString<MorningReport>(body) }.getOrNull() else null }
     val run = remember(body) { if (entity?.type == "post_run" && body != null) runCatching { json.decodeFromString<PostRunReport>(body) }.getOrNull() else null }
     val ins = remember(body) { if (entity?.type == "insights" && body != null) runCatching { json.decodeFromString<InsightsReport>(body) }.getOrNull() else null }
+    val wk = remember(body) { if (entity?.type == "weekly" && body != null) runCatching { json.decodeFromString<WeeklyReport>(body) }.getOrNull() else null }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(entity?.let { Format.shortDate(it.localDate) } ?: "Report") },
@@ -149,7 +157,21 @@ fun ReportScreen(id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: 
                 item { Text("Insights as they stood on ${Format.shortDate(r.localDate)}", style = MaterialTheme.typography.titleMedium) }
                 items(r.insights, key = { it.id }) { i -> InsightCard(i, emphasised = i.verdict == "pattern") {} }
             }
-            if (morning == null && run == null && ins == null) {
+            wk?.let { w ->
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Week of ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text(w.headline, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text("Next week: ${w.nextWeekFocus.text}", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                }
+                items(w.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
+                item { Meta("Revision ${w.revision} · generated ${w.generatedAt} · focus rule ${w.nextWeekFocus.rule}") }
+            }
+            if (morning == null && run == null && ins == null && wk == null) {
                 item { EmptyState(Icons.Outlined.MenuBook, "Report not cached", "Connect to the backend once to save this report for offline reading.") }
             }
             morning?.let { m ->
@@ -175,6 +197,15 @@ fun ReportScreen(id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: 
                 item { OutlinedButton(onClick = { onOpenRun(r.activity.sourceId) }) { Text("Open run details") } }
                 item { Meta("Revision ${r.revision} · generated ${r.generatedAt}") }
             }
+            if (revisions.size > 1) item {
+                Group(title = "Versions") {
+                    revisions.forEach { v ->
+                        row("Revision ${v.revision}" + if (v.id == id) " · showing" else "",
+                            supporting = "Generated ${v.generatedAt.replace('T', ' ').removeSuffix("Z")} UTC",
+                            onClick = if (v.id == id) null else ({ vm.open(v) { onOpenReport(v.id) } }))
+                    }
+                }
+            }
         }
     }
     evidence?.let { EvidenceSheet(it) { evidence = null } }
@@ -194,3 +225,38 @@ private fun FindingCard(f: Finding, onWhy: () -> Unit) {
 @Composable
 private fun Meta(text: String) =
     Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+
+/** One day's morning briefing, opened from a trend chart. Rendered from the report for that date. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DayScreen(date: String, onBack: () -> Unit, vm: com.bennybar.runnersidekick.ui.DayVm = viewModel(key = "d$date", factory = factory { com.bennybar.runnersidekick.ui.DayVm(it, date) })) {
+    val day by vm.day.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    var evidence by remember { mutableStateOf<Finding?>(null) }
+    Scaffold(topBar = {
+        TopAppBar(title = { Text(Format.longDate(date)) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
+            actions = { if (day?.value?.synthetic == true) DemoBadge() })
+    }) { padding ->
+        val m = day?.value
+        LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (m == null) {
+                item { EmptyState(Icons.Outlined.MenuBook, if (busy) "Loading day" else "Day not cached", if (busy) "Fetching…" else "Connect to the backend to load this day.") }
+            } else {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(m.headline, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text(m.recommendation.suggestion, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                }
+                items(m.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
+                m.checkin?.let { c -> item { Meta("Check-in: energy ${c.energy ?: "–"}, soreness ${c.soreness ?: "–"}, recovery ${c.recovery ?: "–"}") } }
+                item { Meta("Report revision ${m.revision} · generated ${m.generatedAt}") }
+            }
+        }
+    }
+    evidence?.let { EvidenceSheet(it) { evidence = null } }
+}

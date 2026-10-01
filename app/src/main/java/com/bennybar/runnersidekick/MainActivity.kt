@@ -41,6 +41,7 @@ import androidx.navigation.navArgument
 import com.bennybar.runnersidekick.ui.activities.ActivitiesScreen
 import com.bennybar.runnersidekick.ui.activities.ActivityDetailScreen
 import com.bennybar.runnersidekick.ui.insights.InsightsScreen
+import com.bennybar.runnersidekick.ui.journal.DayScreen
 import com.bennybar.runnersidekick.ui.journal.JournalScreen
 import com.bennybar.runnersidekick.ui.journal.ReportScreen
 import com.bennybar.runnersidekick.ui.settings.SettingsScreen
@@ -97,7 +98,11 @@ private fun App() {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
             }
-            composable("insights") { InsightsScreen() }
+            composable("insights") {
+                InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
+                    onOpenReport = { nav.navigate("report/$it") })
+            }
+            composable("day/{date}") { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) }
             composable("activities") { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) }
             composable("journal") { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) }
             composable("settings") { SettingsScreen() }
@@ -105,7 +110,8 @@ private fun App() {
                 ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() })
             }
             composable("report/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                ReportScreen(it.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate("activity/$id") })
+                ReportScreen(it.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate("activity/$id") },
+                    onOpenReport = { id -> nav.navigate("report/$id") })
             }
         }
     }

@@ -96,3 +96,20 @@ reached the same verdict.
 
 Practical notes are options, never prescriptions. The only numbers they use are the user's own Garmin zone
 boundaries. Confounders are listed with every insight. HR-based comparisons never cross a device change.
+
+## Weekly review — `weekly.py` (`weekly-1.0`)
+
+Covers a completed Monday–Sunday week in local time.
+- **Volume:** moving time vs the mean of the previous 4 weeks. Flagged outside if > 1.5× or < 0.5×.
+- **Intensity:** share of moving time in Garmin zones 4–5.
+- **Pace at HR:** the week's median vs the previous 4 weeks, same watch only, ≥ 3 earlier runs.
+- **Recovery:** the week's median vs the personal range ending the day before the week. Needs ≥ 4 measured nights.
+- **Next-week focus, first match wins:** F1 pain/illness reported → F2 volume > 1.5× → F3 ≥ 70% hard (suggest one
+  easy run below your zone-3 floor) → F4 light or empty week → F5 keep the rhythm.
+- Reviews older than 14 days are not regenerated, so history keeps its original context.
+
+## Trends — `trends.py` (`trends-1.0`)
+
+Daily values are shown as measured; missing days are null, never zero. The band is the same 28-day personal range as
+the morning report, restarted at watch changes. The period summary compares medians with the previous period of
+equal length, and only when each has ≥ max(3, days/3) measured days. "Notable" uses the same thresholds as baselines.

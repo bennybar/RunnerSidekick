@@ -9,7 +9,8 @@
   audit [--out PATH]     field-coverage audit of stored data (no values, no credentials)
   serve [--host --port]  run the API (default 127.0.0.1:8765)
 
-Environment: RSK_SOURCE=garmin|fixture (default fixture), RSK_DATA_DIR (default ~/.runner-sidekick).
+No configuration needed: data lives in <repo>/data and the source is Garmin. (Overrides for tests/demo only:
+RSK_SOURCE=fixture, RSK_DATA_DIR=...)
 """
 
 from __future__ import annotations
@@ -173,9 +174,9 @@ def main(argv=None) -> int:
         print("Garmin tokens deleted.")
         return 0
     if args.cmd == "create-token":
-        print(create_token(cfg.data_dir, args.name))
-        print(f"Shown once. Saved (hashed) in {cfg.data_dir}/device_tokens.json. The API only accepts it if it runs "
-              f"with RSK_DATA_DIR={cfg.data_dir}. Enter it in the app under Settings → Connection.", file=sys.stderr)
+        token = create_token(cfg.data_dir, args.name)
+        print(f"\nDevice token for '{args.name}':\n\n    {token}\n\n"
+              "Paste it into the app: Settings → Connection → Device token. It is shown only this once.")
         return 0
     if args.cmd == "revoke-token":
         print(f"revoked {revoke_token(cfg.data_dir, args.name)} token(s) named {args.name!r} in {cfg.data_dir}")

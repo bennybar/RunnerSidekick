@@ -213,8 +213,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         return with_narrative(conn, body)
 
     @app.get("/v1/trends")
-    def get_trends(days: Literal[7, 28, 90] = 28, conn=Depends(db)):
+    def get_trends(days: int = 28, conn=Depends(db)):
         from .trends import build_trends
+        if days not in (7, 28, 90):
+            raise HTTPException(422, "days must be 7, 28 or 90")
         return build_trends(conn, cfg.source, today(conn), days, synthetic)
 
     @app.get("/v1/weekly/latest")

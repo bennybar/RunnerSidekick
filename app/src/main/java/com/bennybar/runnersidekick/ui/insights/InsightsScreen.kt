@@ -19,6 +19,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Insights
@@ -83,8 +89,16 @@ fun categoryStyle(category: String): Pair<ImageVector, RoundedPolygon> = when (c
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun InsightsScreen(vm: InsightsVm = viewModel(factory = factory(::InsightsVm))) {
+fun InsightsScreen(
+    onOpenDay: (String) -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit,
+    vm: InsightsVm = viewModel(factory = factory(::InsightsVm)),
+) {
     val data by vm.insights.collectAsStateWithLifecycle()
+    val weekly by vm.weekly.collectAsStateWithLifecycle()
+    val trends by vm.trends.collectAsStateWithLifecycle()
+    val days by vm.days.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val busy by vm.busy.collectAsStateWithLifecycle()
     var method by remember { mutableStateOf<Insight?>(null) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -95,6 +109,21 @@ fun InsightsScreen(vm: InsightsVm = viewModel(factory = factory(::InsightsVm))) 
         PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val items = data?.value?.insights.orEmpty()
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        listOf("Insights", "Trends").forEachIndexed { i, l ->
+                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
+                        }
+                    }
+                }
+                if (tab == 1) {
+                    item {
+                        TrendsSection(trends?.value, days, settings?.units ?: com.bennybar.runnersidekick.data.local.Units.METRIC, loading = busy,
+                            onDays = vm::setDays, onOpenDay = onOpenDay, onOpenRun = onOpenRun)
+                    }
+                    return@LazyColumn
+                }
+                weekly?.value?.let { w -> item { WeeklyCard(w) { onOpenReport(w.id) } } }
                 item {
                     Text("A fixed set of questions answered from your own data. Every answer is shown, including \"no clear pattern\".",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -127,6 +156,25 @@ fun InsightsScreen(vm: InsightsVm = viewModel(factory = factory(::InsightsVm))) 
         }
     }
     method?.let { MethodSheet(it) { method = null } }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun WeeklyCard(w: com.bennybar.runnersidekick.data.remote.WeeklyReport, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeBadge(Icons.Outlined.CalendarMonth, MaterialShapes.Cookie12Sided, Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
+                Spacer(Modifier.width(12.dp))
+                Text("Weekly review · ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}", style = MaterialTheme.typography.labelLarge,
+                    color = cs.onPrimaryContainer)
+            }
+            Text(w.headline, style = MaterialTheme.typography.headlineSmall, color = cs.onPrimaryContainer)
+            Text("Next week: ${w.nextWeekFocus.text}", style = MaterialTheme.typography.bodyMedium, color = cs.onPrimaryContainer)
+            Text("Open the full review", style = MaterialTheme.typography.labelLarge, color = cs.primary)
+        }
+    }
 }
 
 @Composable

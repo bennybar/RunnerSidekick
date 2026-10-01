@@ -213,3 +213,12 @@ def test_redaction_filter_drops_secret_looking_logs():
     f = RedactFilter()
     assert not f.filter(logging.LogRecord("x", logging.INFO, "", 0, "Authorization: Bearer abc", None, None))
     assert f.filter(logging.LogRecord("x", logging.INFO, "", 0, "synced 3 days", None, None))
+
+
+
+def test_defaults_need_no_environment(monkeypatch):
+    from sidekick import config
+    monkeypatch.delenv("RSK_SOURCE", raising=False)
+    monkeypatch.delenv("RSK_DATA_DIR", raising=False)
+    cfg = config.load_config()
+    assert cfg.source == "garmin" and cfg.data_dir == config.REPO_DIR / "data"

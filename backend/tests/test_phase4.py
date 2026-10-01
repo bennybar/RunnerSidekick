@@ -74,3 +74,6 @@ def test_revisions_endpoint_lists_history(tmp_path):
     assert [x["revision"] for x in revs] == [r2["revision"], r1["revision"]]
     assert client.get(f"/v1/reports/{revs[-1]['id']}", headers=h).json()["revision"] == r1["revision"]
     assert client.get("/v1/trends", params={"days": 13}, headers=h).status_code == 422
+    for d in (7, 28, 90):  # valid ranges arrive as query strings and must be accepted
+        r = client.get("/v1/trends", params={"days": d}, headers=h)
+        assert r.status_code == 200 and len(r.json()["metrics"][0]["points"]) == d

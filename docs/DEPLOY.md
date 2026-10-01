@@ -6,7 +6,9 @@ Everything lives in `/var/www/RunnerSidekick` and runs as root:
 |---|---|
 | `/var/www/RunnerSidekick/backend` | code and `.venv` |
 | `/var/www/RunnerSidekick/data` | `garmin.db`, `garmin_tokens/`, `device_tokens.json` (dir 0700, files 0600) |
-| `/etc/runnersidekick.env` | secrets, e.g. `OPENAI_API_KEY` (0600) |
+| `/etc/runnersidekick.env` | optional, only for `OPENAI_API_KEY` (0600) |
+
+No configuration is needed: the code always uses `<repo>/data` and Garmin.
 
 The API listens on `127.0.0.1:8765`. nginx terminates TLS and proxies only `/v1/`, so nothing in
 `/var/www/RunnerSidekick` is served as files.
@@ -17,7 +19,7 @@ The API listens on `127.0.0.1:8765`. nginx terminates TLS and proxies only `/v1/
 cd /var/www/RunnerSidekick/backend
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 install -d -m 700 /var/www/RunnerSidekick/data
-install -m 600 /dev/null /etc/runnersidekick.env           # add OPENAI_API_KEY=... here if you want AI summaries
+# optional, AI summaries only:  echo 'OPENAI_API_KEY=sk-...' > /etc/runnersidekick.env && chmod 600 /etc/runnersidekick.env
 cp ../deploy/runnersidekick.service /etc/systemd/system/
 systemctl daemon-reload
 ```
@@ -27,8 +29,8 @@ systemctl daemon-reload
 On the Mac:
 
 ```sh
-sqlite3 ~/.runner-sidekick/garmin.db "PRAGMA wal_checkpoint(TRUNCATE);"
-scp -P 22238 -rp ~/.runner-sidekick/garmin.db ~/.runner-sidekick/garmin_tokens root@runnersidekick.ibarak.org:/var/www/RunnerSidekick/data/
+sqlite3 ~/StudioProjects/RunnerSidekick/data/garmin.db "PRAGMA wal_checkpoint(TRUNCATE);"
+scp -P 22238 -rp ~/StudioProjects/RunnerSidekick/data/garmin.db ~/StudioProjects/RunnerSidekick/data/garmin_tokens root@runnersidekick.ibarak.org:/var/www/RunnerSidekick/data/
 ```
 
 On the server:
@@ -40,14 +42,16 @@ systemctl enable --now runnersidekick
 ```
 
 Alternative to copying: log in on the server with
-`RSK_SOURCE=garmin RSK_DATA_DIR=/var/www/RunnerSidekick/data .venv/bin/python -m sidekick garmin-login`.
+`.venv/bin/python -m sidekick garmin-login`.
 Garmin often rate-limits logins from datacenter IPs, though.
 
 ## Device token for the phone (printed once)
 
 ```sh
-cd /var/www/RunnerSidekick/backend && RSK_DATA_DIR=/var/www/RunnerSidekick/data .venv/bin/python -m sidekick create-token pixel
+cd /var/www/RunnerSidekick/backend && .venv/bin/python -m sidekick create-token phone
 ```
+
+It prints a line starting with `rsk_`. Paste that into the app under Settings → Connection → Device token.
 
 ## Hourly sync (cron)
 

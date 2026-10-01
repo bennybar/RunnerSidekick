@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Shared plumbing: a busy flag and a human-readable error for the last failed network action. */
@@ -88,8 +89,21 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
+    val weekly = repo.weekly.state(null)
+    private val _days = MutableStateFlow(28)
+    val days: StateFlow<Int> = _days.asStateFlow()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
+
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights() }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshTrends(_days.value) }
+    fun setDays(d: Int) { _days.value = d; launchIo { repo.refreshTrends(d) } }
+}
+
+class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
+    val day = repo.day(date).state(null)
+    init { launchIo { repo.refreshDay(date) } }
 }
 
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
@@ -113,7 +127,18 @@ class JournalVm(repo: Repository) : BaseVm(repo) {
 
 class ReportVm(repo: Repository, val id: Long) : BaseVm(repo) {
     val report = repo.report(id).state(null)
-    init { launchIo { repo.loadReport(id) } }
+    val revisions = MutableStateFlow<List<com.bennybar.runnersidekick.data.remote.RevisionInfo>>(emptyList())
+    init {
+        launchIo {
+            repo.loadReport(id)
+            repo.report(id).first()?.let { r -> revisions.value = repo.revisions(r.type, r.subjectKey) }
+        }
+    }
+    fun open(rev: com.bennybar.runnersidekick.data.remote.RevisionInfo, onReady: () -> Unit) = launchIo {
+        val r = report.value ?: return@launchIo
+        repo.cacheRevision(rev.id, r.type, r.subjectKey, r.localDate, rev.revision)
+        onReady()
+    }
 }
 
 @Suppress("UNCHECKED_CAST")

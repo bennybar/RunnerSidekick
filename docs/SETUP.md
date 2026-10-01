@@ -5,15 +5,15 @@
 ```sh
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q                         # 33 tests
+.venv/bin/python -m pytest -q
 ```
 
 Configuration (environment variables):
 
 | Name | Default | Meaning |
 |---|---|---|
-| `RSK_SOURCE` | `fixture` | `garmin` for live data, `fixture` for synthetic demo data (separate databases) |
-| `RSK_DATA_DIR` | `~/.runner-sidekick` | databases, Garmin tokens, device-token hashes (0700) |
+| `RSK_SOURCE` | `garmin` | set to `fixture` only for synthetic demo data (separate database) |
+| `RSK_DATA_DIR` | `<repo>/data` | databases, Garmin tokens, device-token hashes (0700, gitignored) |
 | `RSK_TIMEZONE` | `Asia/Jerusalem` | default local zone (editable in the app) |
 | `RSK_BACKFILL_DAYS` | `90` | history to backfill |
 | `RSK_REFETCH_DAYS` | `3` | recent window re-fetched every sync (late sleep, edited activities) |
@@ -25,7 +25,6 @@ Configuration (environment variables):
 Run these in a real terminal (the password prompt needs a TTY):
 
 ```sh
-export RSK_SOURCE=garmin
 .venv/bin/python -m sidekick garmin-login     # email + hidden password; tokens saved, password never stored
 .venv/bin/python -m sidekick sync --loop      # bounded, resumable ~90-day backfill (~6 requests/day, 1 s apart)
 .venv/bin/python -m sidekick audit --out ../docs/data-audit.md   # coverage matrix (field names/counts only)
@@ -66,4 +65,4 @@ The backend refuses to bind beyond loopback without TLS. Options:
   tokens: `python -m sidekick garmin-logout`. Device tokens: `revoke-token NAME`.
 - Phone: *Clear this phone's cache*. Android cloud backup and device transfer are disabled for the app.
 - Backups: the app doesn't back anything up. Your computer's own backups (e.g. Time Machine) may include
-  `~/.runner-sidekick`.
+  the repo's `data/` folder.

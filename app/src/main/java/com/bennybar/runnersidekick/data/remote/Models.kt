@@ -330,3 +330,81 @@ data class InsightsReport(
     val synthetic: Boolean,
     val insights: List<Insight>,
 )
+
+@Serializable
+data class TrendPoint(val date: String, val value: Double? = null)
+
+@Serializable
+data class BandPoint(val date: String, val q1: Double? = null, val median: Double? = null, val q3: Double? = null)
+
+@Serializable
+data class TrendSummary(
+    val n: Int,
+    @SerialName("previous_n") val previousN: Int,
+    val median: Double? = null,
+    @SerialName("previous_median") val previousMedian: Double? = null,
+    val change: Double? = null,
+    val meaningful: Boolean = false,
+    val enough: Boolean = false,
+)
+
+@Serializable
+data class TrendMetric(
+    val metric: String,
+    val title: String,
+    val unit: String,
+    val points: List<TrendPoint>,
+    val band: List<BandPoint>,
+    val summary: TrendSummary,
+    @SerialName("measured_days") val measuredDays: Int,
+)
+
+@Serializable
+data class WeekVolume(
+    @SerialName("week_start") val weekStart: String,
+    val runs: Int,
+    @SerialName("distance_m") val distanceM: Double,
+    @SerialName("moving_s") val movingS: Double,
+    val partial: Boolean,
+    @SerialName("activity_ids") val activityIds: List<String> = emptyList(),
+)
+
+@Serializable
+data class PacePoint(val date: String, @SerialName("pace_s_per_km") val paceSPerKm: Double, @SerialName("source_id") val sourceId: String? = null)
+
+@Serializable
+data class PaceSeries(val device: String, val points: List<PacePoint>)
+
+@Serializable
+data class PaceAtHr(@SerialName("band_bpm") val bandBpm: List<Int>? = null, val verdict: String, val headline: String, val series: List<PaceSeries> = emptyList())
+
+@Serializable
+data class Trends(
+    val days: Int,
+    val start: String,
+    val end: String,
+    val synthetic: Boolean,
+    @SerialName("device_changes") val deviceChanges: List<String> = emptyList(),
+    val metrics: List<TrendMetric>,
+    @SerialName("weekly_running") val weeklyRunning: List<WeekVolume>,
+    @SerialName("pace_at_hr") val paceAtHr: PaceAtHr,
+)
+
+@Serializable
+data class FocusRule(val rule: String, val text: String)
+
+@Serializable
+data class WeeklyReport(
+    val id: Long,
+    val revision: Int,
+    @SerialName("generated_at") val generatedAt: String,
+    val synthetic: Boolean,
+    @SerialName("week_start") val weekStart: String,
+    @SerialName("week_end") val weekEnd: String,
+    val headline: String,
+    val findings: List<Finding>,
+    @SerialName("next_week_focus") val nextWeekFocus: FocusRule,
+)
+
+@Serializable
+data class RevisionInfo(val id: Long, val revision: Int, @SerialName("generated_at") val generatedAt: String, @SerialName("data_cutoff") val dataCutoff: String? = null)

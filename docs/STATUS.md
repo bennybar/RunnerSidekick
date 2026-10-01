@@ -34,6 +34,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   start-up outliers. Main-thread JSON decoding moved off the main thread.
 - Deployment files (`deploy/`, `docs/DEPLOY.md`). Pinned `requirements.txt`.
 
+## Phase 4 (2026-10-01)
+- Trends (7/28/90 days): daily sleep, resting HR and comparable HRV with the personal-range band, explicit gaps and
+  watch-change markers; period-vs-previous summary with sample sizes; weekly running volume; pace at the usual HR band
+  per watch. Every point opens its day or run.
+- Weekly review report (Mon–Sun, local): volume vs prior 4 weeks, intensity, pace at HR, recovery context,
+  check-ins, next-week focus (rule table F1–F5). Revisioned; frozen after 14 days.
+- Revision history: `/v1/reports/{type}/{key}/revisions`, "Versions" on every report.
+- New launcher icon (concept A) with a themed layer and a notification glyph.
+- Backend defaults hard-coded: data in `<repo>/data`, source Garmin. No env setup needed.
+
 ## Blockers
 - None blocking. Live Garmin sync demonstrated 2026-10-01: 90-day backfill, 31 runs, 53 days of wellness data (audit in docs/data-audit.md, generated locally and not committed).
 
@@ -42,12 +52,20 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
    then checkpoint 2.
 2. AI narrative not yet exercised against the real OpenAI API (no key configured). Only fake-provider tests so far.
    TalkBack walkthrough not done (200 % font and dark mode checked).
-3. Phase 4: Trends (7/28/90), weekly review, journal revision history browser.
+3. Multi-user (see roadmap below).
+
+## Roadmap: multi-user (after Phase 4, not started)
+- Goal: other people sign in with Garmin and the backend issues their app token automatically.
+- Use the **Garmin Connect Developer Program OAuth** (official; needs business approval, so apply early). Don't collect
+  Garmin passwords via the unofficial library for other users: security liability, terms, and IP-level blocking.
+- Backend: `users` table; every record, report, check-in and token scoped to a user; per-user sync scheduling and rate
+  budgets; encrypted Garmin tokens; per-user export and deletion.
+- App: a sign-in screen replacing manual URL/token entry.
+- Compliance: privacy policy, explicit consent for health data (GDPR, Israeli privacy law).
 
 ## Known limitations
 - Pace chart uses 20-s bucket means and is still noisy on real 1-s data. It may need smoothing.
 - A brief "No briefing yet" frame shows before the Room cache emits on cold start.
-- No Trends screen or weekly review yet (Phase 4).
 - Notifications verified to build and wire up, but not yet observed firing on the emulator (WorkManager timing).
 - Physical-device connectivity is documented but not set up (needs TLS or `adb reverse`).
 - No Room migration tests yet (schema v1 exported to `app/schemas`).

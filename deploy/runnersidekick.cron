@@ -1,4 +1,4 @@
 # /etc/cron.d/runnersidekick : hourly Garmin sync and report regeneration (as root).
 # flock skips a run if the previous one is still going; the sync engine backs off on rate limits and stops on auth failure.
 SHELL=/bin/sh
-17 * * * * root cd /var/www/RunnerSidekick/backend && RSK_SOURCE=garmin RSK_DATA_DIR=/var/www/RunnerSidekick/data flock -n /var/www/RunnerSidekick/data/sync.lock /var/www/RunnerSidekick/backend/.venv/bin/python -m sidekick sync >> /var/log/runnersidekick-sync.log 2>&1
+17 * * * * root cd /var/www/RunnerSidekick/backend && flock -n /var/www/RunnerSidekick/data/sync.lock .venv/bin/python -m sidekick sync >> /var/log/runnersidekick-sync.log 2>&1
