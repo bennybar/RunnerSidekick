@@ -44,6 +44,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - New launcher icon (concept A) with a themed layer and a notification glyph.
 - Backend defaults hard-coded: data in `<repo>/data`, source Garmin. No env setup needed.
 
+## Analysis additions (2026-10-01)
+- Grade-adjusted pace; drift on GAP with 20-min segments (eligible runs 8 → 11 of 31 on live data); best efforts and
+  PRs; run story; more specific next focus; easy pace (measured / unknown / estimated); Garmin fitness card (VO₂ max,
+  race predictions, training status, load vs Garmin range, load balance, heat acclimation) with an agreement note.
+
 ## Blockers
 - None blocking. Live Garmin sync demonstrated 2026-10-01: 90-day backfill, 31 runs, 53 days of wellness data (audit in docs/data-audit.md, generated locally and not committed).
 
@@ -54,7 +59,18 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
    TalkBack walkthrough not done (200 % font and dark mode checked).
 3. Multi-user (see roadmap below).
 
-## Roadmap: multi-user (after Phase 4, not started)
+## Multi-user phase (in progress, 2026-10-01)
+- Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
+  `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only
+  `POST /v1/auth/google` (Google ID token verified with `google-auth`). Garmin OAuth 2.0 PKCE start/callback/refresh/
+  disconnect per Garmin's spec. Account deletion deregisters from Garmin. CLI: `invite`, `users`, `set-owner-email`,
+  `--user`. 18 new tests, including cross-user isolation.
+- Done (app): Google Sign-In screen (Credential Manager), device-token fallback, Account and Garmin sections in Settings.
+- Waiting on the user: Google Cloud Web client ID; Garmin developer program approval.
+- Not built yet: official Garmin data import (push/ping webhooks; partner docs needed after approval), per-user sync
+  budgets beyond the hourly cron, privacy policy/consent screen.
+
+## Roadmap: multi-user (original notes)
 - Goal: other people sign in with Garmin and the backend issues their app token automatically.
 - Use the **Garmin Connect Developer Program OAuth** (official; needs business approval, so apply early). Don't collect
   Garmin passwords via the unofficial library for other users: security liability, terms, and IP-level blocking.

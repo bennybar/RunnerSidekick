@@ -19,6 +19,8 @@ android {
         versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"\"")
     }
 
     // Release signing comes from ~/.gradle/gradle.properties (never the repo). Without it, release builds stay unsigned.
@@ -78,6 +80,10 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
     implementation(libs.androidx.graphics.shapes)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play)
+    implementation(libs.googleid)
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

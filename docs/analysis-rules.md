@@ -113,3 +113,38 @@ Covers a completed Monday–Sunday week in local time.
 Daily values are shown as measured; missing days are null, never zero. The band is the same 28-day personal range as
 the morning report, restarted at watch changes. The period summary compares medians with the previous period of
 equal length, and only when each has ≥ max(3, days/3) measured days. "Notable" uses the same thresholds as baselines.
+
+## Grade-adjusted pace, best efforts, run story — `running.py` (`running-1.2`)
+
+- **Grade-adjusted pace (GAP).** Uses the Minetti et al. (2002) energy-cost polynomial
+  `C(i) = 155.4i⁵ − 30.4i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6` (J/kg/m, i = gradient). Gradient is measured over about
+  50 m of distance and clamped to ±30 %. GAP speed = speed × C(i)/C(0). It's used for split "flat-equivalent" pace,
+  for steady/variable classification, and for drift.
+- **Drift** now uses GAP, needs a ≥ 20 min steady segment (20–30 min is flagged "short"), and excludes only runs
+  above 40 m/km of climbing.
+- **"Variable" vs intervals:** intervals need rest/recovery laps or a 1-min speed CV above 0.15. A run that's merely
+  uneven (CV between 0.08 and 0.15) isn't called an interval session.
+- **Best efforts:** the fastest continuous 1 km / 5 km / 10 km / half segment inside a run, by elapsed time, with
+  boundaries interpolated. A sample gap over 30 s invalidates a segment. "New best" means faster than every earlier
+  synced run.
+- **Run story:** deterministic sentences from complete splits: fastest and slowest km, fade (> 5 s/km between
+  halves), the km from which HR stayed in zone ≥ 4, cadence change (≥ 4 spm), and the most uphill km (pace minus GAP
+  > 8 s/km).
+- **Next focus** (first match wins): intervals → compare efforts; drift > 5 % → see if it repeats; fade > 8 s/km →
+  start about 10 s/km slower; ≥ 80 % of splits in zone ≥ 4 → "if meant to be easy, it wasn't"; uneven → steadier
+  effort enables comparisons; otherwise keep building comparable runs.
+
+## Easy pace — `insights.py` (`insights-1.1`)
+
+This is the pace below the zone-3 floor (top of zone 2), on the current watch, over the last 6 weeks, with the first
+10 min of each run excluded. It's **measured** if there are at least 10 minutes of such running. If 90 % of minutes
+are more than 10 bpm above zone 2, the app says it's **unknown** and explains how to measure it. Otherwise it's
+**estimated** with a Theil–Sen pace–HR line (interquartile range of residuals as the band), labelled as an estimate.
+
+## Garmin fitness
+
+VO₂ max, race predictions, training status, acute load vs Garmin's chronic range, load-balance feedback and heat
+acclimation are shown under Garmin's names, as supplied. Garmin's acute:chronic ratio is deliberately not shown or
+used. When Garmin's status (Overreaching/Strained/Unproductive) or low-aerobic shortage coincides with our "mostly
+hard" insight, the app says they agree. It also notes they come from the same runs, so the agreement isn't
+independent confirmation.

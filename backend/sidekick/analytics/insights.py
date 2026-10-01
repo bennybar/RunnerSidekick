@@ -19,7 +19,7 @@ from statistics import mean, median, pstdev
 from ..connectors.base import Samples
 from . import running as rn
 
-INSIGHTS_VERSION = "insights-1.0"
+INSIGHTS_VERSION = "insights-1.1"  # 1.1: easy pace
 MIN_RUNS = 8
 MIN_NIGHTS = 8
 EVENING_HOUR = 18
@@ -366,8 +366,93 @@ def durability(drifts: list[tuple[str, str, float]]) -> dict:
 
 def compute_all(runs: list[RunData], obs: dict, bedtimes: dict, zones: dict | None, drifts: list, today: date) -> list[dict]:
     order = [
-        intensity_distribution(runs, zones), efficiency_trend(runs), pacing_pattern(runs),
+        intensity_distribution(runs, zones), easy_pace(runs, zones, today), efficiency_trend(runs), pacing_pattern(runs),
         evening_runs_sleep(runs, obs, bedtimes), recovery_after_load(runs, obs), consistency(runs, today), durability(drifts),
     ]
     rank = {"pattern": 0, "no_clear_pattern": 1, "not_enough_data": 2}
     return sorted(order, key=lambda i: rank[i["verdict"]])
+
+
+# ---------------------------------------------------------------- your easy pace
+
+def easy_pace(runs: list[RunData], zones: dict | None, today: date) -> dict:
+    """Pace that corresponds to easy running (Garmin zones 1–2, i.e. below the zone-3 floor) on the current watch.
+    Measured from samples when there's enough easy running; otherwise estimated from the pace–HR relationship of
+    1-minute blocks (robust Theil–Sen fit), clearly labelled as an estimate with a range."""
+    q = "What is easy pace for you?"
+    if not zones or not zones.get("floors"):
+        return insight("easy_pace", q, "training", "not_enough_data", "Heart-rate zones not available", "", method="pace in zones 1–2")
+    ceiling = zones["floors"][2]
+    cutoff = (today - timedelta(days=42)).isoformat()
+    recent = [r for r in runs if r.local_date >= cutoff and r.samples]
+    if not recent:
+        return insight("easy_pace", q, "training", "not_enough_data", "No recent runs with heart rate", "", method="pace in zones 1–2")
+    device = recent[-1].device
+    recent = [r for r in recent if r.device == device]
+    easy_t = easy_d = 0.0
+    blocks: list[tuple[float, float]] = []  # (hr, speed) per minute of moving time, after the first 10 minutes
+    for r in recent:
+        w = rn._weights(r.samples)
+        mv = acc_t = acc_h = acc_s = 0.0
+        for i, wi in enumerate(w):
+            h, sp = r.samples.hr[i], r.samples.speed[i]
+            if wi <= 0 or h is None or not 60 <= h <= 220:
+                continue
+            mv += wi
+            if mv < 600:
+                continue
+            if h < ceiling:
+                easy_t += wi
+                easy_d += wi * sp
+            acc_t += wi; acc_h += wi * h; acc_s += wi * sp
+            if acc_t >= 60:
+                blocks.append((acc_h / acc_t, acc_s / acc_t))
+                acc_t = acc_h = acc_s = 0.0
+    method = (f"Pace while heart rate was below {ceiling} bpm (top of your zone 2), last 6 weeks, current watch, "
+              "first 10 min of each run excluded.")
+    conf = ["Heat, hills and fatigue change the pace that feels easy.", f"Zones are Garmin's ({zones.get('method')}, max HR {zones.get('max_hr')})."]
+    if easy_t >= 600:
+        pace = easy_t / easy_d * 1000
+        return insight("easy_pace", q, "training", "pattern", f"Easy for you is about {fmt_pace(pace)}",
+                       f"Measured from {round(easy_t / 60)} minutes of running below {ceiling} bpm across {len(recent)} runs.",
+                       n=len(recent), effect={"pace_s_per_km": round(pace), "ceiling_bpm": ceiling, "measured": True},
+                       method=method, confounders=conf,
+                       practical=f"Keeping easy runs at or slower than {fmt_pace(pace)} keeps them in zone 2.")
+    if len(blocks) < 20:
+        return insight("easy_pace", q, "training", "not_enough_data", "Not enough recent running to estimate easy pace",
+                       f"Needs about 20 minutes of steady running data on this watch; have {len(blocks)}.", n=len(blocks), method=method)
+    xs = [h for h, _ in blocks]
+    lowest = sorted(xs)[len(xs) // 10]  # 10th percentile of minute-average HR
+    if lowest > ceiling + 10:
+        # Extrapolating this far below anything actually run would be guesswork, so say so and say how to measure it.
+        return insight("easy_pace", q, "training", "pattern", "You haven't run easy recently, so your easy pace is unknown",
+                       f"Almost all of your recent running was above {round(lowest)} bpm; your zone 2 ends at {ceiling} bpm. "
+                       f"Your pace barely changes across the heart rates you do run at, so it can't be extrapolated reliably.",
+                       n=len(recent), effect={"ceiling_bpm": ceiling, "p10_hr": round(lowest), "measured": False},
+                       method=method, confounders=conf,
+                       practical=f"To find it: one run by heart rate, keeping it below {ceiling} bpm for 30 minutes whatever the pace. "
+                                 "Walk breaks are fine. The app will then measure your easy pace from that run.")
+    slope = theil_sen([(h, sp) for h, sp in blocks])
+    if slope is None or slope <= 0:
+        return insight("easy_pace", q, "training", "no_clear_pattern", "Pace and heart rate don't line up clearly enough to estimate",
+                       "Your recent runs don't show a consistent pace–heart-rate relationship.", n=len(blocks), method=method)
+    intercept = median(sp - slope * h for h, sp in blocks)
+    target = ceiling - 3
+    resid = sorted(sp - (intercept + slope * h) for h, sp in blocks)
+    lo_sp = intercept + slope * target + resid[int(0.25 * (len(resid) - 1))]
+    hi_sp = intercept + slope * target + resid[int(0.75 * (len(resid) - 1))]
+    mid = intercept + slope * target
+    if mid <= 0.5 or lo_sp <= 0.3:
+        return insight("easy_pace", q, "training", "not_enough_data", "Easy pace can't be estimated reliably yet",
+                       "Your runs are too far above zone 2 to extrapolate.", n=len(blocks), method=method)
+    far = min(xs) - target
+    return insight("easy_pace", q, "training", "pattern",
+                   f"Easy for you is probably around {fmt_pace(1000 / mid)} (estimated)",
+                   f"You rarely run below {ceiling} bpm, so this is estimated from how your pace changes with heart rate "
+                   f"in {len(blocks)} minutes of recent running: likely between {fmt_pace(1000 / hi_sp)} and {fmt_pace(1000 / lo_sp)}.",
+                   n=len(blocks), effect={"pace_s_per_km": round(1000 / mid), "range_s_per_km": [round(1000 / hi_sp), round(1000 / lo_sp)],
+                                          "ceiling_bpm": ceiling, "measured": False, "extrapolated_bpm": round(far)},
+                   method=method + f" Estimated at {target} bpm from a robust pace–HR line, which extrapolates about {round(far)} bpm "
+                                   "below your easiest recorded minute.",
+                   confounders=conf + ["An estimate outside the range you actually ran: check it by running at that pace and watching your heart rate."],
+                   practical=f"Try an easy run at about {fmt_pace(1000 / mid)} and see whether heart rate settles below {ceiling} bpm.")

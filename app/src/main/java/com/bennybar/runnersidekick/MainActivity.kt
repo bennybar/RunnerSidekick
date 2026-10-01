@@ -44,7 +44,10 @@ import com.bennybar.runnersidekick.ui.insights.InsightsScreen
 import com.bennybar.runnersidekick.ui.journal.DayScreen
 import com.bennybar.runnersidekick.ui.journal.JournalScreen
 import com.bennybar.runnersidekick.ui.journal.ReportScreen
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bennybar.runnersidekick.ui.settings.SettingsScreen
+import com.bennybar.runnersidekick.ui.settings.SignInScreen
 import com.bennybar.runnersidekick.ui.theme.RunnerTheme
 import com.bennybar.runnersidekick.ui.today.TodayScreen
 
@@ -66,9 +69,20 @@ private val TABS = listOf(
     Tab("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun App() {
+    val repo = (LocalContext.current.applicationContext as RunnerApp).repository
+    val local by repo.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    when (local?.hasToken) {
+        null -> Unit                  // settings still loading: draw nothing for a frame rather than flash sign-in
+        false -> SignInScreen()
+        true -> MainNav()
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun MainNav() {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination

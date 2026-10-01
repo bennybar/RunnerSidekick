@@ -18,7 +18,7 @@ from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import utc_now
 
-REPORT_VERSION = "report-1.5"  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras; 1.5: sparkline while learning
+REPORT_VERSION = "report-1.8"  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -44,6 +44,12 @@ def fmt_delta(metric: str, d: float) -> str:
     if metric == "sleep_duration":
         return f"{sign}{fmt_duration(abs(d))}"
     return f"{sign}{abs(d):.0f} {'bpm' if metric == 'resting_hr' else 'ms'}"
+
+
+def fmt_duration_s(s: float) -> str:
+    s = int(round(s))
+    h, m, sec = s // 3600, (s % 3600) // 60, s % 60
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
 def fmt_pace(s_per_km: float) -> str:
@@ -323,9 +329,34 @@ def run_analysis(conn, a: dict) -> dict:
     if key not in _class_cache:
         laps = laps_for(conn, a["id"])
         s = samples_for(conn, a["id"])
-        _class_cache[key] = {"classification": rn.classify(s, laps),
-                             "decoupling": rn.decoupling(s, laps, a["distance_m"], a["elevation_gain_m"])}
+        dc = rn.decoupling(s, laps, a["distance_m"], a["elevation_gain_m"])
+        # One classification for the whole report: the grade-adjusted one the drift analysis used
+        _class_cache[key] = {"classification": dc["classification"], "decoupling": dc}
     return _class_cache[key]
+
+
+_effort_cache: dict[tuple[int, str], dict] = {}
+
+EFFORT_LABELS = {"1k": "1 km", "5k": "5 km", "10k": "10 km", "half": "half marathon"}
+
+
+def efforts_for(conn, a: dict) -> dict:
+    key = (a["id"], a["content_hash"])
+    if key not in _effort_cache:
+        _effort_cache[key] = rn.best_efforts(samples_for(conn, a["id"]))
+    return _effort_cache[key]
+
+
+def records(conn, source: str) -> dict:
+    """Best effort per distance across synced history, with the progression of bests over time."""
+    out: dict[str, dict] = {}
+    for a in activities(conn, source, "0000-01-01", "9999-12-31"):
+        for k, e in efforts_for(conn, a).items():
+            r = out.setdefault(k, {"label": EFFORT_LABELS[k], "best": None, "progression": []})
+            if r["best"] is None or e["elapsed_s"] < r["best"]["elapsed_s"]:
+                r["best"] = {**e, "date": a["local_date"], "source_id": a["source_id"]}
+                r["progression"].append({"date": a["local_date"], "elapsed_s": e["elapsed_s"], "source_id": a["source_id"]})
+    return out
 
 
 def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
@@ -403,6 +434,32 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             "limitations": ["Matched on distance (±20%), elevation gain per km (±8 m) and steady effort. Weather is not considered."],
             "algorithm_version": rn.RUNNING_VERSION, "derived": True,
         })
+    # Best efforts in this run, compared with every earlier run in synced history
+    mine = efforts_for(conn, a)
+    earlier = [x for x in activities(conn, source, "0000-01-01", a["local_date"]) if x["start_utc"] < a["start_utc"]]
+    best_efforts = {}
+    for k, e in mine.items():
+        prev = [efforts_for(conn, x)[k]["elapsed_s"] for x in earlier if k in efforts_for(conn, x)]
+        best_efforts[k] = {**e, "label": EFFORT_LABELS[k], "previous_best_s": min(prev) if prev else None,
+                           "is_best": bool(prev) and e["elapsed_s"] < min(prev), "compared_runs": len(prev)}
+    new_bests = [k for k, e in best_efforts.items() if e["is_best"]]
+    if new_bests:
+        k = max(new_bests, key=lambda x: rn.BEST_EFFORT_DISTANCES[x])
+        e = best_efforts[k]
+        findings.append({
+            "id": f"r:{sid}:best_{k}", "category": "running", "metric": "best_effort", "title": f"New best {e['label']}",
+            "observed": {"value": e["elapsed_s"], "unit": "s"}, "comparison": {"kind": "previous_best", "value": e["previous_best_s"], "n": e["compared_runs"]},
+            "delta": {"abs": round(e["elapsed_s"] - e["previous_best_s"], 1), "pct": None}, "status": "info", "priority": 0,
+            "statement": (f"Your fastest {e['label']} in synced history: {fmt_duration_s(e['elapsed_s'])}, "
+                          f"{abs(e['elapsed_s'] - e['previous_best_s']):.0f} s faster than your previous best."),
+            "interpretation": "Fastest continuous segment of this distance inside a run, by elapsed time.",
+            "evidence": {"record_ids": [sid], "date_range": [a["local_date"]] * 2}, "sample_size": e["compared_runs"] + 1, "coverage": None,
+            "limitations": ["Only runs synced to Runner Sidekick count; GPS distance has some error."],
+            "algorithm_version": rn.RUNNING_VERSION, "derived": True,
+        })
+    zones = get_setting(conn, "source_hr_zones", None)
+    details = rn.split_details(samples_for(conn, a["id"]), laps, zones["floors"] if zones else None)
+    story = rn.run_story(splits, details, fmt_pace)
     week_start = d - timedelta(days=d.weekday())
     week_acts = activities(conn, source, week_start.isoformat(), a["local_date"])
     rpe = conn.execute("SELECT rpe FROM activity_effort WHERE activity_source_id=?", (sid,)).fetchone()
@@ -417,20 +474,40 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                                         "elevation_loss_m", "avg_cadence_spm")},
         "pace_moving_s_per_km": pace, "pace_basis": "moving",
         "garmin_metrics": json.loads(a["garmin_metrics_json"]),
-        "splits": [rn.as_dict(s) for s in splits], "classification": an["classification"], "decoupling": dc,
+        "splits": [{**rn.as_dict(s), **{k: v for k, v in dt.items() if k != "idx"}}
+                   for s, dt in zip(splits, details or [{}] * len(splits))],
+        "story": story, "best_efforts": best_efforts,
+        "classification": an["classification"], "decoupling": dc,
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_start.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
-        "next_focus": next_focus(an, dc, comp), "narrative": None,
+        "next_focus": next_focus(an, dc, comp, splits, details), "narrative": None,
     }
-    inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS}
+    inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
+              "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 
-def next_focus(an: dict, dc: dict, comp: dict) -> str:
-    if an["classification"]["kind"] == "variable":
-        return "Variable-effort session: drift analysis does not apply. Compare repeated interval splits instead."
+def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None) -> str:
+    """One practical focus from this run, most specific first. No pace or HR prescriptions beyond the run's own numbers."""
+    full = [s for s in (splits or []) if s.complete and s.pace_s_per_km]
+    zones = [d.get("zone") for d in (details or []) if d.get("zone") is not None]
+    cls = an["classification"]
+    structured = "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15
+    if cls["kind"] == "variable" and structured:
+        return "Interval-style session: drift analysis doesn't apply. Compare the repeated efforts with each other instead."
     if dc.get("eligible") and dc["decoupling_pct"] > 5:
         return "See whether heart-rate drift repeats on your next comparable steady run before reading much into it."
+    if len(full) >= 4:
+        h = len(full) // 2
+        first = sum(s.pace_s_per_km for s in full[:h]) / h
+        fade = sum(s.pace_s_per_km for s in full[h:]) / (len(full) - h) - first
+        if fade > 8:
+            return (f"You faded by about {fade:.0f} s/km. Next time, try starting about 10 s/km slower than {fmt_pace(first)} "
+                    "and see if the second half holds.")
+    if zones and sum(1 for z in zones if z >= 4) >= 0.8 * len(zones):
+        return "Almost the whole run was in zone 4 or higher. If it was meant to be easy, it wasn't; if it was a hard run, that fits."
+    if cls["kind"] == "variable":
+        return "Pace was uneven enough that drift and similar-run comparisons were skipped. A steadier effort makes them possible."
     if comp.get("n", 0) < 3:
         return "A few more similar runs will make comparisons meaningful."
     return "Nothing stands out. Keep building consistent, comparable runs."

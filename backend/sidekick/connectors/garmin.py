@@ -188,6 +188,39 @@ def normalise_weight(d: str, p: dict | None) -> list[Observation]:
     return [obs(d, "weight", grams / 1000.0 if grams is not None else None, method="garmin_weigh_in")]
 
 
+def normalise_fitness(race: dict, ts: dict) -> dict:
+    out: dict = {"source": "garmin"}
+    if race and any(race.get(k) for k in ("time5K", "time10K", "timeHalfMarathon", "timeMarathon")):
+        out["race_predictions"] = {"date": race.get("calendarDate"), "5k": race.get("time5K"), "10k": race.get("time10K"),
+                                   "half": race.get("timeHalfMarathon"), "marathon": race.get("timeMarathon")}
+    vo2 = ((ts.get("mostRecentVO2Max") or {}).get("generic") or {})
+    if vo2.get("vo2MaxPreciseValue") or vo2.get("vo2MaxValue"):
+        out["vo2max"] = {"value": vo2.get("vo2MaxPreciseValue") or vo2.get("vo2MaxValue"), "date": vo2.get("calendarDate"),
+                         "fitness_age": vo2.get("fitnessAge")}
+    heat = (ts.get("mostRecentVO2Max") or {}).get("heatAltitudeAcclimation") or {}
+    if heat.get("heatAcclimationPercentage") is not None:
+        out["heat_acclimation_pct"] = heat.get("heatAcclimationPercentage")
+    status_map = ((ts.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData") or {})
+    st = next((v for v in status_map.values() if v.get("primaryTrainingDevice")), None) or next(iter(status_map.values()), None)
+    if st:
+        acute = st.get("acuteTrainingLoadDTO") or {}
+        out["training_status"] = {
+            "phrase": st.get("trainingStatusFeedbackPhrase"), "date": st.get("calendarDate"), "since": st.get("sinceDate"),
+            "paused": st.get("trainingPaused"),
+            # Garmin's acute load and its own chronic "optimal" range. The acute:chronic ratio is deliberately not shown.
+            "acute_load": acute.get("dailyTrainingLoadAcute"),
+            "chronic_min": acute.get("minTrainingLoadChronic"), "chronic_max": acute.get("maxTrainingLoadChronic"),
+        }
+    lb_map = ((ts.get("mostRecentTrainingLoadBalance") or {}).get("metricsTrainingLoadBalanceDTOMap") or {})
+    lb = next((v for v in lb_map.values() if v.get("primaryTrainingDevice")), None) or next(iter(lb_map.values()), None)
+    if lb:
+        out["load_balance"] = {k: lb.get(k) for k in ("trainingBalanceFeedbackPhrase", "monthlyLoadAerobicLow", "monthlyLoadAerobicHigh",
+                                                     "monthlyLoadAnaerobic", "monthlyLoadAerobicLowTargetMin", "monthlyLoadAerobicLowTargetMax",
+                                                     "monthlyLoadAerobicHighTargetMin", "monthlyLoadAerobicHighTargetMax",
+                                                     "monthlyLoadAnaerobicTargetMin", "monthlyLoadAnaerobicTargetMax")}
+    return out
+
+
 # ---------------------------------------------------------------- activity normalisation
 
 def summarise_activity(a: dict) -> dict:
@@ -373,6 +406,13 @@ class GarminConnector:
             return None
         return {"floors": floors, "method": prof.get("trainingMethod"), "max_hr": prof.get("maxHeartRateUsed"),
                 "lthr": prof.get("lactateThresholdHeartRateUsed"), "profile": prof.get("sport"), "source": "garmin"}
+
+    def fitness_snapshot(self, day: date) -> dict | None:
+        """Garmin's own fitness numbers, kept under Garmin's names: race predictions, VO2 max, training status,
+        acute load vs Garmin's chronic range, load-balance feedback and heat acclimation."""
+        rp_ = self._call("get_race_predictions") or {}
+        ts = self._call("get_training_status", day.isoformat()) or {}
+        return normalise_fitness(rp_, ts)
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []

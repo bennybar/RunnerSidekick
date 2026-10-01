@@ -53,6 +53,32 @@ cd /var/www/RunnerSidekick/backend && .venv/bin/python -m sidekick create-token 
 
 It prints a line starting with `rsk_`. Paste that into the app under Settings → Connection → Device token.
 
+## Users and sign-in
+
+The first time the new version starts, it moves the single-user data into `data/users/1/` and makes that the owner
+account. Existing tokens keep working.
+
+```sh
+cd /var/www/RunnerSidekick/backend
+./.venv/bin/python -m sidekick set-owner-email you@gmail.com   # lets you sign in with Google too
+./.venv/bin/python -m sidekick invite add friend@gmail.com     # invite-only: who may sign in with Google
+./.venv/bin/python -m sidekick invite list
+./.venv/bin/python -m sidekick users
+```
+
+Google sign-in needs the Web OAuth client ID set in `backend/sidekick/config.py` (`GOOGLE_WEB_CLIENT_ID`) and in
+`app/build.gradle.kts` (`GOOGLE_WEB_CLIENT_ID`).
+
+Server secrets go in `data/secrets.json` (gitignored, mode 0600). Every key is optional:
+
+```json
+{"garmin_client_id": "...", "garmin_client_secret": "...", "openai_api_key": "..."}
+```
+
+Garmin's official sign-in for members turns on once `garmin_client_id` and `garmin_client_secret` are present (from
+the Garmin Connect Developer Program). Register `https://runnersidekick.ibarak.org/v1/garmin/oauth/callback` as its
+redirect URI. Data import via Garmin's official API comes after approval.
+
 ## Hourly sync (cron)
 
 ```sh

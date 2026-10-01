@@ -134,7 +134,7 @@ def test_hr_dropout_makes_run_ineligible():
 
 
 def test_hilly_run_not_eligible():
-    r = rn.decoupling(steady_samples(150.0, 150.0), [], 10000.0, 200.0)  # 20 m/km
+    r = rn.decoupling(steady_samples(150.0, 150.0), [], 10000.0, 500.0)  # 50 m/km
     assert not r["eligible"] and any("hilly" in x for x in r["reasons"])
 
 
@@ -186,3 +186,70 @@ def test_two_independent_signals_suggest_easier():
 
 def test_no_data_is_insufficient():
     assert recommend({}, None, False, False)["state"] == "insufficient_data"
+
+
+# ---------------------------------------------------------------- grade-adjusted pace, best efforts, story
+
+def test_minetti_polynomial_shape():
+    # Minetti 2002 polynomial: 3.6 J/kg/m on the flat, cheapest around -20%, rising steeply uphill
+    assert rn.minetti_cost(0.0) == pytest.approx(3.6)
+    assert min(rn.minetti_cost(g / 100) for g in range(-30, 31)) == pytest.approx(rn.minetti_cost(-0.2), abs=0.05)
+    assert rn.minetti_cost(0.1) < rn.minetti_cost(0.2) < rn.minetti_cost(0.3)
+    assert rn.minetti_cost(0.2) == pytest.approx(9.007, abs=0.01)  # hand-evaluated from the published coefficients
+
+
+def test_gap_is_faster_uphill_and_unchanged_on_flat():
+    t = [float(x) for x in range(0, 601, 5)]
+    flat = Samples(t, [150.0] * len(t), [3.0] * len(t), [3.0 * x for x in t], [10.0] * len(t), [170.0] * len(t))
+    assert all(v == pytest.approx(3.0) for v in rn.gap_speeds(flat))
+    hill = Samples(t, [150.0] * len(t), [2.5] * len(t), [2.5 * x for x in t], [0.1 * 2.5 * x for x in t], [170.0] * len(t))  # +10%
+    g = [v for v in rn.gap_speeds(hill)[20:] if v is not None]
+    assert g and all(v == pytest.approx(2.5 * rn.minetti_cost(0.1) / 3.6, rel=1e-3) for v in g)
+
+
+def test_drift_on_a_hill_uses_grade_adjusted_speed():
+    # Steady effort: slower up the hill in the second half, but grade-adjusted speed and HR constant -> no drift
+    t = [float(x) for x in range(0, 4201, 5)]
+    grade = [0.0 if x < 2400 else 0.05 for x in t]
+    speed = [3.0 if g == 0 else 3.0 * 3.6 / rn.minetti_cost(0.05) for g in grade]
+    dist, elev = [0.0], [0.0]
+    for k in range(1, len(t)):
+        dist.append(dist[-1] + speed[k - 1] * 5)
+        elev.append(elev[-1] + speed[k - 1] * 5 * grade[k - 1])
+    s = Samples(t, [150.0] * len(t), speed, dist, elev, [170.0] * len(t))
+    r = rn.decoupling(s, [], dist[-1], elev[-1])
+    assert r["eligible"] and r["grade_adjusted"] and abs(r["decoupling_pct"]) < 0.5
+
+
+def test_short_steady_segment_is_flagged():
+    r = rn.decoupling(steady_samples(150.0, 152.0, total=1800), [], 5400.0, 10.0)  # 30 min run -> 20 min segment
+    assert r["eligible"] and r["short_segment"]
+
+
+def test_best_efforts_hand_calculated():
+    # 0–2 km at 5:00/km, then 3 km at 4:00/km: fastest 1 km = 240 s, fastest 5 km = 2*300 + 3*240 = 1320 s
+    t, d, x, dist = [], [], 0.0, 0.0
+    while dist < 5000:
+        sp = 1000 / 300 if dist < 2000 else 1000 / 240
+        t.append(x); d.append(dist); x += 1; dist += sp
+    t.append(x); d.append(dist)
+    s = Samples(t, [150.0] * len(t), [3.0] * len(t), d, [0.0] * len(t), [170.0] * len(t))
+    b = rn.best_efforts(s)
+    assert b["1k"]["elapsed_s"] == pytest.approx(240, abs=1.5)
+    assert b["5k"]["elapsed_s"] == pytest.approx(1320, abs=2)
+    assert "10k" not in b
+
+
+def test_run_story_mentions_fade_and_fastest_km():
+    splits = [rn.Split(k, 1000.0, 300 + 8 * k, 300 + 8 * k, 160.0, 0.0, 300.0 + 8 * k, True) for k in range(6)]
+    story = rn.run_story(splits, [{"zone": 4, "cadence_spm": 172 - k} for k in range(6)], lambda p: f"{int(p)}")
+    assert any("Fastest km was #1" in x for x in story) and any("faded" in x for x in story)
+
+
+def test_next_focus_does_not_call_an_uneven_run_intervals():
+    from sidekick.reports import next_focus
+    uneven = {"classification": {"kind": "variable", "reason": "1-min speed CV 0.081", "speed_cv": 0.081}}
+    intervals = {"classification": {"kind": "variable", "reason": "source laps include rest/recovery laps"}}
+    splits = [rn.Split(k, 1000.0, 300 + 6 * k, 300 + 6 * k, 160.0, 0.0, 300.0 + 6 * k, True) for k in range(6)]
+    assert "faded" in next_focus(uneven, {"eligible": False}, {}, splits, [])
+    assert "Interval" in next_focus(intervals, {"eligible": False}, {}, splits, [])

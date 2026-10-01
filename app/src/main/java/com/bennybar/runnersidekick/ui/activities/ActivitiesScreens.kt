@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Speed
@@ -206,6 +207,35 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
             }
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
+                if (r.story.isNotEmpty()) item {
+                    Group(title = "How the run went") {
+                        custom {
+                            r.story.forEach { line ->
+                                Row(Modifier.padding(vertical = 4.dp)) {
+                                    Text("•", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(line, style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+                }
+                val efforts = listOf("1k", "5k", "10k", "half").mapNotNull { r.bestEfforts[it] }
+                if (efforts.isNotEmpty()) item {
+                    Group(title = "Best efforts in this run") {
+                        efforts.forEach { e ->
+                            row("${e.label}: ${Format.duration(e.elapsedS)}",
+                                supporting = Format.pace(e.paceSPerKm, units) + (e.previousBestS?.let { " · your previous best ${Format.duration(it)}" } ?: " · first one recorded"),
+                                icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny,
+                                trailing = if (e.isBest) ({
+                                    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.tertiaryContainer) {
+                                        Text("New best", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                                    }
+                                }) else null)
+                        }
+                    }
+                }
                 detail?.value?.chart?.let { c ->
                     item {
                         val colors = LocalDataColors.current
@@ -325,7 +355,7 @@ private fun Splits(r: PostRunReport, units: Units) {
     Group(title = "Splits") {
         custom {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                listOf("#", "Distance", "Pace", "HR", "Climb").forEachIndexed { i, h ->
+                listOf("#", "Pace", "Flat-equiv.", "HR", "Zone", "Climb").forEachIndexed { i, h ->
                     Text(h, Modifier.weight(if (i == 0) 0.5f else 1f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -333,12 +363,16 @@ private fun Splits(r: PostRunReport, units: Units) {
             r.splits.forEach { s ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${s.idx + 1}", Modifier.weight(0.5f), style = MaterialTheme.typography.bodyMedium)
-                    Text(Format.distance(s.distanceM, units), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Text(Format.pace(s.paceSPerKm, units) + if (!s.complete) "*" else "", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text(Format.pace(s.paceSPerKm, units).substringBefore(" ") + if (!s.complete) "*" else "", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text(Format.pace(s.gapPaceSPerKm, units).substringBefore(" "), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(s.avgHr?.roundToInt()?.toString() ?: "—", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(s.zone?.takeIf { it > 0 }?.let { "Z$it" } ?: "—", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Text("+${Format.elevation(s.elevationGainM, units)}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
+            Text("Flat-equivalent = grade-adjusted pace (Minetti energy-cost model): what the effort would give on flat ground.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             if (r.splits.any { !it.complete }) Text("* Partial split, left out of split comparisons", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(2.dp))

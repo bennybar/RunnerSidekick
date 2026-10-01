@@ -66,6 +66,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     val todayCheckin = repo.status.flatMapLatest { s -> s?.let { repo.checkinFor(it.value.today) } ?: flowOf(null) }.state(null)
 
     val insights = repo.insights.state(null)
+    val fitness = repo.fitness.state(null)
 
     init { refresh() }
 
@@ -90,6 +91,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 class InsightsVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
     val weekly = repo.weekly.state(null)
+    val fitness = repo.fitness.state(null)
     private val _days = MutableStateFlow(28)
     val days: StateFlow<Int> = _days.asStateFlow()
 
@@ -97,7 +99,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
 
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshTrends(_days.value) }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); repo.refreshTrends(_days.value) }
     fun setDays(d: Int) { _days.value = d; launchIo { repo.refreshTrends(d) } }
 }
 

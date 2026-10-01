@@ -37,6 +37,24 @@ class Config:
 REPO_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_DIR / "data"
 
+# Google Sign-In: the *Web* OAuth client ID from Google Cloud (not a secret). Android sign-in requests ID tokens for it.
+GOOGLE_WEB_CLIENT_ID = ""  # filled in once the Google Cloud OAuth client exists
+
+PUBLIC_BASE_URL = "https://runnersidekick.ibarak.org"
+GARMIN_REDIRECT_URI = f"{PUBLIC_BASE_URL}/v1/garmin/oauth/callback"
+
+
+def secrets(data_dir: Path) -> dict:
+    """Server-only secrets from <data>/secrets.json (gitignored), e.g.
+    {"garmin_client_id": "...", "garmin_client_secret": "...", "openai_api_key": "..."}. Missing file = none."""
+    import json
+
+    p = data_dir / "secrets.json"
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return {}
+
 
 def load_config() -> Config:
     source = os.getenv("RSK_SOURCE", SOURCE_GARMIN)

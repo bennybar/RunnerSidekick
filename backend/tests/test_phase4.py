@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
@@ -77,3 +78,29 @@ def test_revisions_endpoint_lists_history(tmp_path):
     for d in (7, 28, 90):  # valid ranges arrive as query strings and must be accepted
         r = client.get("/v1/trends", params={"days": d}, headers=h)
         assert r.status_code == 200 and len(r.json()["metrics"][0]["points"]) == d
+
+
+def test_garmin_fitness_normalisation_keeps_garmin_names_and_skips_acwr():
+    from sidekick.connectors.garmin import normalise_fitness
+    race = {"calendarDate": "2026-10-01", "time5K": 1500, "time10K": 3150, "timeHalfMarathon": 7000, "timeMarathon": 15000}
+    ts = {"mostRecentVO2Max": {"generic": {"calendarDate": "2026-09-30", "vo2MaxPreciseValue": 48.6}},
+          "mostRecentTrainingStatus": {"latestTrainingStatusData": {"1": {
+              "primaryTrainingDevice": True, "trainingStatusFeedbackPhrase": "PRODUCTIVE_1", "calendarDate": "2026-10-01",
+              "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 400, "minTrainingLoadChronic": 300.0, "maxTrainingLoadChronic": 500.0,
+                                       "dailyAcuteChronicWorkloadRatio": 1.3, "acwrStatus": "OPTIMAL"}}}}}
+    f = normalise_fitness(race, ts)
+    assert f["race_predictions"]["5k"] == 1500 and f["vo2max"]["value"] == 48.6
+    assert f["training_status"]["phrase"] == "PRODUCTIVE_1" and f["training_status"]["acute_load"] == 400
+    assert "acwr" not in json.dumps(f).lower()  # the load ratio is deliberately not carried
+
+
+def test_records_and_new_best_flag(tmp_path):
+    from sidekick import reports as rp
+    conn = synced(tmp_path)
+    rec = rp.records(conn, "fixture")
+    assert rec["1k"]["best"]["elapsed_s"] > 0 and rec["1k"]["progression"][0]["date"] <= rec["1k"]["best"]["date"]
+    best_run = rec["1k"]["best"]["source_id"]
+    r = rp.build_post_run(conn, "fixture", best_run, True)
+    first_ever = rec["1k"]["progression"][0]["source_id"] == best_run
+    assert r["best_efforts"]["1k"]["is_best"] is (not first_ever)
+    assert r["story"] and "gap_pace_s_per_km" in r["splits"][0]

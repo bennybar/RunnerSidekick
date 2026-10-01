@@ -95,6 +95,7 @@ fun InsightsScreen(
 ) {
     val data by vm.insights.collectAsStateWithLifecycle()
     val weekly by vm.weekly.collectAsStateWithLifecycle()
+    val fitness by vm.fitness.collectAsStateWithLifecycle()
     val trends by vm.trends.collectAsStateWithLifecycle()
     val days by vm.days.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -122,6 +123,9 @@ fun InsightsScreen(
                             onDays = vm::setDays, onOpenDay = onOpenDay, onOpenRun = onOpenRun)
                     }
                     return@LazyColumn
+                }
+                fitness?.value?.let { f ->
+                    item { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun) }
                 }
                 weekly?.value?.let { w -> item { WeeklyCard(w) { onOpenReport(w.id) } } }
                 item {

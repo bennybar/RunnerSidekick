@@ -101,6 +101,13 @@ def run_sync(conn: sqlite3.Connection, connector: Connector, today: date, backfi
     try:
         _sync_days(conn, connector, today, target, refetch_days, max_backfill_days, res)
         _sync_activities(conn, connector, today, target, refetch_days, max_activity_details, res)
+        if hasattr(connector, "fitness_snapshot"):
+            snap = connector.fitness_snapshot(today)
+            if snap:
+                snap["fetched_at"] = utc_now()
+                with conn:
+                    conn.execute("INSERT INTO user_settings VALUES ('garmin_fitness', ?) ON CONFLICT (key) DO UPDATE SET value_json=excluded.value_json",
+                                 (json.dumps(snap),))
         if hasattr(connector, "hr_zones"):
             zones = connector.hr_zones()
             if zones:

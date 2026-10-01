@@ -16,7 +16,11 @@ data class Status(
     @SerialName("latest_activity_start") val latestActivityStart: String? = null,
     @SerialName("sync_running") val syncRunning: Boolean = false,
     val backfill: Backfill? = null,
+    @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
 )
+
+@Serializable
+data class GarminOfficial(val available: Boolean = false, val connected: Boolean = false, @SerialName("data_import") val dataImport: String? = null)
 
 @Serializable
 data class Connection(
@@ -193,6 +197,18 @@ data class Split(
     @SerialName("elevation_gain_m") val elevationGainM: Double? = null,
     @SerialName("pace_s_per_km") val paceSPerKm: Double? = null,
     val complete: Boolean,
+    @SerialName("gap_pace_s_per_km") val gapPaceSPerKm: Double? = null,
+    @SerialName("cadence_spm") val cadenceSpm: Double? = null,
+    val zone: Int? = null,
+)
+
+@Serializable
+data class BestEffort(
+    val label: String,
+    @SerialName("elapsed_s") val elapsedS: Double,
+    @SerialName("pace_s_per_km") val paceSPerKm: Double,
+    @SerialName("previous_best_s") val previousBestS: Double? = null,
+    @SerialName("is_best") val isBest: Boolean = false,
 )
 
 @Serializable
@@ -245,6 +261,8 @@ data class PostRunReport(
     val effort: Effort? = null,
     @SerialName("next_focus") val nextFocus: String,
     val narrative: Narrative? = null,
+    val story: List<String> = emptyList(),
+    @SerialName("best_efforts") val bestEfforts: Map<String, BestEffort> = emptyMap(),
 )
 
 @Serializable
@@ -408,3 +426,54 @@ data class WeeklyReport(
 
 @Serializable
 data class RevisionInfo(val id: Long, val revision: Int, @SerialName("generated_at") val generatedAt: String, @SerialName("data_cutoff") val dataCutoff: String? = null)
+
+@Serializable
+data class RacePredictions(val date: String? = null, @SerialName("5k") val k5: Double? = null, @SerialName("10k") val k10: Double? = null,
+                           val half: Double? = null, val marathon: Double? = null)
+
+@Serializable
+data class Vo2(val value: Double, val date: String? = null)
+
+@Serializable
+data class TrainingStatus(
+    val phrase: String? = null, val date: String? = null, val since: String? = null, val paused: Boolean? = null,
+    @SerialName("acute_load") val acuteLoad: Double? = null, @SerialName("chronic_min") val chronicMin: Double? = null,
+    @SerialName("chronic_max") val chronicMax: Double? = null,
+)
+
+@Serializable
+data class LoadBalance(@SerialName("trainingBalanceFeedbackPhrase") val phrase: String? = null)
+
+@Serializable
+data class GarminFitness(
+    @SerialName("race_predictions") val racePredictions: RacePredictions? = null,
+    val vo2max: Vo2? = null,
+    @SerialName("training_status") val trainingStatus: TrainingStatus? = null,
+    @SerialName("load_balance") val loadBalance: LoadBalance? = null,
+    @SerialName("heat_acclimation_pct") val heatAcclimationPct: Double? = null,
+    @SerialName("fetched_at") val fetchedAt: String? = null,
+)
+
+@Serializable
+data class RecordBest(@SerialName("elapsed_s") val elapsedS: Double, val date: String, @SerialName("source_id") val sourceId: String)
+
+@Serializable
+data class RecordEntry(val label: String, val best: RecordBest? = null, val progression: List<RecordBest> = emptyList())
+
+@Serializable
+data class Fitness(
+    val garmin: GarminFitness? = null,
+    @SerialName("vo2max_series") val vo2maxSeries: List<Point> = emptyList(),
+    val records: Map<String, RecordEntry> = emptyMap(),
+    @SerialName("easy_pace") val easyPace: Insight? = null,
+    val synthetic: Boolean = false,
+)
+
+@Serializable
+data class Me(val id: Long, val email: String? = null, val name: String? = null, val role: String)
+
+@Serializable
+data class AuthResult(val token: String, val user: Me)
+
+@Serializable
+data class GoogleSignInBody(@SerialName("id_token") val idToken: String, @SerialName("device_name") val deviceName: String)

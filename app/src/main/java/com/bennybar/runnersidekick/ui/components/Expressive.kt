@@ -119,9 +119,10 @@ fun ShapeBadge(
     modifier: Modifier = Modifier,
     container: Color = MaterialTheme.colorScheme.primaryContainer,
     content: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    iconSize: androidx.compose.ui.unit.Dp = 22.dp,
 ) {
     Surface(shape = polygon.toShape(), color = container, modifier = modifier) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = content, modifier = Modifier.size(22.dp)) }
+        Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = content, modifier = Modifier.size(iconSize)) }
     }
 }
 

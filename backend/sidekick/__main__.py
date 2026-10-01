@@ -2,9 +2,13 @@
 
   garmin-login           interactive Garmin login (hidden password prompt); stores tokens, never the password
   garmin-logout          delete stored Garmin tokens
-  create-token NAME      create a device token for the Android app (printed once)
+  create-token NAME      create an app token (printed once). Users who sign in with Google get theirs automatically
   revoke-token NAME
-  sync [--loop]          run a sync (+ report regeneration); --loop repeats until the backfill is complete
+  sync [--loop]          sync every connected user (+ report regeneration); --loop repeats until backfill completes
+  invite add|remove|list EMAIL   invite-only access: who may sign in with Google
+  users                  list accounts
+  set-owner-email EMAIL  let the owner sign in with Google as this address
+  (most commands take --user ID; the default is the owner)
   rebuild-reports        regenerate reports after an algorithm change (new revisions; old ones kept)
   audit [--out PATH]     field-coverage audit of stored data (no values, no credentials)
   serve [--host --port]  run the API (default 127.0.0.1:8765)
@@ -26,6 +30,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import reports as rp
+from dataclasses import replace
+
+from . import accounts
 from .auth import create_token, revoke_token
 from .config import SOURCE_FIXTURE, SOURCE_GARMIN, load_config
 from .connectors.fixture import FixtureConnector
@@ -153,45 +160,81 @@ def cmd_audit(cfg, out: str | None) -> int:
     return 0
 
 
+def user_cfg(cfg, user_id: int | None):
+    """Config pointed at one user's data folder (the owner when user_id is None)."""
+    a = accounts.app_db(cfg.data_dir)
+    try:
+        uid = user_id if user_id is not None else accounts.ensure_owner(a)["id"]
+    finally:
+        a.close()
+    return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, uid)), uid
+
+
+def cmd_sync_all(cfg, loop: bool, only_user: int | None) -> int:
+    a = accounts.app_db(cfg.data_dir)
+    try:
+        users = [u["id"] for u in accounts.list_users(a)] if only_user is None else [only_user]
+    finally:
+        a.close()
+    worst = 0
+    for uid in users:
+        ucfg, _ = user_cfg(cfg, uid)
+        if cfg.source != SOURCE_FIXTURE and not (ucfg.garmin_token_dir / "garmin_tokens.json").exists():
+            print(f"user {uid}: no Garmin connection, skipped")
+            continue
+        print(f"user {uid}:", end=" ")
+        worst = max(worst, cmd_sync(ucfg, loop))
+    return worst
+
+
 def main(argv=None) -> int:
     setup_logging()
     ap = argparse.ArgumentParser(prog="sidekick")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("garmin-login")
-    sub.add_parser("garmin-logout")
-    p = sub.add_parser("create-token"); p.add_argument("name")
-    p = sub.add_parser("revoke-token"); p.add_argument("name")
-    p = sub.add_parser("sync"); p.add_argument("--loop", action="store_true")
-    sub.add_parser("rebuild-reports")
-    p = sub.add_parser("audit"); p.add_argument("--out")
+
+    def with_user(p):
+        p.add_argument("--user", type=int, help="user id (default: the owner)")
+        return p
+
+    with_user(sub.add_parser("garmin-login"))
+    with_user(sub.add_parser("garmin-logout"))
+    with_user(sub.add_parser("create-token")).add_argument("name")
+    with_user(sub.add_parser("revoke-token")).add_argument("name")
+    p = with_user(sub.add_parser("sync", help="sync every connected user (or --user)")); p.add_argument("--loop", action="store_true")
+    with_user(sub.add_parser("rebuild-reports"))
+    with_user(sub.add_parser("audit")).add_argument("--out")
+    p = sub.add_parser("invite", help="invite-only access by Google email")
+    p.add_argument("action", choices=["add", "remove", "list"]); p.add_argument("email", nargs="?")
+    sub.add_parser("users")
+    sub.add_parser("set-owner-email").add_argument("email")
     p = sub.add_parser("serve"); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8765)
     args = ap.parse_args(argv)
     cfg = load_config()
-    if args.cmd == "garmin-login":
-        return cmd_garmin_login(cfg)
-    if args.cmd == "garmin-logout":
-        shutil.rmtree(cfg.garmin_token_dir, ignore_errors=True)
-        print("Garmin tokens deleted.")
-        return 0
-    if args.cmd == "create-token":
-        token = create_token(cfg.data_dir, args.name)
-        print(f"\nDevice token for '{args.name}':\n\n    {token}\n\n"
-              "Paste it into the app: Settings → Connection → Device token. It is shown only this once.")
-        return 0
-    if args.cmd == "revoke-token":
-        print(f"revoked {revoke_token(cfg.data_dir, args.name)} token(s) named {args.name!r} in {cfg.data_dir}")
+
+    if args.cmd in ("invite", "users", "set-owner-email"):
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            if args.cmd == "users":
+                for u in accounts.list_users(a):
+                    print(f"{u['id']:>3}  {u['role']:<6}  {u['email'] or '(no email yet)':<32}  {u['sessions']} active token(s)")
+            elif args.cmd == "set-owner-email":
+                accounts.set_owner_email(a, args.email)
+                print(f"Owner can now sign in with Google as {accounts.normalise_email(args.email)}.")
+            elif args.action == "list":
+                for r in a.execute("SELECT * FROM invites ORDER BY created_at"):
+                    print(f"{r['email']:<32}  {'used ' + r['used_at'] if r['used_at'] else 'not used yet'}")
+            elif not args.email:
+                print("email required"); return 2
+            elif args.action == "add":
+                accounts.add_invite(a, args.email)
+                print(f"Invited {accounts.normalise_email(args.email)}. They can now sign in with Google in the app.")
+            else:
+                print(f"removed {accounts.remove_invite(a, args.email)} unused invite(s)")
+        finally:
+            a.close()
         return 0
     if args.cmd == "sync":
-        return cmd_sync(cfg, args.loop)
-    if args.cmd == "rebuild-reports":
-        conn = connect(cfg.db_path)
-        c, today = make_connector(cfg, conn)
-        sids = [r[0] for r in conn.execute("SELECT source_id FROM activity WHERE source=? ORDER BY start_utc", (c.source,))]
-        rp.regenerate(conn, c.source, c.synthetic, set(), sids, today)
-        print(f"rebuilt {len(sids)} run reports and recent morning reports (unchanged inputs keep their revision)")
-        return 0
-    if args.cmd == "audit":
-        return cmd_audit(cfg, args.out)
+        return cmd_sync_all(cfg, args.loop, args.user)
     if args.cmd == "serve":
         import uvicorn
 
@@ -201,6 +244,31 @@ def main(argv=None) -> int:
             return 2
         uvicorn.run(create_app(cfg), host=args.host, port=args.port, log_level="info")
         return 0
+
+    ucfg, uid = user_cfg(cfg, args.user)
+    if args.cmd == "garmin-login":
+        return cmd_garmin_login(ucfg)
+    if args.cmd == "garmin-logout":
+        shutil.rmtree(ucfg.garmin_token_dir, ignore_errors=True)
+        print("Garmin tokens deleted.")
+        return 0
+    if args.cmd == "create-token":
+        token = create_token(cfg.data_dir, args.name, uid)
+        print(f"\nDevice token for '{args.name}':\n\n    {token}\n\n"
+              "Paste it into the app: Settings → Connection → Device token. It is shown only this once.")
+        return 0
+    if args.cmd == "revoke-token":
+        print(f"revoked {revoke_token(cfg.data_dir, args.name, uid)} token(s) named {args.name!r}")
+        return 0
+    if args.cmd == "rebuild-reports":
+        conn = connect(ucfg.db_path)
+        c, today = make_connector(ucfg, conn)
+        sids = [r[0] for r in conn.execute("SELECT source_id FROM activity WHERE source=? ORDER BY start_utc", (c.source,))]
+        rp.regenerate(conn, c.source, c.synthetic, set(), sids, today)
+        print(f"rebuilt {len(sids)} run reports and recent morning reports (unchanged inputs keep their revision)")
+        return 0
+    if args.cmd == "audit":
+        return cmd_audit(ucfg, args.out)
     return 1
 
 

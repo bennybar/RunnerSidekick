@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
@@ -112,6 +113,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val today by vm.today.collectAsStateWithLifecycle()
     val checkin by vm.todayCheckin.collectAsStateWithLifecycle()
     val insights by vm.insights.collectAsStateWithLifecycle()
+    val fitness by vm.fitness.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val offline by vm.offline.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -171,6 +173,13 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 item { Readings(report) { evidence = it } }
                 item {
                     Group(title = "More") {
+                        fitness?.value?.garmin?.let { g ->
+                            val parts = listOfNotNull(g.vo2max?.let { "VO₂ max %.1f".format(it.value) },
+                                com.bennybar.runnersidekick.ui.insights.trainingStatusLabel(g.trainingStatus?.phrase),
+                                g.racePredictions?.k5?.let { "5K ${(it / 60).toInt()}:${"%02d".format(it.toInt() % 60)}" })
+                            if (parts.isNotEmpty()) row("Your fitness", supporting = parts.joinToString(" · ") + " (Garmin)",
+                                icon = Icons.Outlined.MonitorHeart, iconShape = MaterialShapes.Cookie9Sided, onClick = onOpenInsights)
+                        }
                         checkin?.let { c ->
                             row("Your check-in", supporting = checkinSummary(c), icon = Icons.Outlined.TaskAlt, iconShape = MaterialShapes.Cookie4Sided,
                                 onClick = { sheet = "checkin" })

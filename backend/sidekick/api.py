@@ -9,14 +9,19 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import os
 
 from . import narrative as nv
 from . import reports as rp
-from .auth import verify_token
+from dataclasses import replace
+
+from . import accounts
+from . import garmin_oauth as goauth
+from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, secrets
+from fastapi.responses import HTMLResponse
 from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
@@ -88,18 +93,52 @@ def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
     return out
 
 
-def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
-    def db():
-        c = connect(cfg.db_path)
+class GoogleSignIn(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+    device_name: str = Field(default="android", max_length=60)
+
+
+def verify_google_id_token(token: str) -> dict:
+    """Signature, expiry, issuer and audience checks by Google's own library."""
+    from google.auth.transport import requests as grequests
+    from google.oauth2 import id_token
+
+    if not GOOGLE_WEB_CLIENT_ID:
+        raise HTTPException(503, "Google sign-in isn't configured on this server yet")
+    try:
+        return id_token.verify_oauth2_token(token, grequests.Request(), audience=GOOGLE_WEB_CLIENT_ID)
+    except ValueError:
+        raise HTTPException(401, "Google sign-in could not be verified")
+
+
+def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token) -> FastAPI:
+    accounts.app_db(cfg.data_dir).close()  # create/migrate the accounts DB (and move a single-user layout into users/<owner>)
+    synthetic = cfg.source == SOURCE_FIXTURE
+    sync_locks: dict[int, threading.Lock] = {}
+    running: set[int] = set()
+
+    def current_user(authorization: str | None = Header(default=None)):
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="invalid or missing token")
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            u = accounts.verify_session(a, authorization[7:])
+        finally:
+            a.close()
+        if u is None:
+            raise HTTPException(status_code=401, detail="invalid or missing token")
+        return u
+
+    def user_cfg(user) -> Config:
+        """The same config, pointed at this user's own data folder."""
+        return replace(cfg, data_dir=accounts.user_dir(cfg.data_dir, user["id"]))
+
+    def db(user=Depends(current_user)):
+        c = connect(user_cfg(user).db_path)
         try:
             yield c
         finally:
             c.close()
-
-    connect(cfg.db_path).close()  # apply migrations at startup
-    lock = threading.Lock()
-    synthetic = cfg.source == SOURCE_FIXTURE
-    state = {"running": False}
 
     def tz(conn) -> ZoneInfo:
         return ZoneInfo(rp.get_setting(conn, "timezone", cfg.timezone))
@@ -107,26 +146,23 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
     def today(conn) -> date:
         return datetime.now(tz(conn)).date()
 
-    def make_connector(conn):
+    def make_connector(conn, ucfg: Config):
         if connector is not None:
             return connector
         if synthetic:
             return FixtureConnector(anchor=today(conn), tz=str(tz(conn)))
-        return GarminConnector(cfg.garmin_token_dir, cfg.request_spacing_s)
+        return GarminConnector(ucfg.garmin_token_dir, ucfg.request_spacing_s)
 
-    def require_token(authorization: str | None = Header(default=None)) -> None:
-        if not authorization or not authorization.startswith("Bearer ") or not verify_token(cfg.data_dir, authorization[7:]):
-            raise HTTPException(status_code=401, detail="invalid or missing device token")
+    # No interactive docs or schema endpoint. Public routes live on `app`; everything with user data on `api`.
+    app = FastAPI(title="Runner Sidekick", docs_url=None, redoc_url=None, openapi_url=None)
+    api = APIRouter(dependencies=[Depends(current_user)])
 
-    # No interactive docs or schema endpoint: they'd be the only unauthenticated routes.
-    app = FastAPI(title="Runner Sidekick", dependencies=[Depends(require_token)], docs_url=None, redoc_url=None, openapi_url=None)
-
-    def do_sync(force: bool = False) -> dict:
-        with lock:
-            state["running"] = True
-            conn = connect(cfg.db_path)
+    def do_sync(ucfg: Config, user_id: int, force: bool = False) -> dict:
+        with sync_locks.setdefault(user_id, threading.Lock()):
+            running.add(user_id)
+            conn = connect(ucfg.db_path)
             try:
-                c = make_connector(conn)
+                c = make_connector(conn, ucfg)
                 res = run_sync(conn, c, today(conn), cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days, force=force)
                 with lock_reports:
                     rp.regenerate(conn, c.source, synthetic, res.changed_dates, res.changed_activities, today(conn))
@@ -137,7 +173,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                 raise
             finally:
                 conn.close()
-                state["running"] = False
+                running.discard(user_id)
 
     lock_reports = threading.RLock()
     inflight: set[tuple] = set()
@@ -146,12 +182,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         return nv.AiConfig(
             enabled=bool(rp.get_setting(conn, "ai_enabled", False)),
             model=rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key"),
             max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "20")),
         )
 
-    def generate_bg(body: dict, key: tuple) -> None:
-        c = connect(cfg.db_path)
+    def generate_bg(body: dict, key: tuple, db_path) -> None:
+        c = connect(db_path)
         try:
             nv.generate(c, body, ai_config(c), provider=narrative_provider)
         finally:
@@ -173,15 +209,16 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         elif not ai.api_key and narrative_provider is None:
             body["narrative"] = {"status": "not_configured", "detail": "OPENAI_API_KEY is not set on the backend"}
         else:
-            key = (body["type"], body["id"], ai.model)
+            key = (conn.execute("PRAGMA database_list").fetchone()["file"], body["type"], body["id"], ai.model)
             if key not in inflight:
                 inflight.add(key)
-                threading.Thread(target=generate_bg, args=(body, key), daemon=True).start()
+                db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+                threading.Thread(target=generate_bg, args=(body, key, db_path), daemon=True).start()
             body["narrative"] = {"status": "pending"}
         return body
 
-    @app.get("/v1/status")
-    def status(conn=Depends(db)):
+    @api.get("/v1/status")
+    def status(conn=Depends(db), user=Depends(current_user)):
         row = get_connection_row(conn, cfg.source)
         latest = conn.execute("SELECT MAX(local_date) d FROM daily_observation WHERE source=? AND state='measured'", (cfg.source,)).fetchone()["d"]
         latest_act = conn.execute("SELECT MAX(start_utc) s FROM activity WHERE source=?", (cfg.source,)).fetchone()["s"]
@@ -190,36 +227,37 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         return {
             "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)),
             "connection": {k: row[k] for k in ("state", "detail", "last_attempt_at", "last_success_at", "retry_not_before")} if row else
-            {"state": make_connector(conn).connection_state().value, "detail": None, "last_attempt_at": None, "last_success_at": None, "retry_not_before": None},
+            {"state": make_connector(conn, user_cfg(user)).connection_state().value, "detail": None, "last_attempt_at": None, "last_success_at": None, "retry_not_before": None},
             "latest_observation_date": latest, "latest_activity_start": latest_act,
             "watch_sync_time": None,  # not exposed by the source; never guessed
-            "backfill": cps.get("days"), "sync_running": state["running"],
+            "backfill": cps.get("days"), "sync_running": user["id"] in running,
             "last_job": dict(job) if job else None,
             "capabilities": json.loads(row["capabilities_json"]) if row else {},
+            "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),
         }
 
-    @app.post("/v1/sync", status_code=202)
-    def sync_now(conn=Depends(db)):
-        if state["running"]:
+    @api.post("/v1/sync", status_code=202)
+    def sync_now(conn=Depends(db), user=Depends(current_user)):
+        if user["id"] in running:
             return {"started": False, "detail": "sync already running"}
-        threading.Thread(target=do_sync, daemon=True).start()
+        threading.Thread(target=do_sync, args=(user_cfg(user), user["id"]), daemon=True).start()
         return {"started": True}
 
-    @app.get("/v1/today")
+    @api.get("/v1/today")
     def today_report(day: str | None = Query(default=None, alias="date"), conn=Depends(db)):
         d = date.fromisoformat(day) if day else today(conn)
         with lock_reports:
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         return with_narrative(conn, body)
 
-    @app.get("/v1/trends")
+    @api.get("/v1/trends")
     def get_trends(days: int = 28, conn=Depends(db)):
         from .trends import build_trends
         if days not in (7, 28, 90):
             raise HTTPException(422, "days must be 7, 28 or 90")
         return build_trends(conn, cfg.source, today(conn), days, synthetic)
 
-    @app.get("/v1/weekly/latest")
+    @api.get("/v1/weekly/latest")
     def latest_weekly(conn=Depends(db)):
         from .weekly import regenerate_weeklies
         with lock_reports:
@@ -229,7 +267,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
             raise HTTPException(404, "no completed week yet")
         return with_narrative(conn, json.loads(r["body_json"]))
 
-    @app.get("/v1/reports/{rtype}/{key}/revisions")
+    @api.get("/v1/reports/{rtype}/{key}/revisions")
     def revisions(rtype: str, key: str, conn=Depends(db)):
         """All stored revisions of one report, newest first, so earlier versions stay browsable."""
         return [{"id": r["id"], "revision": r["revision"], "generated_at": r["generated_at"], "data_cutoff": r["data_cutoff"],
@@ -237,12 +275,23 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                 for r in conn.execute("SELECT id, revision, generated_at, data_cutoff, algorithm_version FROM report"
                                       " WHERE type=? AND subject_key=? ORDER BY revision DESC", (rtype, key))]
 
-    @app.get("/v1/insights")
+    @api.get("/v1/fitness")
+    def fitness(conn=Depends(db)):
+        """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace."""
+        d = today(conn)
+        vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, "garmin_vo2max_running", d.isoformat()).items())
+               if k >= (d - timedelta(days=120)).isoformat()]
+        report = rp.build_insights(conn, cfg.source, d, synthetic)
+        easy = next((i for i in report["insights"] if i["id"] == "easy_pace"), None)
+        return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2, "records": rp.records(conn, cfg.source),
+                "easy_pace": easy, "zones": rp.get_setting(conn, "source_hr_zones", None), "synthetic": synthetic}
+
+    @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
         with lock_reports:
             return rp.build_insights(conn, cfg.source, today(conn), synthetic)
 
-    @app.get("/v1/reports")
+    @api.get("/v1/reports")
     def list_reports(type: str | None = None, start: str | None = Query(default=None, alias="from"),
                      end: str | None = Query(default=None, alias="to"), limit: int = Query(default=60, le=500), conn=Depends(db)):
         q = ("SELECT r.id, r.type, r.subject_key, r.local_date, r.revision, r.generated_at, r.body_json FROM report r"
@@ -274,14 +323,14 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                         "state": (b.get("recommendation") or {}).get("state")})
         return out
 
-    @app.get("/v1/reports/{report_id}")
+    @api.get("/v1/reports/{report_id}")
     def get_report(report_id: int, conn=Depends(db)):
         r = conn.execute("SELECT body_json FROM report WHERE id=?", (report_id,)).fetchone()
         if not r:
             raise HTTPException(404)
         return with_narrative(conn, json.loads(r["body_json"]))
 
-    @app.post("/v1/reports/{report_id}/narrative")
+    @api.post("/v1/reports/{report_id}/narrative")
     def regenerate_narrative(report_id: int, conn=Depends(db)):
         """Explicit request: regenerate the narrative for this revision (counts against the daily budget)."""
         r = conn.execute("SELECT body_json FROM report WHERE id=?", (report_id,)).fetchone()
@@ -289,7 +338,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
             raise HTTPException(404)
         return nv.generate(conn, json.loads(r["body_json"]), ai_config(conn), provider=narrative_provider, force=True)
 
-    @app.get("/v1/activities")
+    @api.get("/v1/activities")
     def list_activities(start: str | None = Query(default=None, alias="from"), end: str | None = Query(default=None, alias="to"), conn=Depends(db)):
         end = end or today(conn).isoformat()
         start = start or (date.fromisoformat(end) - timedelta(days=cfg.backfill_days)).isoformat()
@@ -299,7 +348,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                                    "elapsed_s", "moving_s", "avg_hr", "elevation_gain_m")} |
                 {"pace_moving_s_per_km": rp.rn.moving_pace(r["distance_m"], r["moving_s"]), "synthetic": synthetic} for r in rows]
 
-    @app.get("/v1/activities/{sid}")
+    @api.get("/v1/activities/{sid}")
     def get_activity(sid: str, conn=Depends(db)):
         a = rp.activity_by_source_id(conn, cfg.source, sid)
         if not a:
@@ -309,7 +358,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         s = rp.samples_for(conn, a["id"])
         return {"report": with_narrative(conn, report), "chart": downsample(s) if s else None}
 
-    @app.put("/v1/activities/{sid}/effort")
+    @api.put("/v1/activities/{sid}/effort")
     def put_effort(sid: str, body: EffortIn, conn=Depends(db)):
         with conn:
             conn.execute("INSERT INTO activity_effort VALUES (?,?,?) ON CONFLICT (activity_source_id) DO UPDATE SET"
@@ -317,7 +366,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                          (sid, body.rpe, body.client_updated_at))
         return {"ok": True}
 
-    @app.put("/v1/checkins/{cid}")
+    @api.put("/v1/checkins/{cid}")
     def put_checkin(cid: str, body: CheckinIn, conn=Depends(db)):
         """Last-writer-wins on client_updated_at; a stale write is ignored and the stored version returned."""
         with conn:
@@ -334,7 +383,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         r["pain"], r["illness"], r["deleted"] = bool(r["pain"]), bool(r["illness"]), bool(r["deleted"])
         return r
 
-    @app.get("/v1/checkins")
+    @api.get("/v1/checkins")
     def list_checkins(start: str | None = Query(default=None, alias="from"), end: str | None = Query(default=None, alias="to"), conn=Depends(db)):
         rows = conn.execute("SELECT * FROM checkin WHERE local_date BETWEEN ? AND ? ORDER BY local_date DESC",
                             (start or "0000", end or "9999")).fetchall()
@@ -346,18 +395,18 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
             out.append(d)
         return out
 
-    @app.get("/v1/settings")
+    @api.get("/v1/settings")
     def get_settings(conn=Depends(db)):
         return {"timezone": str(tz(conn)), "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5]),
                 "goal": rp.get_setting(conn, "goal", None), "available_minutes": rp.get_setting(conn, "available_minutes", None),
                 "hr_zone_source": rp.get_setting(conn, "hr_zone_source", "garmin"),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
-                "ai_available": bool(os.getenv("OPENAI_API_KEY")) or narrative_provider is not None,
+                "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
                 "morning_window_start": rp.get_setting(conn, "morning_window_start", "06:00"),
                 "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00")}
 
-    @app.put("/v1/settings")
+    @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):
         if body.timezone is not None:
             try:
@@ -372,7 +421,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
                              (k, json.dumps(v)))
         return get_settings(conn)
 
-    @app.delete("/v1/data")
+    @api.delete("/v1/data")
     def delete_data(scope: Literal["raw", "reports", "all"], conn=Depends(db)):
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
@@ -385,7 +434,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         conn.execute("VACUUM")
         return {"deleted": tables}
 
-    @app.get("/v1/export")
+    @api.get("/v1/export")
     def export(conn=Depends(db)):
         out = {}
         for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings"):
@@ -393,5 +442,78 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         out["reports"] = [json.loads(r["body_json"]) for r in conn.execute("SELECT body_json FROM report")]
         return {"mode": cfg.source, "synthetic": synthetic, "exported_at": utc_now(), "data": out}
 
+    # ---------------------------------------------------------------- sign-in (public)
+
+    @app.post("/v1/auth/google")
+    def auth_google(body: GoogleSignIn):
+        """Exchange a Google ID token for an app token. Invite-only: new accounts need an invite for their email."""
+        claims = google_verifier(body.id_token)
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            try:
+                u = accounts.sign_in_with_google(a, claims)
+            except accounts.NotInvited as e:
+                raise HTTPException(403, str(e))
+            token = accounts.create_session(a, u["id"], body.device_name)
+        finally:
+            a.close()
+        return {"token": token, "user": {"id": u["id"], "email": u["email"], "name": u["name"], "role": u["role"]}}
+
+    # ---------------------------------------------------------------- official Garmin connection
+
+    @api.post("/v1/garmin/oauth/start")
+    def garmin_start(user=Depends(current_user)):
+        sec = secrets(cfg.data_dir)
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            return {"authorize_url": goauth.start(a, user["id"], sec.get("garmin_client_id"), GARMIN_REDIRECT_URI)}
+        except goauth.NotConfigured as e:
+            raise HTTPException(503, str(e))
+        finally:
+            a.close()
+
+    @app.get("/v1/garmin/oauth/callback", response_class=HTMLResponse)
+    def garmin_callback(state: str = "", code: str = "", error: str = ""):
+        def page(title, msg):
+            return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><title>{title}</title>"
+                                f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>{title}</h2>"
+                                f"<p>{msg}</p><p>You can close this page and return to Runner Sidekick.</p></body>")
+        if error or not code or not state:
+            return page("Garmin not connected", "The connection was cancelled or Garmin returned an error.")
+        sec = secrets(cfg.data_dir)
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            goauth.complete(a, state, code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""), GARMIN_REDIRECT_URI,
+                            lambda uid: accounts.user_dir(cfg.data_dir, uid))
+        except goauth.OAuthError as e:
+            return page("Garmin not connected", str(e))
+        finally:
+            a.close()
+        return page("Garmin connected", "Your Garmin account is linked.")
+
+    @api.delete("/v1/garmin/connection")
+    def garmin_disconnect(user=Depends(current_user)):
+        sec = secrets(cfg.data_dir)
+        return {"disconnected": goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))}
+
+    @api.get("/v1/me")
+    def me(user=Depends(current_user)):
+        return {"id": user["id"], "email": user["email"], "name": user["name"], "role": user["role"]}
+
+    @api.delete("/v1/account")
+    def delete_account(user=Depends(current_user)):
+        """Deletes all of this user's data and sessions. The owner account can't delete itself from the app."""
+        if user["role"] == accounts.OWNER_ROLE:
+            raise HTTPException(409, "the owner account can't be deleted from the app")
+        sec = secrets(cfg.data_dir)
+        goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))  # Garmin requires it
+        a = accounts.app_db(cfg.data_dir)
+        try:
+            accounts.delete_user(a, cfg.data_dir, user["id"])
+        finally:
+            a.close()
+        return {"deleted": True}
+
+    app.include_router(api)
     app.state.do_sync = do_sync
     return app

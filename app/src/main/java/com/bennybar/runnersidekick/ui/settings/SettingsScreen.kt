@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Watch
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -74,6 +77,15 @@ import java.time.Instant
 
 class SettingsVm(repo: Repository) : BaseVm(repo) {
     val status = repo.status.state(null)
+    val me = repo.me.state(null)
+
+    fun signOut() = launchIo { repo.signOut() }
+    fun deleteAccount() = launchIo { repo.deleteAccount() }
+    fun disconnectGarmin() = launchIo { repo.disconnectGarmin(); message.value = "Garmin disconnected" }
+    fun connectGarmin(ctx: android.content.Context) = launchIo {
+        val url = repo.garminAuthorizeUrl()
+        androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(ctx, android.net.Uri.parse(url))
+    }
     val remote = MutableStateFlow<SettingsDto?>(null)
     val message = MutableStateFlow<String?>(null)
 
@@ -114,6 +126,7 @@ private val TIME = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
 @Composable
 fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
     val local by vm.settings.collectAsStateWithLifecycle()
+    val me by vm.me.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val remote by vm.remote.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -166,6 +179,30 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                             enabled = !busy && url.isNotBlank() && (token.isNotBlank() || local?.hasToken == true),
                             modifier = Modifier.padding(top = 12.dp)) { Text("Save and test") }
                     }
+                }
+            }
+            item {
+                val m = me?.value
+                val g = status?.value?.garminOfficial
+                Group(title = "Account") {
+                    row(m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in",
+                        supporting = when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
+                        icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle)
+                    row("Garmin", supporting = when {
+                        g?.connected == true -> "Connected with Garmin's official sign-in. " + (g.dataImport ?: "")
+                        status?.value?.connection?.state == "connected" && m?.role == "owner" -> "Connected (owner's direct connection)"
+                        g?.available == true -> "Not connected"
+                        else -> "Garmin sign-in for members opens once Garmin approves this app"
+                    }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided,
+                        trailing = when {
+                            g?.connected == true -> ({ TextButton(onClick = vm::disconnectGarmin) { Text("Disconnect") } })
+                            g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
+                            else -> null
+                        })
+                    row("Sign out", supporting = "Removes the token and cached data from this phone", icon = Icons.AutoMirrored.Outlined.Logout,
+                        iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "signout" })
+                    if (m?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
+                        icon = Icons.Outlined.DeleteOutline, iconShape = MaterialShapes.Burst, onClick = { confirm = "account" })
                 }
             }
             item {
@@ -285,15 +322,27 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     confirm?.let { scope ->
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text("Delete data?") },
+            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; else -> "Delete data?" }) },
             text = {
                 Text(when (scope) {
                     "local" -> "Removes cached reports and runs from this phone. Unsent check-ins are kept."
                     "raw" -> "Removes stored Garmin source payloads. Normalised records and reports stay."
+                    "signout" -> "You can sign in again any time. Unsent check-ins stay on this phone."
+                    "account" -> "Permanently deletes all your health data, reports and check-ins on the server, and disconnects Garmin. This can't be undone."
                     else -> "Removes all records, reports, check-ins and settings from the backend and this phone. Garmin sign-in tokens aren't affected. This can't be undone."
                 })
             },
-            confirmButton = { TextButton(onClick = { if (scope == "local") vm.clearLocal() else vm.deleteRemote(scope); confirm = null }) { Text("Delete") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    when (scope) {
+                        "local" -> vm.clearLocal()
+                        "signout" -> vm.signOut()
+                        "account" -> vm.deleteAccount()
+                        else -> vm.deleteRemote(scope)
+                    }
+                    confirm = null
+                }) { Text(if (scope == "signout") "Sign out" else "Delete") }
+            },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }

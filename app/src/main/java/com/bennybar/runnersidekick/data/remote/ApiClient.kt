@@ -36,6 +36,16 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     suspend fun delete(path: String, query: Map<String, String>): String = call("DELETE", path, query, null)
 
+    /** Unauthenticated POST (sign-in), against an explicit base URL. Returns the HTTP code and body. */
+    suspend fun postPublic(base: String, path: String, body: String): Pair<Int, String> = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(base.trimEnd('/') + path).post(body.toRequestBody("application/json".toMediaType())).build()
+        try {
+            http.newCall(req).execute().use { it.code to it.body.string() }
+        } catch (e: IOException) {
+            throw ApiException.Network(e)
+        }
+    }
+
     private suspend fun call(method: String, path: String, query: Map<String, String>, body: String?): String =
         withContext(Dispatchers.IO) {
             val (base, token) = credentials() ?: throw ApiException.NotConfigured()

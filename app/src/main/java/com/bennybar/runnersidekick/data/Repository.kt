@@ -10,7 +10,11 @@ import com.bennybar.runnersidekick.data.remote.ActivitySummary
 import com.bennybar.runnersidekick.data.remote.ApiClient
 import com.bennybar.runnersidekick.data.remote.CheckinDto
 import com.bennybar.runnersidekick.data.remote.EffortIn
+import com.bennybar.runnersidekick.data.remote.AuthResult
+import com.bennybar.runnersidekick.data.remote.Fitness
+import com.bennybar.runnersidekick.data.remote.GoogleSignInBody
 import com.bennybar.runnersidekick.data.remote.InsightsReport
+import com.bennybar.runnersidekick.data.remote.Me
 import com.bennybar.runnersidekick.data.remote.RevisionInfo
 import com.bennybar.runnersidekick.data.remote.Trends
 import com.bennybar.runnersidekick.data.remote.WeeklyReport
@@ -57,6 +61,43 @@ class Repository(
 
     val insights: Flow<Cached<InsightsReport>?> = observe("insights") { json.decodeFromString<InsightsReport>(it) }
     val weekly: Flow<Cached<WeeklyReport>?> = observe("weekly") { json.decodeFromString<WeeklyReport>(it) }
+    val fitness: Flow<Cached<Fitness>?> = observe("fitness") { json.decodeFromString<Fitness>(it) }
+    val me: Flow<Cached<Me>?> = observe("me") { json.decodeFromString<Me>(it) }
+
+    suspend fun refreshFitness() = put("fitness", api.getRaw("/v1/fitness"))
+
+    /** Exchanges a Google ID token for an app token; stores it. Returns an error message, or null on success. */
+    suspend fun signInWithGoogle(idToken: String, backendUrl: String): String? {
+        val (code, body) = api.postPublic(backendUrl, "/v1/auth/google",
+            json.encodeToString(GoogleSignInBody(idToken, android.os.Build.MODEL ?: "android")))
+        return when (code) {
+            200 -> {
+                val r = json.decodeFromString<AuthResult>(body)
+                settings.setBackend(backendUrl, r.token)
+                refreshAll()
+                null
+            }
+            403 -> "This Google account hasn't been invited yet. Ask the server owner to run: sidekick invite add <your email>"
+            503 -> "Google sign-in isn't set up on this server yet."
+            else -> "Sign-in failed (HTTP $code)."
+        }
+    }
+
+    suspend fun garminAuthorizeUrl(): String =
+        json.parseToJsonElement(api.post("/v1/garmin/oauth/start")).let { (it as kotlinx.serialization.json.JsonObject)["authorize_url"]!!.toString().trim('"') }
+
+    suspend fun disconnectGarmin() { api.delete("/v1/garmin/connection", emptyMap()); refreshStatus() }
+
+    suspend fun deleteAccount() {
+        api.delete("/v1/account", emptyMap())
+        clearLocal(includeCheckins = true)
+        settings.clearToken()
+    }
+
+    suspend fun signOut() {
+        clearLocal(includeCheckins = false)
+        settings.clearToken()
+    }
 
     fun trends(days: Int): Flow<Cached<Trends>?> = observe("trends:$days") { json.decodeFromString<Trends>(it) }
     fun day(date: String): Flow<Cached<MorningReport>?> = observe("day:$date") { json.decodeFromString<MorningReport>(it) }
@@ -116,6 +157,8 @@ class Repository(
         put("activities", api.getRaw("/v1/activities"))
         put("insights", api.getRaw("/v1/insights"))
         refreshWeekly()
+        refreshFitness()
+        put("me", api.getRaw("/v1/me"))
         refreshJournal()
     }
 

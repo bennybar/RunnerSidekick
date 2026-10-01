@@ -135,6 +135,12 @@ class FixtureConnector:
     def hr_zones(self) -> dict | None:
         return {"floors": [95, 113, 132, 151, 170], "method": "HR_MAX", "max_hr": 189, "lthr": 168, "profile": "DEFAULT", "source": "fixture"}
 
+    def fitness_snapshot(self, day: date) -> dict | None:
+        return {"source": "fixture", "race_predictions": {"date": day.isoformat(), "5k": 1440, "10k": 3010, "half": 6700, "marathon": 14200},
+                "vo2max": {"value": 49.0, "date": day.isoformat(), "fitness_age": None}, "heat_acclimation_pct": 60,
+                "training_status": {"phrase": "PRODUCTIVE_1", "date": day.isoformat(), "since": None, "paused": False,
+                                    "acute_load": 420, "chronic_min": 300.0, "chronic_max": 520.0}}
+
     def list_activities(self, start: date, end: date) -> list[dict]:
         out = []
         d = start
