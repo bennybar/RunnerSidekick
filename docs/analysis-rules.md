@@ -182,7 +182,7 @@ coefficient of variation is > 0.15; long if moving time ≥ max(60 min, 1.3× th
 time below the zone-3 floor: easy (≥ 70 %), tempo (< 40 %), else other. An inferred intent never produces the
 "meant to be easy" finding; the app shows it as one line ("Looks like: …") that can be corrected.
 
-## AI coach — `coach.py` (`coach-1.4`)
+## AI coach — `coach.py` (`coach-1.5`)
 
 Cross-domain insights (≤ 4) and recommendations (≤ 4; training, recovery, sleep, pacing, habits) written by the
 selected OpenAI model from a bundle of deterministic outputs only: profile, today's plan and advice, today's readings,
@@ -270,10 +270,12 @@ insight, the HRV weekly chart, the coach's weekly items, the app's Activities gr
 weekly digest, which arrives on the first day of the week. After a change, past reviews keep their weeks: a week that
 overlaps an existing review by 4 days or more isn't reviewed again. The current week gets a newly picked focus.
 
-## AI input on a run — `run_ai.py` (`run-ai-1.0`)
+## AI input on a run — `run_ai.py` (`run-ai-1.1`)
 
 Only on request ("Get AI input" on a run). The answer has a short read, up to three points that went well, up to three
 to work on, and one suggestion for next time with a direction. The evidence is the run's analysis plus its context:
 similar runs, the run's week against the four before, that day's plan, that week's focus, any race goal and today's
 advice. Run names and notes are never sent. The coach's checks apply, and "harder" is rejected while today holds
 intensity back. Cached per run and input hash. Each request counts against the shared daily AI budget (25 calls a day per account).
+
+Both the coach (coach-1.5) and run input (run-ai-1.1) start with a TL;DR: one checked sentence of up to 120 characters. Today's coach teaser shows the TL;DR.

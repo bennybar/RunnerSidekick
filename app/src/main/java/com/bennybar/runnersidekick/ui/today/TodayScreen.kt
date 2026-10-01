@@ -177,7 +177,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 focus?.value?.let { f -> animatedItem(key = "focus") { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 // One AI voice: the coach's summary when there is one, otherwise the report summary
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
-                coachShown?.summary?.let { s ->
+                (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
                     // Older advice is labelled as such, so it never reads as current next to a changed briefing
                     val note = if (coachShown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")

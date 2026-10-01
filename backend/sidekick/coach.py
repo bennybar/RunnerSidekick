@@ -27,7 +27,7 @@ from .narrative import OpenAIProvider
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "coach-1.4"
+PROMPT_VERSION = "coach-1.5"
 MAX_ITEMS = 4
 CATEGORIES = ["training", "recovery", "sleep", "pacing", "habits"]
 FACT = re.compile(r"\{fact:([a-z0-9_]+)\}")
@@ -44,8 +44,9 @@ EVIDENCE_CONFIDENCE = {"consistent": "high", "emerging": "medium"}
 LEVELS = ["low", "medium", "high"]
 
 SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["summary", "summary_evidence_ids", "insights", "recommendations"],
+    "type": "object", "additionalProperties": False, "required": ["tldr", "summary", "summary_evidence_ids", "insights", "recommendations"],
     "properties": {
+        "tldr": {"type": "string"},
         "summary": {"type": "string"},
         "summary_evidence_ids": {"type": "array", "items": {"type": "string"}},
         "insights": {"type": "array", "maxItems": MAX_ITEMS, "items": {
@@ -64,6 +65,7 @@ SCHEMA = {
 
 SYSTEM = """You are a thoughtful running coach and data analyst writing for one runner. You receive a JSON evidence
 bundle computed from their Garmin data, check-ins and plans. Write:
+- tldr: one short sentence, under fifteen words: the single thing to know today. It must follow from the summary.
 - summary: two or three sentences on where they stand right now, with the evidence ids it relies on.
 - insights: up to four connections a runner would not easily see alone, especially across areas (training intensity,
   pacing, volume, sleep, recovery readings, Garmin's own fitness numbers, plans and intent vs what actually happened,
@@ -275,7 +277,7 @@ def validate(raw: str, b: Bundle) -> dict:
         d = json.loads(raw)
     except (TypeError, json.JSONDecodeError) as e:
         raise CoachError(f"not JSON: {e}")
-    if not isinstance(d, dict) or set(d) != {"summary", "summary_evidence_ids", "insights", "recommendations"}:
+    if not isinstance(d, dict) or set(d) != {"tldr", "summary", "summary_evidence_ids", "insights", "recommendations"}:
         raise CoachError("schema mismatch")
     today = b.items.get("plan:today", {})
     held_back = bool(today.get("intensity_held_back")) or today.get("state") == "consider_easier"
@@ -286,7 +288,7 @@ def validate(raw: str, b: Bundle) -> dict:
                        else LEVELS.index("low") if c in ("profile:runner", "plan:today") else LEVELS.index("medium")) for c in cited)
         return LEVELS[min(LEVELS.index(conf), allowed)]
 
-    out = {"summary": check_text(d["summary"], b, "summary", 600), "summary_evidence_ids": check_ids(d["summary_evidence_ids"], b, "summary"),
+    out = {"tldr": check_text(d["tldr"], b, "tldr", 120), "summary": check_text(d["summary"], b, "summary", 600), "summary_evidence_ids": check_ids(d["summary_evidence_ids"], b, "summary"),
            "insights": [], "recommendations": []}
     if len(d["insights"]) > MAX_ITEMS or len(d["recommendations"]) > MAX_ITEMS:
         raise CoachError("too many items")

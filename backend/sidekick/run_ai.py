@@ -18,15 +18,16 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "run-ai-1.0"
+PROMPT_VERSION = "run-ai-1.1"
 MAX_POINTS = 3
 
 POINT = {"type": "object", "additionalProperties": False, "required": ["text", "evidence_ids"],
          "properties": {"text": {"type": "string"}, "evidence_ids": {"type": "array", "items": {"type": "string"}}}}
 SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["summary", "summary_evidence_ids", "went_well", "to_work_on", "next_time"],
+    "required": ["tldr", "summary", "summary_evidence_ids", "went_well", "to_work_on", "next_time"],
     "properties": {
+        "tldr": {"type": "string"},
         "summary": {"type": "string"},
         "summary_evidence_ids": {"type": "array", "items": {"type": "string"}},
         "went_well": {"type": "array", "maxItems": MAX_POINTS, "items": POINT},
@@ -39,6 +40,7 @@ SCHEMA = {
 
 SYSTEM = """You are a running coach reviewing one run with the runner. You receive a JSON evidence bundle: the run's
 analysis and its context. Write:
+- tldr: one short sentence, under fifteen words: the main takeaway from this run. It must follow from the summary.
 - summary: two sentences on how this run went and what it says, given what it was meant to be.
 - went_well: up to three specific things that went well.
 - to_work_on: up to three specific things to work on, practical and kind.
@@ -150,7 +152,7 @@ def validate(raw: str, b: ch.Bundle) -> dict:
         raise ch.CoachError("next_time: harder while today's advice holds intensity back")
     points = lambda key: [{"text": ch.check_text(p.get("text"), b, f"{key} {k}", 300),  # noqa: E731
                            "evidence_ids": ch.check_ids(p.get("evidence_ids"), b, f"{key} {k}")} for k, p in enumerate(d[key])]
-    return {"summary": ch.check_text(d["summary"], b, "summary", 500),
+    return {"tldr": ch.check_text(d["tldr"], b, "tldr", 120), "summary": ch.check_text(d["summary"], b, "summary", 500),
             "summary_evidence_ids": ch.check_ids(d["summary_evidence_ids"], b, "summary"),
             "went_well": points("went_well"), "to_work_on": points("to_work_on"),
             "next_time": {"text": ch.check_text(nt.get("text"), b, "next_time", 300),

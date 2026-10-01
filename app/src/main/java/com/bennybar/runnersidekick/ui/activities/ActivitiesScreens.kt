@@ -445,6 +445,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
             }
             when {
                 shown != null -> {
+                    shown.tldr?.let { com.bennybar.runnersidekick.ui.insights.Tldr(it) }
                     shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                     if (shown.wentWell.isNotEmpty()) {
                         Text("Went well", style = MaterialTheme.typography.titleSmall, color = cs.primary)

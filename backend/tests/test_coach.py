@@ -35,7 +35,7 @@ class Fake:
 def good(bundle):
     facts = bundle["facts"]
     fid = next(iter(facts))
-    return {"summary": f"Today's picture: {{fact:{fid}}} stands out (plan:today).", "summary_evidence_ids": ["plan:today"],
+    return {"tldr": "Keep today easy.", "summary": f"Today's picture: {{fact:{fid}}} stands out (plan:today).", "summary_evidence_ids": ["plan:today"],
             "insights": [{"title": "A connection", "text": "Volume and intensity move together.", "evidence_ids": ["plan:today"], "confidence": "low"}],
             "recommendations": [{"title": "Keep it easy", "text": "An easy run fits.", "why": "Recent load is up.",
                                  "evidence_ids": ["plan:today"], "category": "training", "direction": "easier"}]}
@@ -67,6 +67,8 @@ def test_valid_output_renders_facts_and_strips_echoed_ids(conn):
     (lambda d: d["recommendations"][0].update(text="Run hard every day this week."), "disallowed"),
     (lambda d: d.update(summary_evidence_ids=[]), "at least one"),
     (lambda d: d["recommendations"][0].update(direction="sideways"), "bad direction"),
+    (lambda d: d.update(tldr="This takeaway is far too long for a one-line summary, because it keeps adding detail about the whole month of running, sleep and recovery."), "tldr"),
+    (lambda d: d.update(tldr="Run 5 easy days."), "numbers"),
 ])
 def test_unsupported_output_rejected(conn, mutate, why):
     def bad(b):
@@ -119,7 +121,7 @@ def test_harder_rejected_when_intensity_held_back_and_confidence_capped():
     b = coach.Bundle()
     b.item("plan:today", "today", state="usual_plan", intensity_held_back=True)
     b.item("insight:pacing", "insight", confidence="emerging")
-    raw = {"summary": "A picture.", "summary_evidence_ids": ["plan:today"],
+    raw = {"tldr": "Easy does it.", "summary": "A picture.", "summary_evidence_ids": ["plan:today"],
            "insights": [{"title": "T", "text": "X.", "evidence_ids": ["plan:today"], "confidence": "high"},
                         {"title": "T", "text": "Y.", "evidence_ids": ["insight:pacing"], "confidence": "high"}],
            "recommendations": [{"title": "Go", "text": "Add a fast session.", "why": "Why.", "evidence_ids": ["plan:today"],

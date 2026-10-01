@@ -73,6 +73,7 @@ fun CoachCard(view: CoachView, loading: Boolean, insights: List<Insight>, onOpen
                     }
                     if (view.status == "pending" || loading) LoadingIndicator(Modifier.size(28.dp))
                 }
+                shown.tldr?.let { Tldr(it) }
                 shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 if (shown.insights.isNotEmpty()) {
                     HorizontalDivider()
@@ -136,6 +137,19 @@ private fun EvidenceChips(ids: List<String>, v: CoachView, insights: List<Insigh
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         chips.forEach { (label, open) ->
             AssistChip(onClick = open, label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) }, modifier = Modifier.widthIn(max = 280.dp))
+        }
+    }
+}
+
+/** The one line to read if you read nothing else. */
+@Composable
+fun Tldr(text: String) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = MaterialTheme.shapes.medium, color = cs.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("TL;DR", style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
+            Spacer(Modifier.width(10.dp))
+            Text(text, style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer)
         }
     }
 }

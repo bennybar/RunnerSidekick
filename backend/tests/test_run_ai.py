@@ -32,7 +32,7 @@ class Fake:
 
 def good(bundle, direction="easier"):
     p = {"text": "Your pace held at {fact:pace} (run:this).", "evidence_ids": ["run:this"]}
-    return {"summary": "A steady run for its purpose.", "summary_evidence_ids": ["run:this"], "went_well": [p],
+    return {"tldr": "Solid, but start slower.", "summary": "A steady run for its purpose.", "summary_evidence_ids": ["run:this"], "went_well": [p],
             "to_work_on": [{"text": "Ease the opening.", "evidence_ids": ["run:this"]}],
             "next_time": {"text": "Keep the next one easy.", "evidence_ids": ["today:advice"], "direction": direction}}
 
