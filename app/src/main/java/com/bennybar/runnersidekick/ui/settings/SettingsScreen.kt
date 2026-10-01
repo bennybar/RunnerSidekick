@@ -126,6 +126,15 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 private val TIME = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
+/** "1:40:00" or "45:30" → seconds; null if malformed or outside 10 min–10 h. */
+private fun parseHms(t: String): Int? {
+    val p = t.split(":").map { it.toIntOrNull() ?: return null }
+    val s = when (p.size) { 2 -> p[0] * 60 + p[1]; 3 -> p[0] * 3600 + p[1] * 60 + p[2]; else -> return null }
+    return s.takeIf { p.drop(1).all { v -> v in 0..59 } && it in 600..36000 }
+}
+
+private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+
 private val BIRTH = Regex("^(19|20)\\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -178,9 +187,10 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         var url by remember(local?.backendUrl) { mutableStateOf(local?.backendUrl ?: "") }
                         var token by remember { mutableStateOf("") }
                         OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
                         OutlinedTextField(token, { token = it }, label = { Text(if (local?.hasToken == true) "Device token (saved, enter to replace)" else "Device token") },
-                            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
                         FilledTonalButton(onClick = { vm.saveBackend(url, token); token = ""; editBackend = false },
                             enabled = !busy && url.isNotBlank() && (token.isNotBlank() || local?.hasToken == true),
                             modifier = Modifier.padding(top = 12.dp)) { Text("Save and test") }
@@ -239,9 +249,17 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     var sex by remember(r) { mutableStateOf(r.profileSex) }
                     var birth by remember(r) { mutableStateOf(r.profileBirthDate ?: "") }
                     val birthOk = birth.isEmpty() || BIRTH.matches(birth)
-                    val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank() && birthOk
+                    var raceName by remember(r) { mutableStateOf(r.raceName ?: "") }
+                    var raceDate by remember(r) { mutableStateOf(r.raceDate ?: "") }
+                    var raceDist by remember(r) { mutableStateOf(r.raceDistance) }
+                    var raceTarget by remember(r) { mutableStateOf(r.raceTargetS?.let(::hms) ?: "") }
+                    val raceDateOk = raceDate.isEmpty() || BIRTH.matches(raceDate)
+                    val raceTargetS = parseHms(raceTarget)
+                    val raceOk = raceDateOk && (raceTarget.isEmpty() || raceTargetS != null) && (raceDate.isEmpty() == (raceDist == null))
+                    val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank() && birthOk && raceOk
                     val edited = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
-                        r.aiAvailable, start, end, profileSex = sex, profileBirthDate = birth.ifBlank { null }, profileDetected = r.profileDetected)
+                        r.aiAvailable, start, end, profileSex = sex, profileBirthDate = birth.ifBlank { null }, profileDetected = r.profileDetected,
+                        raceDate = raceDate.ifBlank { null }, raceDistance = raceDist, raceTargetS = raceTargetS, raceName = raceName.trim().ifBlank { null })
                     val dirty = edited != r
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Group(title = "Training profile") {
@@ -263,6 +281,26 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                                 OutlinedTextField(tz, { tz = it }, label = { Text("Time zone (e.g. Asia/Jerusalem)") }, singleLine = true,
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                                Text("Race goal (optional)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                                Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
+                                    listOf("5k" to "5K", "10k" to "10K", "half" to "Half", "marathon" to "Marathon")
+                                        .forEach { (k, l) -> FilterChip(raceDist == k, { raceDist = if (raceDist == k) null else k }, { Text(l) }) }
+                                }
+                                OutlinedTextField(raceDate, { raceDate = it.filter { c -> c.isDigit() || c == '-' }.take(10) },
+                                    label = { Text("Race date (YYYY-MM-DD)") }, singleLine = true,
+                                    isError = !raceDateOk || (raceDate.isEmpty() != (raceDist == null)),
+                                    supportingText = { if (raceDate.isEmpty() != (raceDist == null)) Text("Set both a distance and a date, or neither") },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                                OutlinedTextField(raceTarget, { raceTarget = it.filter { c -> c.isDigit() || c == ':' }.take(8) },
+                                    label = { Text("Target time (h:mm:ss, optional)") }, singleLine = true,
+                                    isError = raceTarget.isNotEmpty() && raceTargetS == null, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(raceName, { raceName = it.take(60) }, label = { Text("Race name (optional)") }, singleLine = true,
+                                    modifier = Modifier.fillMaxWidth())
+                                if (raceDist != null || raceDate.isNotEmpty()) TextButton(onClick = {
+                                    raceDist = null; raceDate = ""; raceTarget = ""; raceName = ""
+                                }) { Text("Clear race goal") }
                                 Text("For age and sex comparisons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
                                 val det = r.profileDetected
                                 Text(if (det?.sex != null || det?.birthDate != null)

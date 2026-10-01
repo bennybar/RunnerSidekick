@@ -106,6 +106,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - VO₂ max history: labelled dots on a zoomed scale with gridlines (position encodes the value, so a narrow 46–47 range
   isn't exaggerated as bar lengths would be); gaps break the line.
 
+## Race goal, HRV trend, weekly digest (2026-10-01, v0.11.0)
+- Race goal in Settings → phase (base, build, sharpen, taper, race week, recovery): leads Today's "Stands out" with
+  prediction vs target, orders the weekly focus, and frames the coach (verified live: it plans from the build phase).
+- Compare → HRV: this week against your own range on the current watch, with a 12-week chart split at watch changes.
+- Monday weekly digest notification. Compiled; not yet seen firing (it needs a Monday morning).
+- URL and token fields no longer autocorrect (it changed "http" to "https").
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

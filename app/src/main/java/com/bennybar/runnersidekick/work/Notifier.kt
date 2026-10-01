@@ -27,21 +27,24 @@ import java.time.LocalTime
 object Notifier {
     private const val CH_MORNING = "morning"
     private const val CH_RUNS = "runs"
+    private const val CH_WEEKLY = "weekly"
     private const val ID_MORNING = 1
+    private const val ID_WEEKLY = 2
 
     fun createChannels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_MORNING, "Morning briefing", NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CH_RUNS, "Run reports", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_WEEKLY, "Weekly digest", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     private fun allowed(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun openApp(ctx: Context, run: String? = null) = PendingIntent.getActivity(
-        ctx, run?.hashCode() ?: 0,
+    private fun openApp(ctx: Context, run: String? = null, report: Long? = null) = PendingIntent.getActivity(
+        ctx, run?.hashCode() ?: report?.toInt() ?: 0,
         Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .apply { run?.let { putExtra(MainActivity.EXTRA_OPEN_RUN, it) } },
+            .apply { run?.let { putExtra(MainActivity.EXTRA_OPEN_RUN, it) }; report?.let { putExtra(MainActivity.EXTRA_OPEN_REPORT, it) } },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -76,6 +79,25 @@ object Notifier {
                     .build()
                 @Suppress("MissingPermission") nm.notify(ID_MORNING, n)
                 repo.settings.markMorningNotified(r.localDate, stateKey)
+            }
+        }
+
+        // Weekly digest: on Monday, from the start of the morning window, once per week
+        val monday = local.toLocalDate().with(java.time.DayOfWeek.MONDAY)
+        if (local.dayOfWeek == java.time.DayOfWeek.MONDAY && local.toLocalTime() >= start && state.weeklyWeek != monday.toString()) {
+            val w = repo.weekly.first()?.value
+            if (w != null && w.weekStart == monday.minusWeeks(1).toString()) {
+                val focus = repo.focus.first()?.value?.current?.title
+                val body = "This week's focus: ${focus ?: "pick one in Today"}" + "\n" + "Next week from the review: ${w.nextWeekFocus.text}"
+                val n = NotificationCompat.Builder(ctx, CH_WEEKLY)
+                    .setSmallIcon(R.drawable.ic_stat_pulse)
+                    .setContentTitle("Last week: ${w.headline}")
+                    .setContentText("This week's focus: ${focus ?: "pick one in Today"}")
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                    .setContentIntent(openApp(ctx, report = w.id)).setAutoCancel(true)
+                    .build()
+                @Suppress("MissingPermission") nm.notify(ID_WEEKLY, n)
+                repo.settings.markWeeklyNotified(monday.toString())
             }
         }
 

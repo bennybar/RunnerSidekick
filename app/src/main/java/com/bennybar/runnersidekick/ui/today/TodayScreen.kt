@@ -164,6 +164,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                             "run" -> t.id?.let(onOpenRun)
                             "compare" -> { com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }
                             "insights" -> onOpenInsights()
+                            "race" -> onOpenSettings()
                         }
                     }
                 }
@@ -361,7 +362,7 @@ private fun StandsOut(items: List<com.bennybar.runnersidekick.data.remote.Highli
                 else -> MaterialShapes.Cookie4Sided
             }
             row(h.title, supporting = h.text.ifBlank { null }, icon = icon, iconShape = shape, accent = TONE_ACCENT[h.tone],
-                onClick = h.target?.takeIf { it.type in setOf("run", "compare", "insights") }?.let { t -> { onOpen(t) } })
+                onClick = h.target?.takeIf { it.type in setOf("run", "compare", "insights", "race") }?.let { t -> { onOpen(t) } })
         }
     }
 }

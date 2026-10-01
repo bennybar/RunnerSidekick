@@ -167,18 +167,51 @@ def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
 
 # ---------------------------------------------------------------- HRV
 
-def hrv_item(conn, source: str, sex: str, age: int, today: date) -> dict:
-    since = (today - timedelta(days=27)).isoformat()
-    vals = [v for k, v in rp.series(conn, source, "hrv_overnight_avg", today.isoformat()).items() if k >= since]
-    out = {"id": "hrv", "title": "Overnight HRV", "source": None, "status": "no_reference",
-           "headline": f"Your overnight HRV: {round(median(vals))} ms" if vals else "No overnight HRV yet",
-           "detail": ("No population reference is shown: published HRV norms are measured differently (short daytime or "
-                      "early-morning windows), so they can't be compared fairly with Garmin's whole-night average. Your own "
-                      "trend in Trends is the meaningful comparison."),
-           "caveats": []}
-    if vals:
-        out.update(value=round(median(vals)), unit="ms", days=len(vals))
-    return out
+def hrv_item(conn, source: str, today: date) -> dict:
+    """Overnight HRV against your own usual range on the current watch (population norms aren't comparable with a
+    whole-night average). Weekly medians for the last 12 weeks; a watch change starts a new segment."""
+    from .analytics import baseline as bl
+    base = {"id": "hrv", "title": "Overnight HRV", "source": "your own nights"}
+    # Comparable HRV only: the measurement method currently in use (as in Trends)
+    latest = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured"}, sort=[("local_date", -1)])
+    if latest is None:
+        return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "Garmin records it while you sleep with the watch on."}
+    values = rp.series(conn, source, "hrv_overnight_avg", today.isoformat(), latest.get("method"))
+    era = rp.device_era_start(conn, source, today)
+    in_era = {d: v for d, v in values.items() if not era or d >= era.isoformat()}
+    week = [v for d, v in in_era.items() if d >= (today - timedelta(days=6)).isoformat()]
+    b = bl.compute_baseline(in_era, today, era_start=era)
+    weeks: list[dict] = []
+    prev_era = None  # era start of the previous plotted week (None is a valid era: the first watch)
+    for k in range(11, -1, -1):
+        ws = today - timedelta(days=today.weekday() + 7 * k)
+        vals = [v for d, v in values.items() if ws.isoformat() <= d <= (ws + timedelta(days=6)).isoformat()]
+        if not vals:
+            continue
+        e = rp.device_era_start(conn, source, min(ws + timedelta(days=6), today))
+        weeks.append({"week": ws.isoformat(), "value": round(median(vals)), "nights": len(vals), "new_watch": bool(weeks) and e != prev_era})
+        prev_era = e
+    chart = {"type": "weekly_dots", "unit": "ms", "decimals": 0, "step": 5, "points": weeks,
+             "band": [round(b.q1), round(b.q3)] if b.sufficient else None}
+    if not week:
+        return {**base, "status": "unavailable", "headline": "No overnight HRV this week", "chart": chart,
+                "detail": "No nights with HRV in the last 7 days."}
+    v = round(median(week))
+    if not b.sufficient:
+        n = len([d for d in in_era if d >= (today - timedelta(days=bl.WINDOW_DAYS)).isoformat()])
+        return {**base, "status": "ok", "value": v, "unit": "ms", "headline": f"This week: {v} ms · still learning your range",
+                "detail": f"Your usual range needs {bl.MIN_VALID} nights on this watch in the last {bl.WINDOW_DAYS} days; {n} so far.",
+                "caveats": ["HRV readings from different watches aren't compared."] if era else [], "chart": chart}
+    where = "below" if v < b.q1 else "above" if v > b.q3 else "within"
+    return {**base, "status": "ok", "value": v, "unit": "ms",
+            "headline": f"This week: {v} ms, {where} your usual range",
+            "detail": f"Median of {len(week)} night{'s' if len(week) != 1 else ''} this week, against your usual {round(b.q1)}–{round(b.q3)} ms "
+                      f"(middle half of the last {bl.WINDOW_DAYS} days on this watch). Higher or lower than usual is a change worth "
+                      "noticing alongside sleep and training, not a verdict on its own.",
+            "method": "Weekly median of Garmin's overnight HRV; your usual range is the 25th–75th percentile of the last 28 days on the "
+                      "current watch, as for Today's readings.",
+            "caveats": ["Population HRV norms are measured differently (short daytime or early-morning windows), so they aren't used."],
+            "chart": chart}
 
 
 # ---------------------------------------------------------------- age grading
@@ -242,5 +275,5 @@ def build(conn, source: str, today: date) -> dict:
     g = rp.get_setting(conn, "garmin_fitness", None) or {}
     vo2 = vo2_item(p["sex"], p["age"], g)
     out["items"] = [vo2, fitness_age_item(p["age"], g, vo2), rhr_item(conn, source, p["sex"], p["age"], today),
-                    age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, p["sex"], p["age"], today)]
+                    age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]
     return out

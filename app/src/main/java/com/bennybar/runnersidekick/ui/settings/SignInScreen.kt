@@ -111,9 +111,14 @@ fun SignInScreen() {
         error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
         TextButton(onClick = { manual = !manual }) { Text(if (manual) "Hide device token" else "Use a device token instead") }
         if (manual) {
-            OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(token, { token = it }, label = { Text("Device token (rsk_…)") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            // URL and token keyboards: no autocorrect (it turns "http" into "https" and mangles tokens)
+            OutlinedTextField(url, { url = it.trim() }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    autoCorrectEnabled = false))
+            OutlinedTextField(token, { token = it.trim() }, label = { Text("Device token (rsk_…)") }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    autoCorrectEnabled = false))
             Button(enabled = !busy && url.isNotBlank() && token.startsWith("rsk_"), modifier = Modifier.fillMaxWidth(), onClick = {
                 scope.launch {
                     busy = true; error = null

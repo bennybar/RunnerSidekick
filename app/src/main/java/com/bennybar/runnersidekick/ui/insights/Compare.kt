@@ -122,6 +122,15 @@ private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
                     "ages" -> AgesChart(c)
                     "distribution" -> DistributionChart(c)
                     "age_grade" -> AgeGradeChart(i.rows, onOpenRun)
+                    "weekly_dots" -> com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
+                        c["points"]!!.jsonArray.map { it.jsonObject }.map { p ->
+                            com.bennybar.runnersidekick.ui.components.WeekPoint(java.time.LocalDate.parse(p["week"]!!.jsonPrimitive.content),
+                                p.num("value") ?: 0.0, p["new_watch"]?.jsonPrimitive?.content == "true")
+                        },
+                        decimals = c.num("decimals")?.toInt() ?: 0, step = c.num("step") ?: 5.0, caption = "Weekly median (${c["unit"]?.jsonPrimitive?.content})",
+                        description = i.title,
+                        band = c["band"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.jsonArray?.let { b ->
+                            b[0].jsonPrimitive.doubleOrNull!! to b[1].jsonPrimitive.doubleOrNull!! })
                 }
             }
             i.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }

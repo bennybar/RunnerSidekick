@@ -54,22 +54,28 @@ import com.bennybar.runnersidekick.ui.theme.RunnerTheme
 import com.bennybar.runnersidekick.ui.today.TodayScreen
 
 class MainActivity : ComponentActivity() {
-    /** A run to open, from a run-report notification. */
+    /** A run or report to open, from a notification ("activity/<id>" or "report/<id>"). */
     private val openRun = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) openRun.value = intent?.getStringExtra(EXTRA_OPEN_RUN)
+        if (savedInstanceState == null) openRun.value = route(intent)
         setContent { RunnerTheme { App(openRun) } }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra(EXTRA_OPEN_RUN)?.let { openRun.value = it }
+        route(intent)?.let { openRun.value = it }
     }
 
-    companion object { const val EXTRA_OPEN_RUN = "open_run" }
+    private fun route(i: android.content.Intent?): String? = i?.getStringExtra(EXTRA_OPEN_RUN)?.let { "activity/$it" }
+        ?: i?.getLongExtra(EXTRA_OPEN_REPORT, -1L)?.takeIf { it >= 0 }?.let { "report/$it" }
+
+    companion object {
+        const val EXTRA_OPEN_RUN = "open_run"
+        const val EXTRA_OPEN_REPORT = "open_report"
+    }
 }
 
 // Material 3 motion: emphasized easing; fade-through between tabs, a horizontal shared axis into and out of details.
@@ -135,7 +141,7 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     val pendingRun by openRun.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(pendingRun) {
-        pendingRun?.let { nav.navigate("activity/$it"); openRun.value = null }
+        pendingRun?.let { nav.navigate(it); openRun.value = null }
     }
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination

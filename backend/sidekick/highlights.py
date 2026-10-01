@@ -34,7 +34,8 @@ def _day(ds: str) -> str:
     return f"{d:%a} {d.day} {d:%b}"
 
 
-def build(conn, source: str, today: date, comparison: dict | None = None, focus: dict | None = None) -> list[dict]:
+def build(conn, source: str, today: date, comparison: dict | None = None, focus: dict | None = None,
+          race: dict | None = None) -> list[dict]:
     out: list[dict] = []
     g = rp.get_setting(conn, "garmin_fitness", None) or {}
 
@@ -103,4 +104,8 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
                         "source": "your runs"})
 
     out.sort(key=lambda h: TONE_ORDER[h["tone"]])
+    if race:
+        # An upcoming race frames everything else, so it always leads
+        out.insert(0, {"id": "race", "tone": "info", "kind": "running", "title": f"{race['headline']} · {race['phase'].replace('_', ' ').capitalize()}",
+                       "text": race.get("prediction_text") or race["phase_note"], "target": {"type": "race"}, "source": "your race goal"})
     return out[:MAX_ITEMS]

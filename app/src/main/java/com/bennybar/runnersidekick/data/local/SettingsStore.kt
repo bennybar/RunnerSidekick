@@ -35,7 +35,8 @@ data class LocalSettings(
 )
 
 /** Notification de-duplication state, kept on the phone. */
-data class NotifyState(val morningDate: String?, val morningState: String?, val runsSeen: Set<String>, val runsSeeded: Boolean)
+data class NotifyState(val morningDate: String?, val morningState: String?, val runsSeen: Set<String>, val runsSeeded: Boolean,
+                       val weeklyWeek: String? = null)
 
 /** Local preferences. The device token is encrypted with an AES-GCM key held in Android Keystore. */
 class SettingsStore(private val context: Context) {
@@ -50,6 +51,7 @@ class SettingsStore(private val context: Context) {
     private val kMorningState = stringPreferencesKey("notified_morning_state")
     private val kRunsSeen = stringSetPreferencesKey("notified_runs")
     private val kRunsSeeded = booleanPreferencesKey("notified_runs_seeded")
+    private val kWeekly = stringPreferencesKey("notified_weekly_week")
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -64,10 +66,12 @@ class SettingsStore(private val context: Context) {
     }
 
     val notifyState: Flow<NotifyState> = context.dataStore.data.map { p ->
-        NotifyState(p[kMorningDate], p[kMorningState], p[kRunsSeen] ?: emptySet(), p[kRunsSeeded] ?: false)
+        NotifyState(p[kMorningDate], p[kMorningState], p[kRunsSeen] ?: emptySet(), p[kRunsSeeded] ?: false, p[kWeekly])
     }
 
     suspend fun setNotificationsEnabled(on: Boolean) = context.dataStore.edit { it[kNotify] = on }
+
+    suspend fun markWeeklyNotified(weekStart: String) = context.dataStore.edit { it[kWeekly] = weekStart }
 
     suspend fun markMorningNotified(date: String, state: String) = context.dataStore.edit { it[kMorningDate] = date; it[kMorningState] = state }
 

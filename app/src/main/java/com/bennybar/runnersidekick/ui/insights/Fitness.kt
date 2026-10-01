@@ -1,7 +1,6 @@
 package com.bennybar.runnersidekick.ui.insights
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.text.drawText
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -196,86 +195,12 @@ private fun LoadBar(st: TrainingStatus) {
     }
 }
 
-/** VO2 max by week (Garmin's latest reading each week, last 8 weeks) as labelled dots. A dot's height is its value on
- *  a zoomed scale with whole-number gridlines, so small changes stay visible without the length distortion of bars.
- *  Weeks without a reading break the line and are marked as a gap. */
+/** VO2 max by week: Garmin's latest reading each week, last 8 weeks. */
 @Composable
 private fun Vo2Chart(series: List<com.bennybar.runnersidekick.data.remote.Point>) {
-    val cs = MaterialTheme.colorScheme
-    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     val weeks = series.groupBy { java.time.LocalDate.parse(it.date).let { d -> d.minusDays(d.dayOfWeek.value - 1L) } }
         .mapValues { (_, pts) -> pts.maxBy { it.date }.value }.toSortedMap().entries.toList().takeLast(8)
-    if (weeks.size < 2) return
-    // Slots in order: a week, or a gap where weeks have no reading (narrower, never joined by the line)
-    val slots = buildList<Pair<java.time.LocalDate, Double>?> {
-        weeks.forEachIndexed { i, e ->
-            if (i > 0 && e.key.minusWeeks(1) != weeks[i - 1].key) add(null)
-            add(e.key to e.value)
-        }
-    }
-    val weights = slots.map { if (it == null) 0.6f else 1f }
-    val lo = kotlin.math.floor(weeks.minOf { it.value } * 2 - 1) / 2
-    val hi = kotlin.math.ceil(weeks.maxOf { it.value } * 2 + 1) / 2
-    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val small = MaterialTheme.typography.labelSmall.copy(color = cs.onSurfaceVariant)
-    val strong = MaterialTheme.typography.labelLarge.copy(color = cs.primary)
-    val grid = cs.outlineVariant
-    val line = cs.primary.copy(alpha = 0.45f)
-    val dot = cs.primary.copy(alpha = 0.7f)
-    val gapLabel = MaterialTheme.typography.labelSmall.copy(color = cs.outline)
-    val gap = 6.dp
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(120.dp).semantics {
-            contentDescription = "VO2 max by week: " + weeks.joinToString { "${Format.shortDate(it.key.toString())} %.1f".format(it.value) }
-        }) {
-            val spacing = gap.toPx()
-            val axis = 28.dp.toPx()  // right margin for the gridline labels, outside the plot
-            val plotW = size.width - axis
-            val unit = (plotW - spacing * (slots.size - 1)) / weights.sum()
-            var x0 = 0f
-            val centers = weights.map { w -> (x0 + w * unit / 2).also { x0 += w * unit + spacing } }
-            val top = 26.dp.toPx()
-            val bottom = size.height - 8.dp.toPx()
-            fun y(v: Double) = (bottom - (v - lo) / (hi - lo) * (bottom - top)).toFloat()
-            // Whole-number gridlines, labelled at the right edge
-            var g = kotlin.math.ceil(lo)
-            while (g <= hi) {
-                drawLine(grid, Offset(0f, y(g)), Offset(plotW, y(g)), strokeWidth = 1.dp.toPx())
-                val t = measurer.measure("%.0f".format(g), small)
-                drawText(t, topLeft = Offset(size.width - t.size.width, y(g) - t.size.height / 2))
-                g += 1
-            }
-            slots.forEachIndexed { k, sl ->
-                if (sl == null) {
-                    val t = measurer.measure("gap", gapLabel)
-                    drawText(t, topLeft = Offset(centers[k] - t.size.width / 2, bottom - t.size.height))
-                } else if (k > 0 && slots[k - 1] != null) {
-                    drawLine(line, Offset(centers[k - 1], y(slots[k - 1]!!.second)), Offset(centers[k], y(sl.second)), strokeWidth = 2.dp.toPx())
-                }
-            }
-            slots.forEachIndexed { k, sl ->
-                if (sl == null) return@forEachIndexed
-                val last = k == slots.lastIndex
-                val c = Offset(centers[k], y(sl.second))
-                drawCircle(if (last) cs.primary else dot, (if (last) 7 else 5).dp.toPx(), c)
-                val t = measurer.measure("%.1f".format(sl.second), if (last) strong else small)
-                drawText(t, topLeft = Offset(c.x - t.size.width / 2, c.y - t.size.height - 8.dp.toPx()))
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(end = 28.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-            // The month is named only where it changes (6 Jul, 13, 20, … 3 Aug), so the labels fit
-            var shownMonth: java.time.Month? = null
-            slots.forEachIndexed { k, sl ->
-                val label = sl?.first?.let { d ->
-                    (if (d.month != shownMonth) "${d.dayOfMonth} ${d.month.getDisplayName(java.time.format.TextStyle.SHORT, locale)}"
-                    else "${d.dayOfMonth}").also { shownMonth = d.month }
-                } ?: ""
-                Text(label,
-                    style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.weight(weights[k]))
-            }
-        }
-        Text("By week (latest Garmin reading)" + if (slots.any { it == null }) " · gap = weeks without a reading" else "",
-            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-    }
+    com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
+        weeks.map { com.bennybar.runnersidekick.ui.components.WeekPoint(it.key, it.value) }, decimals = 1, step = 1.0,
+        caption = "By week (latest Garmin reading)", description = "VO2 max by week")
 }

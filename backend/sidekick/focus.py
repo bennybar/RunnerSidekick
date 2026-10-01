@@ -97,6 +97,14 @@ def options(conn, source: str, today: date) -> list[dict]:
         reasons["recovery"] = f"Garmin rates your training as {status.lower()}."
     reasons.setdefault("consistency", "Regular running is what makes every other trend in the app meaningful.")
     order = GOAL_ORDER.get(goal or "", list(reasons))
+    # A race goal sets the priorities by training phase
+    from . import race as rc
+    rs = rc.status(conn, today)
+    if rs:
+        order = rc.FOCUS_ORDER[rs["phase"]]
+        if rs["phase"] in ("taper", "race_week", "recovery"):
+            reasons["recovery"] = f"{rs['headline']}: {rs['phase_note']}"
+        reasons.setdefault("easy_runs", f"{rs['phase'].replace('_', ' ').capitalize()} phase for {rs['label']}: most running should be easy.")
     # Reported pain or illness in the last 3 days comes first, as it does in the morning recommendation
     flagged = conn.checkin.find_one({"deleted": False, "$or": [{"pain": True}, {"illness": True}],
                                      "local_date": {"$gte": (today - timedelta(days=3)).isoformat()}})

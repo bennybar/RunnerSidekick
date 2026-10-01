@@ -358,6 +358,10 @@ data class SettingsDto(
     @SerialName("profile_sex") val profileSex: String? = null,
     @SerialName("profile_birth_date") val profileBirthDate: String? = null,
     @SerialName("profile_detected") val profileDetected: CompareProfile? = null,
+    @SerialName("race_date") val raceDate: String? = null,
+    @SerialName("race_distance") val raceDistance: String? = null,
+    @SerialName("race_target_s") val raceTargetS: Int? = null,
+    @SerialName("race_name") val raceName: String? = null,
 )
 
 @Serializable

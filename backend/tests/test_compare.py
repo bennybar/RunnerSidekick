@@ -45,7 +45,9 @@ def test_profile_from_garmin_with_override_and_items():
     assert v["rating"] == "Excellent" and v["percentile"] == round(80 + (49.0 - 46.4) / (52.5 - 46.4) * 15)
     assert items["fitness_age"]["fitness_age"] == 40.4 and "younger" in items["fitness_age"]["headline"]
     assert items["resting_hr"]["status"] == "ok" and items["resting_hr"]["caveats"]
-    assert items["hrv"]["status"] == "no_reference"
+    h = items["hrv"]
+    assert h["status"] == "ok" and h["chart"]["band"] and h["chart"]["points"]  # own range, not a population norm
+    assert any(w in h["headline"] for w in ("within", "below", "above"))
     assert any(r["kind"] == "prediction" for r in items["age_grade"]["rows"])
     set_setting(conn, "profile_sex", "female")
     assert compare.build(conn, "fixture", ANCHOR)["profile"]["source"] == "settings"
@@ -68,3 +70,12 @@ def test_compare_endpoint_and_clearing_override(tmp_path):
     assert client.get("/v1/settings", headers=h).json()["profile_birth_date"] == "1990-01-01"
     client.put("/v1/settings", json={"profile_birth_date": None}, headers=h)
     assert client.get("/v1/settings", headers=h).json()["profile_birth_date"] is None
+
+
+def test_hrv_range_restarts_after_a_watch_change():
+    conn = synced()
+    conn.activity.update_many({"local_date": {"$lt": "2026-09-25"}}, {"$set": {"device_id": "old-watch"}})
+    conn.activity.update_many({"local_date": {"$gte": "2026-09-25"}}, {"$set": {"device_id": "new-watch"}})
+    h = compare.hrv_item(conn, "fixture", ANCHOR)
+    assert "learning" in h["headline"]  # only a few nights on the new watch
+    assert any(p["new_watch"] for p in h["chart"]["points"])

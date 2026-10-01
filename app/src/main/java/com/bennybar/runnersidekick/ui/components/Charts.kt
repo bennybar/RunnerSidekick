@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import com.bennybar.runnersidekick.ui.theme.LocalDataColors
 
@@ -121,5 +122,94 @@ fun SeriesChart(
             Spacer(Modifier.weight(1f))
             Text("${((t.last() - t.first()) / 60).toInt()} min", style = MaterialTheme.typography.labelSmall, color = onVar)
         }
+    }
+}
+
+
+data class WeekPoint(val week: java.time.LocalDate, val value: Double, val newWatch: Boolean = false)
+
+/**
+ * Weekly values as labelled dots on a zoomed scale with gridlines every [step] (position encodes the value, so a narrow
+ * range isn't exaggerated as bar lengths would be). Weeks without a value are marked "gap" and a watch change
+ * "new watch"; the line is never drawn across either. [band] shades a personal range (e.g. your usual HRV).
+ */
+@Composable
+fun WeeklyDotChart(points: List<WeekPoint>, decimals: Int, step: Double, caption: String, description: String,
+                   band: Pair<Double, Double>? = null) {
+    if (points.size < 2) return
+    val cs = MaterialTheme.colorScheme
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val fmt = "%.${decimals}f"
+    // Slots in order: a week, or a marker ("gap" for missing weeks, "new watch" for a device change)
+    val slots = buildList<Any> {
+        points.forEachIndexed { i, p ->
+            if (i > 0 && p.newWatch) add("new watch")
+            else if (i > 0 && p.week.minusWeeks(1) != points[i - 1].week) add("gap")
+            add(p)
+        }
+    }
+    val weights = slots.map { if (it is String) 0.7f else 1f }
+    val values = points.map { it.value } + listOfNotNull(band?.first, band?.second)
+    val lo = kotlin.math.floor((values.min() - step / 2) / step) * step
+    val hi = kotlin.math.ceil((values.max() + step / 2) / step) * step
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val small = MaterialTheme.typography.labelSmall.copy(color = cs.onSurfaceVariant)
+    val strong = MaterialTheme.typography.labelLarge.copy(color = cs.primary)
+    val marker = MaterialTheme.typography.labelSmall.copy(color = cs.outline)
+    val gap = 6.dp
+    Column {
+        Canvas(Modifier.fillMaxWidth().height(120.dp).semantics {
+            contentDescription = "$description: " + points.joinToString { "${it.week} ${fmt.format(it.value)}" }
+        }) {
+            val spacing = gap.toPx()
+            val axis = 28.dp.toPx()  // right margin for gridline labels, outside the plot
+            val plotW = size.width - axis
+            val unit = (plotW - spacing * (slots.size - 1)) / weights.sum()
+            var x0 = 0f
+            val centers = weights.map { w -> (x0 + w * unit / 2).also { x0 += w * unit + spacing } }
+            val top = 26.dp.toPx()
+            val bottom = size.height - 8.dp.toPx()
+            fun y(v: Double) = (bottom - (v - lo) / (hi - lo) * (bottom - top)).toFloat()
+            band?.let { (a, b) -> drawRect(cs.primary.copy(alpha = 0.08f), Offset(0f, y(b)), androidx.compose.ui.geometry.Size(plotW, y(a) - y(b))) }
+            var g = lo
+            while (g <= hi + 1e-9) {
+                drawLine(cs.outlineVariant, Offset(0f, y(g)), Offset(plotW, y(g)), strokeWidth = 1.dp.toPx())
+                val t = measurer.measure("%.0f".format(g), small)
+                drawText(t, topLeft = Offset(size.width - t.size.width, y(g) - t.size.height / 2))
+                g += step
+            }
+            slots.forEachIndexed { k, sl ->
+                if (sl is String) {
+                    val t = measurer.measure(sl.replace(" ", "\n"), marker)
+                    drawText(t, topLeft = Offset(centers[k] - t.size.width / 2, bottom - t.size.height))
+                } else if (k > 0 && slots[k - 1] is WeekPoint) {
+                    drawLine(cs.primary.copy(alpha = 0.45f), Offset(centers[k - 1], y((slots[k - 1] as WeekPoint).value)),
+                        Offset(centers[k], y((sl as WeekPoint).value)), strokeWidth = 2.dp.toPx())
+                }
+            }
+            slots.forEachIndexed { k, sl ->
+                if (sl !is WeekPoint) return@forEachIndexed
+                val last = k == slots.lastIndex
+                val c = Offset(centers[k], y(sl.value))
+                drawCircle(if (last) cs.primary else cs.primary.copy(alpha = 0.7f), (if (last) 7 else 5).dp.toPx(), c)
+                val t = measurer.measure(fmt.format(sl.value), if (last) strong else small)
+                drawText(t, topLeft = Offset(c.x - t.size.width / 2, c.y - t.size.height - 8.dp.toPx()))
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp, end = 28.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(gap)) {
+            // The month is named only where it changes (6 Jul, 13, 20, … 3 Aug), so the labels fit
+            var shownMonth: java.time.Month? = null
+            slots.forEachIndexed { k, sl ->
+                val label = (sl as? WeekPoint)?.week?.let { d ->
+                    (if (d.month != shownMonth) "${d.dayOfMonth} ${d.month.getDisplayName(java.time.format.TextStyle.SHORT, locale)}"
+                    else "${d.dayOfMonth}").also { shownMonth = d.month }
+                } ?: ""
+                Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.weight(weights[k]))
+            }
+        }
+        Text(caption + (if (slots.any { it == "gap" }) " · gap = weeks without a reading" else "") +
+            (if (band != null) " · shaded = your usual range" else ""),
+            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
     }
 }

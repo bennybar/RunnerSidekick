@@ -83,6 +83,10 @@ class SettingsIn(BaseModel):
     morning_window_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     profile_sex: Literal["male", "female"] | None = None          # overrides Garmin's profile for comparisons
     profile_birth_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    race_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    race_distance: Literal["5k", "10k", "half", "marathon"] | None = None
+    race_target_s: int | None = Field(default=None, ge=600, le=36000)
+    race_name: str | None = Field(default=None, max_length=60)
 
 
 def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
@@ -265,7 +269,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if body is not None and d == today(conn):
             from . import compare, highlights
             from . import focus as fc
-            body["highlights"] = highlights.build(conn, cfg.source, d, compare.build(conn, cfg.source, d), fc.current(conn, cfg.source, d))
+            from . import race
+            body["race"] = race.status(conn, d)
+            body["highlights"] = highlights.build(conn, cfg.source, d, compare.build(conn, cfg.source, d), fc.current(conn, cfg.source, d),
+                                                  body["race"])
         return body
 
     @api.get("/v1/trends")
@@ -547,7 +554,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00"),
                 "profile_sex": rp.get_setting(conn, "profile_sex", None),
                 "profile_birth_date": rp.get_setting(conn, "profile_birth_date", None),
-                "profile_detected": rp.get_setting(conn, "source_profile", None)}
+                "profile_detected": rp.get_setting(conn, "source_profile", None),
+                **{k: rp.get_setting(conn, k, None) for k in ("race_date", "race_distance", "race_target_s", "race_name")}}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):
@@ -561,7 +569,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         for k, v in body.model_dump(exclude_unset=True).items():
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
-                if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date"):
+                if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date", "race_date", "race_distance",
+                         "race_target_s", "race_name"):
                     conn.user_settings.delete_one({"key": k})
                 continue
             set_setting(conn, k, v)

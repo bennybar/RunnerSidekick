@@ -182,7 +182,7 @@ coefficient of variation is > 0.15; long if moving time ≥ max(60 min, 1.3× th
 time below the zone-3 floor: easy (≥ 70 %), tempo (< 40 %), else other. An inferred intent never produces the
 "meant to be easy" finding; the app shows it as one line ("Looks like: …") that can be corrected.
 
-## AI coach — `coach.py` (`coach-1.3`)
+## AI coach — `coach.py` (`coach-1.4`)
 
 Cross-domain insights (≤ 4) and recommendations (≤ 4; training, recovery, sleep, pacing, habits) written by the
 selected OpenAI model from a bundle of deterministic outputs only: profile, today's plan and advice, today's readings,
@@ -210,7 +210,7 @@ never extrapolated (outside the table: "below the 40th" or "above the 95th").
 | Fitness age | Garmin's own fitness age, achievable age and previous value | shown next to the VO₂ max typical age |
 | Resting HR | NHANES 1999–2008, CDC NHSR 41, Tables 2–3 (2.5th–97.5th) | Seated clinic pulse reads higher than Garmin's resting HR, so the comparison flatters; this is stated on the card |
 | Age grade | USATF/Alan Jones 2025 road standards (5K, 10K, half, marathon; single ages 5–100) | grade = standard ÷ time; 60/70/80/90% = local/regional/national/world class; bests are segments, not races |
-| HRV | none | Published norms (e.g. Fitbit, 5-min windows at 6–7 am) aren't comparable with Garmin's whole-night average, so no position is shown |
+| HRV | your own nights | This week's median against your usual range (25th–75th percentile, last 28 days, current watch, ≥ 14 nights). Weekly medians for 12 weeks, split at watch changes. Population norms (e.g. Fitbit, 5-min windows at 6–7 am) aren't comparable with a whole-night average, so they aren't used |
 
 ## Daily AI summaries of Compare and Trends — `summaries.py` (`summary-1.3`)
 
@@ -237,3 +237,27 @@ At most four items, attention first, each linked to its detail:
 
 Today's order is: the day's call, what stands out, the readings, the focus, then one AI voice (the coach summary,
 or the report summary when there isn't one) and one insight.
+
+## Race goal — `race.py` (`race-1.0`)
+
+One race: date, distance (5K, 10K, half, marathon), optional target time and name. The phase comes from the weeks
+left, using common periodisation rules of thumb rather than a personal plan:
+
+| Phase | Weeks to race |
+|---|---|
+| race week | 0–6 days |
+| taper | ≤ taper length (5K/10K 1 week, half 2, marathon 3) |
+| sharpen | the 3 weeks before the taper |
+| build | the 6 weeks before that |
+| base | earlier |
+| recovery | after the race: 5K 4 days, 10K 7, half 10, marathon 21 |
+
+Effects: it leads "Stands out today", showing Garmin's predicted time against the target when both exist. It orders
+the weekly focus suggestions by phase (base: easy runs first; build: steady volume; sharpen: even pacing; taper, race
+week and recovery: recovery). It also goes to the coach (coach-1.4) as evidence, with the rule to plan backwards and
+never build volume in a taper.
+
+## Weekly digest (app)
+
+On Monday from the start of the morning window, once per week: last week's review headline, this week's focus and
+the review's next-week focus. Tapping opens the review.
