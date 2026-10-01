@@ -23,3 +23,6 @@ __pycache__/
 *.db-journal
 garmin_tokens/
 .env
+
+# Server data dir (health data, Garmin session) when deployed in-place
+/data/

@@ -1,6 +1,6 @@
 # /etc/systemd/system/runnersidekick.service
-# Runner Sidekick API. Listens on loopback only; TLS and the public hostname are handled by the reverse proxy
-# (deploy/nginx-runnersidekick.conf).
+# Runner Sidekick API, run as root. Listens on loopback only; TLS and the public hostname are handled by nginx
+# (deploy/nginx-runnersidekick.conf). Data and Garmin tokens: /var/www/RunnerSidekick/data (0700).
 [Unit]
 Description=Runner Sidekick API (runnersidekick.ibarak.org)
 After=network-online.target
@@ -8,36 +8,26 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=runnersidekick
-Group=runnersidekick
 WorkingDirectory=/var/www/RunnerSidekick/backend
 Environment=RSK_SOURCE=garmin
-Environment=RSK_DATA_DIR=/var/lib/runnersidekick
+Environment=RSK_DATA_DIR=/var/www/RunnerSidekick/data
 Environment=PYTHONUNBUFFERED=1
-# Secrets (OPENAI_API_KEY, optional RSK_* overrides). Mode 0600, owned by root.
+# Secrets (OPENAI_API_KEY, optional RSK_* overrides). Mode 0600.
 EnvironmentFile=-/etc/runnersidekick.env
 ExecStart=/var/www/RunnerSidekick/backend/.venv/bin/python -m sidekick serve --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=5
+UMask=0077
 
-# Data, Garmin tokens and device-token hashes live here (created 0700 by systemd).
-StateDirectory=runnersidekick
-StateDirectoryMode=0700
-
-# Hardening
+# Hardening (still useful as root): read-only system, writable data dir only
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+ReadWritePaths=/var/www/RunnerSidekick/data
 PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictSUIDSGID=true
-LockPersonality=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-ReadWritePaths=/var/lib/runnersidekick
-UMask=0077
 
 [Install]
 WantedBy=multi-user.target
