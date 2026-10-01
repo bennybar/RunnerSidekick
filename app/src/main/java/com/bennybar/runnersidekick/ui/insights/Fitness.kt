@@ -200,6 +200,7 @@ private fun LoadBar(st: TrainingStatus) {
 @Composable
 private fun Vo2Bars(series: List<com.bennybar.runnersidekick.data.remote.Point>) {
     val cs = MaterialTheme.colorScheme
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     val weeks = series.groupBy { java.time.LocalDate.parse(it.date).let { d -> d.minusDays(d.dayOfWeek.value - 1L) } }
         .mapValues { (_, pts) -> pts.maxBy { it.date }.value }.toSortedMap().entries.toList().takeLast(8)
     if (weeks.size < 2) return
@@ -228,7 +229,7 @@ private fun Vo2Bars(series: List<com.bennybar.runnersidekick.data.remote.Point>)
                         .background(if (last) cs.primary else cs.primary.copy(alpha = 0.35f),
                             androidx.compose.foundation.shape.RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 3.dp, bottomEnd = 3.dp)))
                     Spacer(Modifier.height(4.dp))
-                    Text("${week.dayOfMonth} ${week.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())}",
+                    Text("${week.dayOfMonth} ${week.month.getDisplayName(java.time.format.TextStyle.SHORT, locale)}",
                         style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1)
                 }
             }
