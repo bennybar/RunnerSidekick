@@ -95,15 +95,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   directly under the day's call, then readings; a single AI voice instead of two.
 
 ## Motion (2026-10-01, v0.8.0)
-- Predictive back: opted in (`enableOnBackInvokedCallback`). While swiping back, a detail screen (run, report, day)
-  shrinks and slides with the finger, rounding its corners, with the previous screen visible behind it; cancelling
-  snaps it back. Checked on the emulator.
+- Predictive back: opted in (`enableOnBackInvokedCallback`); the swipe drives Navigation's predictive-pop transitions
+  (Navigation 2.10 has separate ones for the gesture; its default is a centred shrink). Cancelling snaps back.
 - Material 3 motion: emphasized easing, fade-through between tabs, a horizontal shared axis for details; lists fade and
   reflow when tabs, ranges or cards change; expandable cards animate their height.
 
 ## Polish (2026-10-01, v0.10.0)
-- Back from any page, including a tab back to Today, shrinks it away as a card: corners round and a shadow appears
-  in the first moments of the gesture.
+- Back (button or swipe, from any page) is iOS-style, as in FairEmail: the page slides off to the right with the
+  finger at full size while the page below slides in from 48 dp left; forward is the mirror image. No scaling or cards.
 - VO₂ max history: labelled dots on a zoomed scale with gridlines (position encodes the value, so a narrow 46–47 range
   isn't exaggerated as bar lengths would be); gaps break the line.
 

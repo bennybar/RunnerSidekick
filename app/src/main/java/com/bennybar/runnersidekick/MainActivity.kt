@@ -3,9 +3,6 @@ package com.bennybar.runnersidekick
 import android.os.Bundle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.animation.core.animateDp
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -91,40 +88,24 @@ private val fadeThroughIn = androidx.compose.animation.fadeIn(spec(210, Emphasiz
     androidx.compose.animation.scaleIn(spec(210, EmphasizedDecelerate, 90), initialScale = 0.96f)
 private val fadeThroughOut = androidx.compose.animation.fadeOut(spec(90, EmphasizedAccelerate))
 
-private val pushIn = androidx.compose.animation.slideInHorizontally(spec(400)) { it / 4 } + androidx.compose.animation.fadeIn(spec(300))
-private val pushOut = androidx.compose.animation.slideOutHorizontally(spec(400)) { -it / 10 } + androidx.compose.animation.fadeOut(spec(250))
-// Back (gesture or button): the detail shrinks and slides toward the edge while the screen behind settles into place
-private val popIn = androidx.compose.animation.slideInHorizontally(spec(400)) { -it / 10 } +
-    androidx.compose.animation.fadeIn(spec(300)) + androidx.compose.animation.scaleIn(spec(400), initialScale = 0.97f)
-private val popOut = androidx.compose.animation.scaleOut(spec(400), targetScale = 0.9f) +
-    androidx.compose.animation.slideOutHorizontally(spec(400)) { it / 4 } + androidx.compose.animation.fadeOut(spec(350))
+// iOS-style horizontal navigation, as in FairEmail: no scaling, no fades on the moving pages.
+// Forward: the new page slides in from 48 dp to the right while the old one shifts 48 dp left and fades quickly.
+// Back (button or swipe): the page slides off to the right, dragged by the finger; the page below slides in from 48 dp left.
+private const val SHIFT_DP = 48
+private fun shift(density: Float) = (SHIFT_DP * density).toInt()
+private val slide = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
 
-/**
- * A detail destination. As soon as it starts to leave (the first moments of a back swipe) it becomes a card: rounded
- * corners and a shadow, so the page shrinking away never shows as a hard-edged rectangle. Navigation seeks this
- * transition with the gesture, so the keyframes front-load the change.
- */
+private fun pushIn(d: Float) = androidx.compose.animation.slideInHorizontally(slide) { shift(d) }
+private fun pushOut(d: Float) = androidx.compose.animation.slideOutHorizontally(slide) { -shift(d) } +
+    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(90, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+private fun popIn(d: Float) = androidx.compose.animation.slideInHorizontally(slide) { -shift(d) }
+private val popOut = androidx.compose.animation.slideOutHorizontally(slide) { it }
+
+/** A page that can be left with back: opaque, so the page below only shows where this one has slid away. */
 @Composable
-private fun androidx.compose.animation.AnimatedContentScope.Detail(content: @Composable () -> Unit) {
-    val visible = androidx.compose.animation.EnterExitState.Visible
-    val corner by transition.animateDp(label = "corner", transitionSpec = {
-        androidx.compose.animation.core.keyframes { durationMillis = 400; 28.dp at 40; 32.dp at 400 }
-    }) { if (it == visible) 0.dp else 32.dp }
-    val lift by transition.animateDp(label = "lift", transitionSpec = {
-        androidx.compose.animation.core.keyframes { durationMillis = 400; 10.dp at 40; 10.dp at 400 }
-    }) { if (it == visible) 0.dp else 10.dp }
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(corner)
-    androidx.compose.foundation.layout.Box(Modifier.shadow(lift, shape).clip(shape)
-        .background(androidx.compose.material3.MaterialTheme.colorScheme.surface)) { content() }
+private fun Page(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface)) { content() }
 }
-
-private val gestureIn = androidx.compose.animation.fadeIn(spec(300), initialAlpha = 0.6f) +
-    androidx.compose.animation.scaleIn(spec(400), initialScale = 0.97f)
-
-private fun gestureOut(edge: Int) = androidx.compose.animation.scaleOut(spec(400), targetScale = 0.9f) +
-    androidx.compose.animation.slideOutHorizontally(spec(400)) { w -> (if (edge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1 else 1) * w / 20 } +
-    // Opaque while the finger drags it (the page behind must not show through); fades only in the last stretch
-    androidx.compose.animation.fadeOut(spec(80, delay = 320))
 
 private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
 
@@ -151,6 +132,7 @@ private fun App(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
 @Composable
 private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
     val nav = rememberNavController()
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
     val pendingRun by openRun.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(pendingRun) {
         pendingRun?.let { nav.navigate("activity/$it"); openRun.value = null }
@@ -180,32 +162,29 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
         },
     ) { padding ->
         NavHost(nav, startDestination = "today",
-            enterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else pushIn },
-            exitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else pushOut },
-            // Every back (gesture or button), from a detail or from a tab to Today, shrinks the page away as a card
-            popEnterTransition = { popIn },
+            enterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else pushIn(density) },
+            exitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else pushOut(density) },
+            popEnterTransition = { popIn(density) },
             popExitTransition = { popOut },
-            // The back swipe has its own transitions in Navigation 2.10 (the default shrinks the page to ~70%, centred).
-            // Material's: the page shrinks to 90% and drifts toward the side being swiped from, the screen behind eases in.
-            predictivePopEnterTransition = { _ -> gestureIn },
-            predictivePopExitTransition = { edge -> gestureOut(edge) },
+            predictivePopEnterTransition = { _ -> popIn(density) },
+            predictivePopExitTransition = { _ -> popOut },
             modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
             }
             composable("insights") {
-                Detail { InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
+                Page { InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
                     onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") }) }
             }
-            composable("day/{date}") { Detail { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
-            composable("activities") { Detail { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) } }
-            composable("journal") { Detail { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
-            composable("settings") { Detail { SettingsScreen() } }
+            composable("day/{date}") { Page { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
+            composable("activities") { Page { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) } }
+            composable("journal") { Page { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
+            composable("settings") { Page { SettingsScreen() } }
             composable("activity/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                Detail { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
+                Page { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
             }
             composable("report/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                Detail {
+                Page {
                     ReportScreen(it.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate("activity/$id") },
                         onOpenReport = { id -> nav.navigate("report/$id") })
                 }
