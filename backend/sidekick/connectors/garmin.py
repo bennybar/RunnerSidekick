@@ -412,7 +412,22 @@ class GarminConnector:
         acute load vs Garmin's chronic range, load-balance feedback and heat acclimation."""
         rp_ = self._call("get_race_predictions") or {}
         ts = self._call("get_training_status", day.isoformat()) or {}
-        return normalise_fitness(rp_, ts)
+        out = normalise_fitness(rp_, ts)
+        fa = self._call("get_fitnessage_data", day.isoformat()) or {}
+        if fa.get("fitnessAge") is not None:
+            # Garmin's own fitness age and the inputs it reports (resting HR, BMI, vigorous activity)
+            out["fitness_age"] = {k: fa.get(k) for k in ("chronologicalAge", "fitnessAge", "achievableFitnessAge", "previousFitnessAge",
+                                                         "lastUpdated")} | {
+                "components": {k: (v.get("value") if isinstance(v, dict) else v) for k, v in (fa.get("components") or {}).items()}}
+        return out
+
+    def profile(self) -> dict | None:
+        """Sex and birth date only, for age/sex comparisons. Weight, height and the rest of the profile are not stored."""
+        ud = (self._call("get_user_profile") or {}).get("userData") or {}
+        sex = {"MALE": "male", "FEMALE": "female"}.get((ud.get("gender") or "").upper())
+        if not sex and not ud.get("birthDate"):
+            return None
+        return {"sex": sex, "birth_date": ud.get("birthDate"), "source": "garmin"}
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []

@@ -92,7 +92,7 @@ fun categoryStyle(category: String): Pair<ImageVector, RoundedPolygon> = when (c
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InsightsScreen(
-    onOpenDay: (String) -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit,
+    onOpenDay: (String) -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit, onOpenSettings: () -> Unit,
     vm: InsightsVm = viewModel(factory = factory(::InsightsVm)),
 ) {
     val data by vm.insights.collectAsStateWithLifecycle()
@@ -105,7 +105,9 @@ fun InsightsScreen(
     val busy by vm.busy.collectAsStateWithLifecycle()
     val coach by vm.coach.collectAsStateWithLifecycle()
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
+    val compare by vm.compare.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
+    LaunchedEffect(tab) { if (tab == 1) vm.loadCompare() }
     var method by remember { mutableStateOf<Insight?>(null) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
@@ -117,12 +119,16 @@ fun InsightsScreen(
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        listOf("Insights", "Trends").forEachIndexed { i, l ->
-                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
+                        listOf("Insights", "Compare", "Trends").forEachIndexed { i, l ->
+                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(l) }
                         }
                     }
                 }
                 if (tab == 1) {
+                    item { CompareSection(compare?.value, onOpenSettings = onOpenSettings, onOpenRun = onOpenRun) }
+                    return@LazyColumn
+                }
+                if (tab == 2) {
                     item {
                         TrendsSection(trends?.value, days, settings?.units ?: com.bennybar.runnersidekick.data.local.Units.METRIC, loading = busy,
                             onDays = vm::setDays, onOpenDay = onOpenDay, onOpenRun = onOpenRun)

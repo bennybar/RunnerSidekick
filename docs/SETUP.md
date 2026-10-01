@@ -5,7 +5,8 @@
 ```sh
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q
+mongod --dbpath /tmp/rsk-mongo --bind_ip 127.0.0.1 &   # records live in MongoDB (brew install mongodb-community)
+.venv/bin/python -m pytest -q                            # each test uses its own throwaway databases
 ```
 
 Configuration (environment variables):

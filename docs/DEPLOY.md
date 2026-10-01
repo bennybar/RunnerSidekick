@@ -5,10 +5,25 @@ Everything lives in `/var/www/RunnerSidekick` and runs as root:
 | Path | What |
 |---|---|
 | `/var/www/RunnerSidekick/backend` | code and `.venv` |
-| `/var/www/RunnerSidekick/data` | `garmin.db`, `garmin_tokens/`, `device_tokens.json` (dir 0700, files 0600) |
+| `/var/www/RunnerSidekick/data` | `secrets.json`, `users/<id>/garmin_tokens/` (dir 0700, files 0600); old SQLite files kept as a backup |
+| local MongoDB (`127.0.0.1:27017`) | all records: `rsk_app` (accounts) and `rsk_u<id>_garmin` (one database per user) |
 | `/etc/runnersidekick.env` | optional, only for `OPENAI_API_KEY` (0600) |
 
-No configuration is needed: the code always uses `<repo>/data` and Garmin.
+No configuration is needed: the code always uses the local MongoDB, `<repo>/data` and Garmin. MongoDB must listen on
+127.0.0.1 only (the default `bindIp`).
+
+## Moving from SQLite to MongoDB (once, done 2026-10-01)
+
+```sh
+cd /var/www/RunnerSidekick/backend
+systemctl stop runnersidekick
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m sidekick migrate-sqlite     # reads data/app.db and data/users/*/*.db; the files are left in place
+systemctl start runnersidekick
+```
+
+It refuses to write into databases that already hold data (`--replace` overwrites). Rollback: check out the previous
+commit and restart; the SQLite files were never changed.
 
 The API listens on `127.0.0.1:8765`. nginx terminates TLS and proxies only `/v1/`, so nothing in
 `/var/www/RunnerSidekick` is served as files.

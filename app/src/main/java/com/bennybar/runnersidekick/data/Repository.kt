@@ -73,6 +73,10 @@ class Repository(
 
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
     val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+    val compare: Flow<Cached<com.bennybar.runnersidekick.data.remote.CompareReport>?> =
+        observe("compare") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(it) }
+
+    suspend fun refreshCompare() = put("compare", api.getRaw("/v1/compare"))
 
     /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
     suspend fun pollCoach() {

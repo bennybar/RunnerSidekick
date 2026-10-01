@@ -182,7 +182,7 @@ coefficient of variation is > 0.15; long if moving time ≥ max(60 min, 1.3× th
 time below the zone-3 floor: easy (≥ 70 %), tempo (< 40 %), else other. An inferred intent never produces the
 "meant to be easy" finding; the app shows it as one line ("Looks like: …") that can be corrected.
 
-## AI coach — `coach.py` (`coach-1.2`)
+## AI coach — `coach.py` (`coach-1.3`)
 
 Cross-domain insights (≤ 4) and recommendations (≤ 4; training, recovery, sleep, pacing, habits) written by the
 selected OpenAI model from a bundle of deterministic outputs only: profile, today's plan and advice, today's readings,
@@ -192,3 +192,22 @@ summaries. Strict JSON schema. Accepted only if every item cites known evidence 
 told never to ask for more logging or check-ins. Cached by input hash; shares the daily AI budget with summaries.
 Key: the server's, or the runner's own key sent per request as `X-OpenAI-Key` (Keystore-encrypted on the phone,
 never stored by the server).
+coach-1.3: the summary must cite evidence; numbers written in words are rejected; each recommendation carries a
+direction (easier/same/harder), and "harder" is rejected while today's advice holds intensity back; confidence is capped by the
+strongest cited evidence (consistent insight: high, emerging: medium, others: low). All AI calls (summaries and coach)
+go through one append-only ledger reserved before each call; a spent budget is recorded, and the same failed input
+is retried no sooner than 30 minutes later.
+
+## Comparisons with your age and sex — `compare.py` (`compare-1.0`)
+
+Profile: sex and birth date from Garmin's user profile (stored alone; weight and height aren't), overridable in
+Settings. Missing values are asked for, never guessed. Positions are interpolated between published percentiles and
+never extrapolated (outside the table: "below the 40th" or "above the 95th").
+
+| Comparison | Reference | Notes |
+|---|---|---|
+| VO₂ max | Cooper Institute ratings as published by Garmin (40th/60th/80th/95th by decade, 20–79) | "Typical age" = age where the 40th–60th midpoint equals your value |
+| Fitness age | Garmin's own fitness age, achievable age and previous value | shown next to the VO₂ max typical age |
+| Resting HR | NHANES 1999–2008, CDC NHSR 41, Tables 2–3 (2.5th–97.5th) | Seated clinic pulse reads higher than Garmin's resting HR, so the comparison flatters; this is stated on the card |
+| Age grade | USATF/Alan Jones 2025 road standards (5K, 10K, half, marathon; single ages 5–100) | grade = standard ÷ time; 60/70/80/90% = local/regional/national/world class; bests are segments, not races |
+| HRV | none | Published norms (e.g. Fitbit, 5-min windows at 6–7 am) aren't comparable with Garmin's whole-night average, so no position is shown |

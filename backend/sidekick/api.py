@@ -81,6 +81,8 @@ class SettingsIn(BaseModel):
     ai_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._:\-]{1,64}$")
     morning_window_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     morning_window_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    profile_sex: Literal["male", "female"] | None = None          # overrides Garmin's profile for comparisons
+    profile_birth_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
 def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
@@ -392,6 +394,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2, "records": rp.records(conn, cfg.source),
                 "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
+    @api.get("/v1/compare")
+    def get_compare(conn=Depends(db)):
+        """You against people of your sex and age: VO2 max, fitness age, resting heart rate, HRV and age-graded times."""
+        from . import compare
+        return compare.build(conn, cfg.source, today(conn))
+
     @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
         with lock_reports:
@@ -491,7 +499,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
                 "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
                 "morning_window_start": rp.get_setting(conn, "morning_window_start", "06:00"),
-                "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00")}
+                "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00"),
+                "profile_sex": rp.get_setting(conn, "profile_sex", None),
+                "profile_birth_date": rp.get_setting(conn, "profile_birth_date", None),
+                "profile_detected": rp.get_setting(conn, "source_profile", None)}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):
@@ -505,7 +516,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         for k, v in body.model_dump(exclude_unset=True).items():
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
-                if k in ("goal", "available_minutes", "goal_type"):
+                if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date"):
                     conn.user_settings.delete_one({"key": k})
                 continue
             set_setting(conn, k, v)

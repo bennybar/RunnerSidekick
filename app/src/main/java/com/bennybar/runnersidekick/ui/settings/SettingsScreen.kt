@@ -126,6 +126,7 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 private val TIME = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
+private val BIRTH = Regex("^(19|20)\\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -235,9 +236,13 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     var end by remember(r) { mutableStateOf(r.morningWindowEnd) }
                     var aiOn by remember(r) { mutableStateOf(r.aiEnabled) }
                     var model by remember(r) { mutableStateOf(r.aiModel) }
-                    val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank()
-                    val dirty = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
-                        r.aiAvailable, start, end) != r
+                    var sex by remember(r) { mutableStateOf(r.profileSex) }
+                    var birth by remember(r) { mutableStateOf(r.profileBirthDate ?: "") }
+                    val birthOk = birth.isEmpty() || BIRTH.matches(birth)
+                    val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank() && birthOk
+                    val edited = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
+                        r.aiAvailable, start, end, profileSex = sex, profileBirthDate = birth.ifBlank { null }, profileDetected = r.profileDetected)
+                    val dirty = edited != r
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Group(title = "Training profile") {
                             custom {
@@ -257,6 +262,19 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                 OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit) }, label = { Text("Usual time per run (min)") }, singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                                 OutlinedTextField(tz, { tz = it }, label = { Text("Time zone (e.g. Asia/Jerusalem)") }, singleLine = true,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                                Text("For age and sex comparisons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                                val det = r.profileDetected
+                                Text(if (det?.sex != null || det?.birthDate != null)
+                                    "From Garmin: ${listOfNotNull(det.sex, det.birthDate).joinToString(", ")}. Set these only to override Garmin."
+                                    else "Garmin didn't provide these; set them to see comparisons.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
+                                    listOf(null to "As in Garmin", "male" to "Male", "female" to "Female")
+                                        .forEach { (k, l) -> FilterChip(sex == k, { sex = k }, { Text(l) }) }
+                                }
+                                OutlinedTextField(birth, { birth = it.filter { c -> c.isDigit() || c == '-' }.take(10) },
+                                    label = { Text("Birth date (YYYY-MM-DD, optional)") }, singleLine = true, isError = !birthOk,
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                                 Text("Heart-rate zones", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
                                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -319,8 +337,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         }
                         Button(
                             enabled = !busy && valid && dirty, modifier = Modifier.fillMaxWidth(),
-                            onClick = { vm.saveRemote(SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones,
-                                goalType, aiOn, model.trim(), r.aiAvailable, start, end)) },
+                            onClick = { vm.saveRemote(edited) },
                         ) { Text(if (dirty) "Save changes" else "Saved") }
                     }
                 }

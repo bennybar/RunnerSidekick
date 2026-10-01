@@ -81,6 +81,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
    TalkBack walkthrough not done (200 % font and dark mode checked).
 3. Multi-user (see roadmap below).
 
+## Review fixes, MongoDB, comparisons (2026-10-01)
+- Second external review: the P1 and P2 findings fixed with regression tests (see the commit "Fix findings from the second
+  external review"). Not done, by choice: an offline queue for plans and intent, race-specific planning, a redesign of
+  Today's competing sections, and full semantic AI validation (replaced by structured constraints).
+- Storage moved to the local MongoDB; one-time `migrate-sqlite`; every endpoint verified identical on real data.
+- Compare tab: VO₂ max percentile, fitness age, resting HR percentile and age-graded times against published references
+  for your sex and age, each with a chart and caveats. No HRV position: there's no comparable reference.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

@@ -115,6 +115,8 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     }
     val weekly = repo.weekly.state(null)
     val fitness = repo.fitness.state(null)
+    val compare = repo.compare.state(null)
+    fun loadCompare() = launchIo { repo.refreshCompare() }
     private val _days = MutableStateFlow(28)
     val days: StateFlow<Int> = _days.asStateFlow()
 

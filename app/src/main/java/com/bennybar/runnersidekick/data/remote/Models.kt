@@ -354,6 +354,9 @@ data class SettingsDto(
     @SerialName("ai_available") val aiAvailable: Boolean = false,
     @SerialName("morning_window_start") val morningWindowStart: String = "06:00",
     @SerialName("morning_window_end") val morningWindowEnd: String = "10:00",
+    @SerialName("profile_sex") val profileSex: String? = null,
+    @SerialName("profile_birth_date") val profileBirthDate: String? = null,
+    @SerialName("profile_detected") val profileDetected: CompareProfile? = null,
 )
 
 @Serializable
@@ -544,4 +547,46 @@ data class CoachView(
     val targets: Map<String, CoachTarget> = emptyMap(),
     val detail: String? = null,
     val previous: CoachView? = null,
+)
+
+@Serializable
+data class CompareProfile(
+    val sex: String? = null,
+    @SerialName("birth_date") val birthDate: String? = null,
+    val age: Int? = null,
+    val source: String? = null,
+)
+
+@Serializable
+data class AgeGradeRow(
+    val distance: String,
+    val label: String,
+    val kind: String,                                  // best | prediction
+    @SerialName("time_s") val timeS: Double,
+    val date: String? = null,
+    @SerialName("source_id") val sourceId: String? = null,
+    @SerialName("age_grade_pct") val ageGradePct: Double,
+    @SerialName("class") val gradeClass: String,
+    @SerialName("age_graded_time_s") val ageGradedTimeS: Double,
+)
+
+@Serializable
+data class CompareItem(
+    val id: String,
+    val title: String,
+    val status: String,                                // ok | unavailable | no_reference
+    val headline: String? = null,
+    val detail: String? = null,
+    val method: String? = null,
+    val source: String? = null,
+    val caveats: List<String> = emptyList(),
+    val rows: List<AgeGradeRow> = emptyList(),
+    val chart: kotlinx.serialization.json.JsonObject? = null,
+)
+
+@Serializable
+data class CompareReport(
+    val profile: CompareProfile = CompareProfile(),
+    val missing: List<String> = emptyList(),
+    val items: List<CompareItem> = emptyList(),
 )

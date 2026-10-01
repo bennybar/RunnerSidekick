@@ -18,8 +18,8 @@ Status: accepted for prototype · 2026-10-01
 2. **Client:** single-module Kotlin/Compose/Material 3 app, Google-app styling (dynamic colour, large top app bars,
    NavigationBar). Manual DI (`RunnerApp` holds one `Repository`); ViewModels per screen. A multi-module split would
    be premature for a single-user prototype.
-3. **Backend:** Python 3.12 + FastAPI + SQLite, colocated in `backend/`. Plain numbered SQL migrations
-   (`backend/sidekick/migrations`) applied on connect, so there's no Alembic dependency.
+3. **Backend:** Python 3.12 + FastAPI, colocated in `backend/`. Storage was SQLite until 2026-10-01 and is now the
+   server's local MongoDB (see the note at the end).
 4. **One database per source** (`~/.runner-sidekick/garmin.db`, `fixture.db`). Synthetic and live records can't mix
    by construction. The API reports `mode`/`synthetic`; the app clears its cache on a mode change and shows a
    "Demo data" badge.
@@ -70,3 +70,13 @@ app/src/main/java/com/bennybar/runnersidekick/
 - The SQLite connection-per-request plus WAL is adequate for one user, but it isn't a multi-user design.
 - Raw payloads are retained for 120 days (`RSK_RAW_RETENTION_DAYS`), separately from reports (kept until deleted).
 - A physical phone needs TLS or `adb reverse`. That's documented, not implemented.
+
+## Update 2026-10-01: MongoDB
+
+Storage moved to a local MongoDB at the owner's request. Accounts live in `rsk_app` and each user's records in
+their own database, `rsk_u<id>_<source>`. That keeps the per-user and per-source isolation and makes account
+deletion a database drop. Documents are stored natively, with unique indexes on natural keys. Integer ids come from
+per-database counters, so the app's ids didn't change. A standalone `mongod` has no multi-document transactions,
+so writes are single-document and idempotent: last-writer-wins upserts and an AI-call ledger that claims before it
+checks. `migrate-sqlite` imported the old files once and left them untouched. Every endpoint was compared on real
+data before and after the change and returned identical results.

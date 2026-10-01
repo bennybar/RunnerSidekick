@@ -129,7 +129,7 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             }
             composable("insights") {
                 InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
-                    onOpenReport = { nav.navigate("report/$it") })
+                    onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") })
             }
             composable("day/{date}") { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) }
             composable("activities") { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) }
