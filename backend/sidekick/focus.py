@@ -9,7 +9,8 @@ from statistics import median
 from . import reports as rp
 from .analytics import insights as ins
 from .analytics import running as rn
-from .db import many, one, put, utc_now
+from .db import first_weekday, many, one, put, utc_now
+from .db import week_start as db_week_start
 
 FOCUS_VERSION = "focus-1.0"
 FADE_TARGET_S = 5.0          # "even" = second half no more than 5 s/km slower than the first
@@ -33,8 +34,8 @@ GOAL_ORDER = {
 }
 
 
-def week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())
+def week_start(d: date, first: int = 0) -> date:
+    return db_week_start(d, first)
 
 
 def _runs(conn, source, start: date, end: date) -> list[dict]:
@@ -88,7 +89,7 @@ def options(conn, source: str, today: date) -> list[dict]:
     i = insights.get("intensity")
     if i and i["verdict"] == "pattern" and zones:
         reasons["easy_runs"] = f"{i['headline']}. Easy means below {zones['floors'][2]} bpm on your zones."
-    ws = week_start(today)
+    ws = week_start(today, first_weekday(conn))
     last = sum(a["moving_s"] or 0 for a in _runs(conn, source, ws - timedelta(days=7), ws - timedelta(days=1)))
     before = sum(a["moving_s"] or 0 for a in _runs(conn, source, ws - timedelta(days=35), ws - timedelta(days=8))) / 4
     if before and last > 1.5 * before:
@@ -203,7 +204,7 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date, params: dict |
 
 
 def current(conn, source: str, today: date) -> dict:
-    ws = week_start(today)
+    ws = week_start(today, first_weekday(conn))
     row = one(conn.weekly_focus, {"week_start": ws.isoformat()})
     opts = options(conn, source, today)
     if row is None and opts:

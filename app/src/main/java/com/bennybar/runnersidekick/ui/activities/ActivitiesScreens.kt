@@ -70,7 +70,6 @@ import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.factory
 import com.bennybar.runnersidekick.ui.theme.LocalDataColors
 import java.time.LocalDate
-import java.time.temporal.WeekFields
 import kotlin.math.roundToInt
 
 private val GARMIN_LABELS = mapOf(
@@ -106,6 +105,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
     val acts by vm.activities.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val firstDay by vm.weekStart.collectAsStateWithLifecycle()
     val units = settings?.units ?: Units.METRIC
     var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -123,10 +123,9 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
                     Filter.TREADMILL -> it.sport == "treadmill_running"
                 }
             }
-            val wf = WeekFields.ISO
-            val weeks = shown.groupBy { LocalDate.parse(it.localDate).with(wf.dayOfWeek(), 1) }
+            val weeks = shown.groupBy { Format.weekStart(LocalDate.parse(it.localDate), firstDay) }
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                weeks.entries.firstOrNull()?.let { (start, runs) -> item { WeekHero(start, runs, units) } }
+                weeks.entries.firstOrNull()?.let { (start, runs) -> item { WeekHero(start, runs, units, firstDay) } }
                 item {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Filter.entries.forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) }) }
@@ -161,12 +160,12 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
 }
 
 @Composable
-private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units) {
+private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units, firstDay: java.time.DayOfWeek) {
     val on = MaterialTheme.colorScheme.onPrimaryContainer
     val (d, du) = distanceParts(runs.sumOf { it.distanceM ?: 0.0 }, units)
     Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(if (start == LocalDate.now().with(WeekFields.ISO.dayOfWeek(), 1)) "This week" else "Week of ${Format.shortDate(start.toString())}",
+            Text(if (start == Format.weekStart(LocalDate.now(), firstDay)) "This week" else "Week of ${Format.shortDate(start.toString())}",
                 style = MaterialTheme.typography.titleMedium, color = on)
             Row {
                 BigStat(d, du, "distance", on, Modifier.weight(1f))

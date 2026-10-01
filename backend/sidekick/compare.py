@@ -184,7 +184,7 @@ def hrv_item(conn, source: str, today: date) -> dict:
     weeks: list[dict] = []
     prev_era = None  # era start of the previous plotted week (None is a valid era: the first watch)
     for k in range(11, -1, -1):
-        ws = today - timedelta(days=today.weekday() + 7 * k)
+        ws = rp.week_start(today, rp.first_weekday(conn)) - timedelta(days=7 * k)
         vals = [v for d, v in values.items() if ws.isoformat() <= d <= (ws + timedelta(days=6)).isoformat()]
         if not vals:
             continue

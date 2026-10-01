@@ -92,4 +92,11 @@ object Format {
     }
 
     fun dateTime(i: Instant): String = i.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM))
+
+    /** The first day of the week from the backend's setting ("monday" … "sunday"). */
+    fun firstDay(name: String?): java.time.DayOfWeek =
+        runCatching { java.time.DayOfWeek.valueOf((name ?: "monday").uppercase()) }.getOrDefault(java.time.DayOfWeek.MONDAY)
+
+    fun weekStart(d: java.time.LocalDate, first: java.time.DayOfWeek): java.time.LocalDate =
+        d.with(java.time.temporal.TemporalAdjusters.previousOrSame(first))
 }

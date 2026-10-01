@@ -25,7 +25,7 @@ from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
-from .db import connect, many, one, put, put_if_newer, set_setting, utc_now
+from .db import WEEKDAYS, connect, many, one, put, put_if_newer, set_setting, utc_now
 from .sync import get_connection_row, run_sync
 
 log = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ class SettingsIn(BaseModel):
     race_distance: Literal["5k", "10k", "half", "marathon"] | None = None
     race_target_s: int | None = Field(default=None, ge=600, le=36000)
     race_name: str | None = Field(default=None, max_length=60)
+    week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
 
 
 def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
@@ -243,6 +244,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         job = one(conn.sync_job, {"source": cfg.source}, sort=[("id", -1)])
         return {
             "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)),
+            "week_start_day": WEEKDAYS[rp.first_weekday(conn)],
             "connection": {k: row[k] for k in ("state", "detail", "last_attempt_at", "last_success_at", "retry_not_before")} if row else
             {"state": make_connector(conn, user_cfg(user)).connection_state().value, "detail": None, "last_attempt_at": None, "last_success_at": None, "retry_not_before": None},
             "latest_observation_date": latest, "latest_activity_start": latest_act,
@@ -339,7 +341,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def put_focus(body: FocusIn, conn=Depends(db)):
         from . import focus as fc
         d = today(conn)
-        fc.choose(conn, fc.week_start(d), body.kind)
+        fc.choose(conn, fc.week_start(d, rp.first_weekday(conn)), body.kind)
         return fc.current(conn, cfg.source, d)
 
     @api.put("/v1/insights/{insight_id}/state")
@@ -555,7 +557,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "profile_sex": rp.get_setting(conn, "profile_sex", None),
                 "profile_birth_date": rp.get_setting(conn, "profile_birth_date", None),
                 "profile_detected": rp.get_setting(conn, "source_profile", None),
-                **{k: rp.get_setting(conn, k, None) for k in ("race_date", "race_distance", "race_target_s", "race_name")}}
+                **{k: rp.get_setting(conn, k, None) for k in ("race_date", "race_distance", "race_target_s", "race_name", "week_start_day")},
+                "week_start_effective": WEEKDAYS[rp.first_weekday(conn)]}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):
@@ -570,7 +573,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
                 if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date", "race_date", "race_distance",
-                         "race_target_s", "race_name"):
+                         "race_target_s", "race_name", "week_start_day"):
                     conn.user_settings.delete_one({"key": k})
                 continue
             set_setting(conn, k, v)

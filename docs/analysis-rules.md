@@ -261,3 +261,11 @@ never build volume in a taper.
 
 On Monday from the start of the morning window, once per week: last week's review headline, this week's focus and
 the review's next-week focus. Tapping opens the review.
+
+## Week start
+
+Weeks start on the runner's setting, else the first day of week in their Garmin profile, else Monday (`db.first_weekday`).
+This applies to weekly reviews, the weekly focus, a run's "this week" totals, Trends' weekly running, the consistency
+insight, the HRV weekly chart, the coach's weekly items, the app's Activities grouping, the VO₂ max chart and the
+weekly digest, which arrives on the first day of the week. After a change, past reviews keep their weeks: a week that
+overlaps an existing review by 4 days or more isn't reviewed again. The current week gets a newly picked focus.

@@ -113,6 +113,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Monday weekly digest notification. Compiled; not yet seen firing (it needs a Monday morning).
 - URL and token fields no longer autocorrect (it changed "http" to "https").
 
+## Week start day (2026-10-01, v0.12.0)
+- "Week starts on" in Settings (As in Garmin, Monday, Sunday, Saturday). The default comes from Garmin's profile
+  (Sunday for the owner). Past reviews keep their weeks.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

@@ -67,7 +67,8 @@ private fun clock(s: Double?): String {
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit) {
+fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit,
+                   firstDay: java.time.DayOfWeek = java.time.DayOfWeek.MONDAY) {
     val cs = MaterialTheme.colorScheme
     val g = f.garmin
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -94,7 +95,7 @@ fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit)
                         g.trainingStatus?.let { st -> StatusBlock(st, Modifier.weight(1f)) }
                     }
                     if (f.vo2maxSeries.size >= 2) {
-                        Vo2Chart(f.vo2maxSeries)
+                        Vo2Chart(f.vo2maxSeries, firstDay)
                         Text("VO₂ max: ${f.vo2maxSeries.size} Garmin measurements since ${Format.shortDate(f.vo2maxSeries.first().date)} " +
                             "(%.1f → %.1f)".format(f.vo2maxSeries.first().value, f.vo2maxSeries.last().value),
                             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
@@ -197,8 +198,8 @@ private fun LoadBar(st: TrainingStatus) {
 
 /** VO2 max by week: Garmin's latest reading each week, last 8 weeks. */
 @Composable
-private fun Vo2Chart(series: List<com.bennybar.runnersidekick.data.remote.Point>) {
-    val weeks = series.groupBy { java.time.LocalDate.parse(it.date).let { d -> d.minusDays(d.dayOfWeek.value - 1L) } }
+private fun Vo2Chart(series: List<com.bennybar.runnersidekick.data.remote.Point>, firstDay: java.time.DayOfWeek) {
+    val weeks = series.groupBy { Format.weekStart(java.time.LocalDate.parse(it.date), firstDay) }
         .mapValues { (_, pts) -> pts.maxBy { it.date }.value }.toSortedMap().entries.toList().takeLast(8)
     com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
         weeks.map { com.bennybar.runnersidekick.ui.components.WeekPoint(it.key, it.value) }, decimals = 1, step = 1.0,

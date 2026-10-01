@@ -15,7 +15,8 @@ from .analytics import baseline as bl
 from .analytics import running as rn
 from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
-from .db import get_setting, many, next_id, one, plain, utc_now
+from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
+from .db import week_start
 
 REPORT_VERSION = "report-2.2"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
@@ -516,8 +517,8 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                 "limitations": ["Garmin zones; wrist heart rate can read high early in a run."],
                 "algorithm_version": rn.RUNNING_VERSION, "derived": True,
             })
-    week_start = d - timedelta(days=d.weekday())
-    week_acts = activities(conn, source, week_start.isoformat(), a["local_date"])
+    week_begin = week_start(d, first_weekday(conn))
+    week_acts = activities(conn, source, week_begin.isoformat(), a["local_date"])
     rpe = one(conn.activity_effort, {"activity_source_id": sid})
     effort = None
     if rpe and a["moving_s"]:
@@ -534,13 +535,14 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                    for s, dt in zip(splits, details or [{}] * len(splits))],
         "story": story, "best_efforts": best_efforts,
         "classification": an["classification"], "decoupling": dc,
-        "comparable": comp, "calendar_week": rn.workload(week_acts, week_start.isoformat(), a["local_date"]),
+        "comparable": comp, "calendar_week": rn.workload(week_acts, week_begin.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
         "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None),
         "intent": intent, "narrative": None,
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
-              "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent}
+              "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
+              "week_first": first_weekday(conn)}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 
@@ -632,7 +634,7 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
         st = _dt.fromisoformat(r["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=r["utc_offset_s"] or 0)
         bedtimes[r["wake_date"]] = st.hour + st.minute / 60 + (24 if st.hour < 12 else 0)
     zones = hr_zones(conn)
-    items = ins.compute_all(runs, obs, bedtimes, zones, drifts, today)
+    items = ins.compute_all(runs, obs, bedtimes, zones, drifts, today, first_weekday(conn))
     # Confidence: a pattern is "consistent" only if an insights report from >= 14 days earlier reached the same verdict.
     prev = latest_body(conn, "insights", {"local_date": {"$lte": (today - timedelta(days=14)).isoformat()}})
     prev_v = {i["id"]: i["verdict"] for i in prev["insights"]} if prev else {}

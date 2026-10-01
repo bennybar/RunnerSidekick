@@ -116,6 +116,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val weekly = repo.weekly.state(null)
     val fitness = repo.fitness.state(null)
     val compare = repo.compare.state(null)
+    val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     fun loadCompare() = launchIo { if (repo.refreshCompare()) pollQuietly { repo.refreshCompare() } }
 
     /** Re-fetch (bounded, without the busy indicator) while a screen's AI summary is written in the background. */
@@ -145,6 +146,7 @@ class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
 
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     val activities = repo.activities.state(null)
+    val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     fun refresh() = launchIo { repo.refreshAll() }
 }
 

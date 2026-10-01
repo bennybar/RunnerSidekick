@@ -137,3 +137,18 @@ def plain(x):
     """The JSON shape of a value (string keys, lists), exactly as the API returns it, ready to store as a document."""
     import json
     return json.loads(json.dumps(x, default=str))
+
+
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def first_weekday(d: Database) -> int:
+    """The day weeks start on (0 = Monday … 6 = Sunday): the runner's setting, else Garmin's profile, else Monday."""
+    name = get_setting(d, "week_start_day", None) or (get_setting(d, "source_profile", None) or {}).get("first_day_of_week")
+    return WEEKDAYS.index(name) if name in WEEKDAYS else 0
+
+
+def week_start(day, first: int = 0):
+    """Start of the week containing `day` for weeks beginning on weekday `first`."""
+    from datetime import timedelta
+    return day - timedelta(days=(day.weekday() - first) % 7)

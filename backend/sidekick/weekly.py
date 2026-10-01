@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from statistics import median
 
 from . import reports as rp
-from .db import many, one
+from .db import first_weekday, many, one
 from .analytics import baseline as bl
 from .analytics import insights as ins
 
@@ -15,8 +15,8 @@ WEEKLY_VERSION = "weekly-1.0"
 FREEZE_AFTER_DAYS = 14  # weekly reviews older than this are not regenerated (history keeps its original context)
 
 
-def week_start(d: date) -> date:
-    return d - timedelta(days=d.weekday())
+def week_start(d: date, first: int = 0) -> date:
+    return d - timedelta(days=(d.weekday() - first) % 7)
 
 
 def _runs(conn, source, start: str, end: str) -> list[ins.RunData]:
@@ -176,15 +176,19 @@ def next_week_focus(flagged_days: list[str], ratio: float | None, hard: float | 
 
 def regenerate_weeklies(conn, source: str, today: date, synthetic: bool) -> None:
     """Build the last completed week's review (revision if inputs changed); create missing older ones once."""
-    last_complete = week_start(today) - timedelta(days=7)
+    first = first_weekday(conn)
+    last_complete = week_start(today, first) - timedelta(days=7)
     r = conn.daily_observation.find_one({"source": source}, sort=[("local_date", 1)])
-    first = r["local_date"] if r else None
-    if not first:
+    first_day = r["local_date"] if r else None
+    if not first_day:
         return
-    existing = set(conn.report.distinct("subject_key", {"type": "weekly"}))
-    ws = week_start(date.fromisoformat(first))
+    existing = {date.fromisoformat(k) for k in conn.report.distinct("subject_key", {"type": "weekly"})}
+    ws = week_start(date.fromisoformat(first_day), first)
     while ws <= last_complete:
+        # After a change of week start, weeks already reviewed on the old boundaries keep their review: a week that
+        # mostly overlaps an existing one (4+ days) isn't reviewed again on the new boundaries
+        covered = any(e != ws and abs((e - ws).days) <= 3 for e in existing)
         recent = (today - (ws + timedelta(days=6))).days <= FREEZE_AFTER_DAYS
-        if recent or ws.isoformat() not in existing:
+        if not covered and (recent or ws not in existing):
             build_weekly(conn, source, ws, synthetic)
         ws += timedelta(days=7)

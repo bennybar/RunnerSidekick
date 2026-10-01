@@ -317,9 +317,9 @@ def recovery_after_load(runs: list[RunData], obs: dict[str, dict[str, float]]) -
 
 # ---------------------------------------------------------------- I6 consistency
 
-def consistency(runs: list[RunData], today: date) -> dict:
+def consistency(runs: list[RunData], today: date, first_weekday: int = 0) -> dict:
     q = "How consistent is your running week to week?"
-    start = today - timedelta(days=today.weekday()) - timedelta(weeks=8)
+    start = today - timedelta(days=(today.weekday() - first_weekday) % 7) - timedelta(weeks=8)
     weeks = [(start + timedelta(weeks=i)) for i in range(8)]
     vol = []
     for w in weeks:
@@ -364,10 +364,10 @@ def durability(drifts: list[tuple[str, str, float]]) -> dict:
                    evidence=[s for _, s, _ in drifts], method=method, confounders=["Heat and hydration also cause drift."])
 
 
-def compute_all(runs: list[RunData], obs: dict, bedtimes: dict, zones: dict | None, drifts: list, today: date) -> list[dict]:
+def compute_all(runs: list[RunData], obs: dict, bedtimes: dict, zones: dict | None, drifts: list, today: date, first_weekday: int = 0) -> list[dict]:
     order = [
         intensity_distribution(runs, zones), easy_pace(runs, zones, today), efficiency_trend(runs), pacing_pattern(runs),
-        evening_runs_sleep(runs, obs, bedtimes), recovery_after_load(runs, obs), consistency(runs, today), durability(drifts),
+        evening_runs_sleep(runs, obs, bedtimes), recovery_after_load(runs, obs), consistency(runs, today, first_weekday), durability(drifts),
     ]
     rank = {"pattern": 0, "no_clear_pattern": 1, "not_enough_data": 2}
     return sorted(order, key=lambda i: rank[i["verdict"]])

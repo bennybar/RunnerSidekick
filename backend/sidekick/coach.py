@@ -22,7 +22,7 @@ from statistics import median
 from . import focus as fc
 from . import reports as rp
 from .analytics import running as rn
-from .db import many, next_id, one, plain, utc_now
+from .db import first_weekday, many, next_id, one, plain, utc_now
 from .narrative import OpenAIProvider
 
 log = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
             b.fact("typical_fade", "typical second-half slowdown", f"{eff['median_fade_s_per_km']:.0f} s/km", eff["median_fade_s_per_km"])
 
     for k in range(4):
-        ws = fc.week_start(today) - timedelta(days=7 * (k + 1))
+        ws = fc.week_start(today, first_weekday(conn)) - timedelta(days=7 * (k + 1))
         w = rp.latest_body(conn, "weekly", {"subject_key": ws.isoformat()})
         if w:
             b.item(f"week:{k + 1}", "weekly_review", weeks_ago=k + 1, headline=w["headline"],

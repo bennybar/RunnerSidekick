@@ -60,6 +60,8 @@ class Repository(
         }.flowOn(Dispatchers.Default) // decoding large reports must not block the main thread
 
     val status: Flow<Cached<Status>?> = observe("status") { json.decodeFromString<Status>(it) }
+    /** The day weeks start on (Settings, else Garmin's profile, else Monday), as the backend reports it. */
+    val weekStart: Flow<java.time.DayOfWeek> = status.map { com.bennybar.runnersidekick.ui.Format.firstDay(it?.value?.weekStartDay) }
     val today: Flow<Cached<MorningReport>?> = observe("today") { json.decodeFromString<MorningReport>(it) }
     val activities: Flow<Cached<List<ActivitySummary>>?> =
         observe("activities") { json.decodeFromString(ListSerializer(ActivitySummary.serializer()), it) }

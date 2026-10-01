@@ -75,9 +75,10 @@ def build_trends(conn, source: str, today: date, days: int, synthetic: bool) -> 
             "measured_days": sum(1 for p in points if p["value"] is not None),
         })
     # Weekly running volume (calendar weeks overlapping the range)
-    acts = rp.activities(conn, source, (start - timedelta(days=start.weekday())).isoformat(), today.isoformat())
+    first_ws = rp.week_start(start, rp.first_weekday(conn))
+    acts = rp.activities(conn, source, first_ws.isoformat(), today.isoformat())
     weeks = []
-    w = start - timedelta(days=start.weekday())
+    w = first_ws
     while w <= today:
         sel = [a for a in acts if w.isoformat() <= a["local_date"] <= (w + timedelta(days=6)).isoformat()]
         weeks.append({"week_start": w.isoformat(), "runs": len(sel), "distance_m": round(sum(a["distance_m"] or 0 for a in sel), 1),

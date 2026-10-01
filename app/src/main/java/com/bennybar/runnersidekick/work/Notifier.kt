@@ -82,11 +82,12 @@ object Notifier {
             }
         }
 
-        // Weekly digest: on Monday, from the start of the morning window, once per week
-        val monday = local.toLocalDate().with(java.time.DayOfWeek.MONDAY)
-        if (local.dayOfWeek == java.time.DayOfWeek.MONDAY && local.toLocalTime() >= start && state.weeklyWeek != monday.toString()) {
+        // Weekly digest: on the first day of the week, from the start of the morning window, once per week
+        val firstDay = repo.weekStart.first()
+        val weekStart = Format.weekStart(local.toLocalDate(), firstDay)
+        if (local.dayOfWeek == firstDay && local.toLocalTime() >= start && state.weeklyWeek != weekStart.toString()) {
             val w = repo.weekly.first()?.value
-            if (w != null && w.weekStart == monday.minusWeeks(1).toString()) {
+            if (w != null && w.weekStart == weekStart.minusWeeks(1).toString()) {
                 val focus = repo.focus.first()?.value?.current?.title
                 val body = "This week's focus: ${focus ?: "pick one in Today"}" + "\n" + "Next week from the review: ${w.nextWeekFocus.text}"
                 val n = NotificationCompat.Builder(ctx, CH_WEEKLY)
@@ -97,7 +98,7 @@ object Notifier {
                     .setContentIntent(openApp(ctx, report = w.id)).setAutoCancel(true)
                     .build()
                 @Suppress("MissingPermission") nm.notify(ID_WEEKLY, n)
-                repo.settings.markWeeklyNotified(monday.toString())
+                repo.settings.markWeeklyNotified(weekStart.toString())
             }
         }
 

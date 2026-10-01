@@ -112,6 +112,7 @@ fun InsightsScreen(
     val coach by vm.coach.collectAsStateWithLifecycle()
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
     val compare by vm.compare.collectAsStateWithLifecycle()
+    val firstDay by vm.weekStart.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
     LaunchedEffect(tab) { if (tab == 1) vm.loadCompare() }
     val requestedTab by InsightsTab.requested.collectAsStateWithLifecycle()
@@ -145,7 +146,7 @@ fun InsightsScreen(
                 }
                 coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
                 fitness?.value?.let { f ->
-                    animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun) }
+                    animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun, firstDay = firstDay) }
                 }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
                 animatedItem(key = "intro") {

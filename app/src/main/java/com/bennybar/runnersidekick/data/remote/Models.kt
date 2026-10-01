@@ -11,6 +11,7 @@ data class Status(
     val synthetic: Boolean,
     val today: String,
     val timezone: String,
+    @SerialName("week_start_day") val weekStartDay: String = "monday",
     val connection: Connection,
     @SerialName("latest_observation_date") val latestObservationDate: String? = null,
     @SerialName("latest_activity_start") val latestActivityStart: String? = null,
@@ -362,6 +363,8 @@ data class SettingsDto(
     @SerialName("race_distance") val raceDistance: String? = null,
     @SerialName("race_target_s") val raceTargetS: Int? = null,
     @SerialName("race_name") val raceName: String? = null,
+    @SerialName("week_start_day") val weekStartDay: String? = null,
+    @SerialName("week_start_effective") val weekStartEffective: String = "monday",
 )
 
 @Serializable

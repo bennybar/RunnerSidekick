@@ -249,6 +249,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     var sex by remember(r) { mutableStateOf(r.profileSex) }
                     var birth by remember(r) { mutableStateOf(r.profileBirthDate ?: "") }
                     val birthOk = birth.isEmpty() || BIRTH.matches(birth)
+                    var weekStart by remember(r) { mutableStateOf(r.weekStartDay) }
                     var raceName by remember(r) { mutableStateOf(r.raceName ?: "") }
                     var raceDate by remember(r) { mutableStateOf(r.raceDate ?: "") }
                     var raceDist by remember(r) { mutableStateOf(r.raceDistance) }
@@ -259,7 +260,8 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank() && birthOk && raceOk
                     val edited = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
                         r.aiAvailable, start, end, profileSex = sex, profileBirthDate = birth.ifBlank { null }, profileDetected = r.profileDetected,
-                        raceDate = raceDate.ifBlank { null }, raceDistance = raceDist, raceTargetS = raceTargetS, raceName = raceName.trim().ifBlank { null })
+                        raceDate = raceDate.ifBlank { null }, raceDistance = raceDist, raceTargetS = raceTargetS, raceName = raceName.trim().ifBlank { null },
+                        weekStartDay = weekStart, weekStartEffective = r.weekStartEffective)
                     val dirty = edited != r
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Group(title = "Training profile") {
@@ -270,6 +272,14 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)) {
                                     listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
                                         .forEach { (k, l) -> FilterChip(goalType == k, { goalType = if (goalType == k) null else k }, { Text(l) }) }
+                                }
+                                Text("Week starts on", style = MaterialTheme.typography.titleMedium)
+                                Text(if (weekStart == null) "Now: ${r.weekStartEffective.replaceFirstChar(Char::uppercase)} (from Garmin, or Monday)."
+                                    else "Used for weekly reviews, the weekly focus, Activities and charts. Past reviews keep their weeks.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)) {
+                                    listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
+                                        .forEach { (k, l) -> FilterChip(weekStart == k, { weekStart = k }, { Text(l) }) }
                                 }
                                 Text("Running days", style = MaterialTheme.typography.titleMedium)
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {

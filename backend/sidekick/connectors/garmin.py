@@ -422,12 +422,13 @@ class GarminConnector:
         return out
 
     def profile(self) -> dict | None:
-        """Sex and birth date only, for age/sex comparisons. Weight, height and the rest of the profile are not stored."""
+        """Sex, birth date and first day of week only (comparisons, week boundaries). Weight, height and the rest are not stored."""
         ud = (self._call("get_user_profile") or {}).get("userData") or {}
         sex = {"MALE": "male", "FEMALE": "female"}.get((ud.get("gender") or "").upper())
-        if not sex and not ud.get("birthDate"):
+        first = ((ud.get("firstDayOfWeek") or {}).get("dayName") or "").lower() or None
+        if not sex and not ud.get("birthDate") and not first:
             return None
-        return {"sex": sex, "birth_date": ud.get("birthDate"), "source": "garmin"}
+        return {"sex": sex, "birth_date": ud.get("birthDate"), "first_day_of_week": first, "source": "garmin"}
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []

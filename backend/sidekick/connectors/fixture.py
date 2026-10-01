@@ -136,7 +136,7 @@ class FixtureConnector:
         return {"floors": [95, 113, 132, 151, 170], "method": "HR_MAX", "max_hr": 189, "lthr": 168, "profile": "DEFAULT", "source": "fixture"}
 
     def profile(self) -> dict | None:
-        return {"sex": "male", "birth_date": "1983-06-02", "source": "fixture"}
+        return {"sex": "male", "birth_date": "1983-06-02", "first_day_of_week": "monday", "source": "fixture"}
 
     def fitness_snapshot(self, day: date) -> dict | None:
         return {"source": "fixture", "race_predictions": {"date": day.isoformat(), "5k": 1440, "10k": 3010, "half": 6700, "marathon": 14200},
