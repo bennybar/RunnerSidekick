@@ -146,14 +146,34 @@ class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
 
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     val activities = repo.activities.state(null)
+    private val _syncResult = MutableStateFlow<String?>(null)
+    /** One-off message after a manual sync ("2 new runs", "No new runs"). */
+    val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
+    fun syncNow() = launchIo {
+        val n = repo.syncRunsNow()
+        _syncResult.value = when (n) { 0 -> "No new runs"; 1 -> "1 new run"; else -> "$n new runs" }
+    }
+    fun clearSyncResult() { _syncResult.value = null }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     fun refresh() = launchIo { repo.refreshAll() }
 }
 
 class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     val detail = repo.activity(id).state(null)
+    val ai = repo.runAi(id).state(null)
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshActivity(id) }
+    fun refresh() = launchIo { repo.refreshActivity(id); runCatching { repo.refreshRunAi(id) } }
+
+    /** Asks for the AI input, then follows it (bounded) while it is written in the background. */
+    fun askAi() = launchIo {
+        if (repo.refreshRunAi(id, request = true) != "pending") return@launchIo
+        viewModelScope.launch {
+            for (attempt in 0 until 20) {
+                kotlinx.coroutines.delay(3000)
+                if (runCatching { repo.refreshRunAi(id) }.getOrDefault("failed") != "pending") break
+            }
+        }
+    }
     fun setEffort(rpe: Int) = launchIo { repo.setEffort(id, rpe) }
     fun setIntent(kind: String, note: String?) = launchIo { repo.setIntent(id, kind, note) }
 }

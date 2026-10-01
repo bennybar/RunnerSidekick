@@ -280,6 +280,23 @@ class Repository(
 
     suspend fun refreshActivity(id: String) = put("activity:$id", api.getRaw("/v1/activities/$id"))
 
+    fun runAi(id: String): Flow<Cached<com.bennybar.runnersidekick.data.remote.RunAi>?> =
+        observe("runai:$id") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(it) }
+
+    /** The run's AI input; [request] asks for it to be written (only then does it cost an AI call). Returns the status. */
+    suspend fun refreshRunAi(id: String, request: Boolean = false): String {
+        val body = if (request) api.postRaw("/v1/activities/$id/ai", aiHeaders()) else api.getRaw("/v1/activities/$id/ai", headers = aiHeaders())
+        put("runai:$id", body)
+        return json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body).status
+    }
+
+    /** Syncs with Garmin now and says how many new runs arrived. */
+    suspend fun syncRunsNow(): Int {
+        val before = activities.first()?.value.orEmpty().map { it.sourceId }.toSet()
+        syncNow()
+        return activities.first()?.value.orEmpty().count { it.sourceId !in before }
+    }
+
     /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. */
     suspend fun syncNow() {
         api.post("/v1/sync")

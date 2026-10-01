@@ -629,3 +629,24 @@ data class Highlight(
     val target: HighlightTarget? = null,
     val source: String? = null,
 )
+
+@Serializable
+data class RunAiPoint(val text: String, @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList())
+
+@Serializable
+data class RunAiNext(val text: String, val direction: String = "same", @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList())
+
+/** AI input on one run: none (not asked yet) | pending | ok | disabled | not_configured | rejected | failed | budget_exceeded. */
+@Serializable
+data class RunAi(
+    val status: String,
+    val model: String? = null,
+    @SerialName("generated_at") val generatedAt: String? = null,
+    @SerialName("key_source") val keySource: String? = null,
+    val summary: String? = null,
+    @SerialName("went_well") val wentWell: List<RunAiPoint> = emptyList(),
+    @SerialName("to_work_on") val toWorkOn: List<RunAiPoint> = emptyList(),
+    @SerialName("next_time") val nextTime: RunAiNext? = null,
+    val detail: String? = null,
+    val previous: RunAi? = null,
+)

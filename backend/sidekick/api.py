@@ -139,7 +139,7 @@ def verify_google_id_token(token: str) -> dict:
 
 
 def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token,
-               coach_provider=None, summary_provider=None) -> FastAPI:
+               coach_provider=None, summary_provider=None, run_ai_provider=None) -> FastAPI:
     accounts.app_db()  # creates the accounts database's indexes
     synthetic = cfg.source == SOURCE_FIXTURE
     sync_locks: dict[int, threading.Lock] = {}
@@ -525,6 +525,55 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         s = rp.samples_for(conn, a["id"])
         return {"report": with_narrative(conn, report), "chart": downsample(s) if s else None}
 
+    run_ai_inflight: set[tuple] = set()
+
+    def run_ai_bg(db_name: str, sid: str, b, model: str, key: str, key_source: str, budget: int) -> None:
+        from . import run_ai
+        c = connect(db_name)
+        try:
+            run_ai.generate(c, cfg.source, sid, b, model, key, key_source, budget, provider=run_ai_provider)
+        except Exception:
+            log.exception("run AI generation failed")
+        finally:
+            run_ai_inflight.discard((db_name, sid))
+
+    def run_ai_state(conn, sid: str, x_openai_key: str | None, start: bool) -> dict:
+        """AI input on one run. Generated only on request (start=True); afterwards served from the cache while the run's
+        data is unchanged. A user's own key is used for that call only and never stored."""
+        from . import run_ai
+        ai = ai_config(conn)
+        if not ai.enabled:
+            return {"status": "disabled"}
+        key = (x_openai_key or "").strip() or ai.api_key
+        if not key and run_ai_provider is None:
+            return {"status": "not_configured"}
+        try:
+            b = run_ai.bundle(conn, cfg.source, sid, today(conn))
+        except run_ai.NotFound:
+            raise HTTPException(404)
+        hit = run_ai.latest(conn, sid, run_ai.input_hash(b, ai.model))
+        if hit and hit["status"] == "ok":
+            return run_ai.view(hit)
+        if (conn.name, sid) in run_ai_inflight:
+            return {"status": "pending"}  # a retry in progress, not the earlier failure
+        if hit and not start:
+            return run_ai.view(hit)
+        if not start:
+            prev = run_ai.latest(conn, sid)
+            return {"status": "none", "previous": run_ai.view(prev) if prev and prev["status"] == "ok" else None}
+        run_ai_inflight.add((conn.name, sid))
+        threading.Thread(target=run_ai_bg, args=(conn.name, sid, b, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
+                         daemon=True).start()
+        return {"status": "pending"}
+
+    @api.get("/v1/activities/{sid}/ai")
+    def get_run_ai(sid: str, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
+        return run_ai_state(conn, sid, x_openai_key, start=False)
+
+    @api.post("/v1/activities/{sid}/ai")
+    def post_run_ai(sid: str, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
+        return run_ai_state(conn, sid, x_openai_key, start=True)
+
     @api.put("/v1/activities/{sid}/effort")
     def put_effort(sid: str, body: EffortIn, conn=Depends(db)):
         put_if_newer(conn.activity_effort, {"activity_source_id": sid}, {"rpe": body.rpe, "client_updated_at": body.client_updated_at})
@@ -583,8 +632,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def delete_data(scope: Literal["raw", "reports", "all"], conn=Depends(db)):
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
-        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary"],
-                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
+                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
         for t in tables:
             conn[t].delete_many({})
@@ -594,7 +643,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def export(conn=Depends(db)):
         out = {}
         for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings",
-                  "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis", "section_summary"):
+                  "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis", "section_summary", "run_ai"):
             out[t] = many(conn[t])
         out["activity_samples"] = many(conn.activity_samples)
         out["reports"] = [r["body"] for r in many(conn.report)]

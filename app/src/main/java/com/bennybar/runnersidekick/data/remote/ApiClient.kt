@@ -35,6 +35,8 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     suspend fun post(path: String): String = call("POST", path, emptyMap(), "")
 
+    suspend fun postRaw(path: String, headers: Map<String, String> = emptyMap()): String = call("POST", path, emptyMap(), "", headers)
+
     suspend fun delete(path: String, query: Map<String, String>): String = call("DELETE", path, query, null)
 
     /** Unauthenticated POST (sign-in), against an explicit base URL. Returns the HTTP code and body. */

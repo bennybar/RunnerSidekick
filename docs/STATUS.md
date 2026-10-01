@@ -117,6 +117,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - "Week starts on" in Settings (As in Garmin, Monday, Sunday, Saturday). The default comes from Garmin's profile
   (Sunday for the owner). Past reviews keep their weeks.
 
+## AI input per run, manual sync (2026-10-01, v0.13.0)
+- "Get AI input" on every run: summary, went well, to work on, next time. Verified live on real runs.
+- Sync button on Activities: syncs with Garmin now and reports how many new runs arrived.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

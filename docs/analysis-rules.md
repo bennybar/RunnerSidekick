@@ -269,3 +269,11 @@ This applies to weekly reviews, the weekly focus, a run's "this week" totals, Tr
 insight, the HRV weekly chart, the coach's weekly items, the app's Activities grouping, the VO₂ max chart and the
 weekly digest, which arrives on the first day of the week. After a change, past reviews keep their weeks: a week that
 overlaps an existing review by 4 days or more isn't reviewed again. The current week gets a newly picked focus.
+
+## AI input on a run — `run_ai.py` (`run-ai-1.0`)
+
+Only on request ("Get AI input" on a run). The answer has a short read, up to three points that went well, up to three
+to work on, and one suggestion for next time with a direction. The evidence is the run's analysis plus its context:
+similar runs, the run's week against the four before, that day's plan, that week's focus, any race goal and today's
+advice. Run names and notes are never sent. The coach's checks apply, and "harder" is rejected while today holds
+intensity back. Cached per run and input hash. Each request counts against the shared daily AI budget.

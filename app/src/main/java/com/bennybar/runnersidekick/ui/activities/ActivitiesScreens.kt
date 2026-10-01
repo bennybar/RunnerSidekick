@@ -1,5 +1,13 @@
 package com.bennybar.runnersidekick.ui.activities
 
+import androidx.compose.animation.animateContentSize
+
+import androidx.compose.material.icons.outlined.Sync
+
+import androidx.compose.material.icons.outlined.AutoAwesome
+
+import androidx.compose.material.icons.outlined.Psychology
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -109,9 +117,24 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
     val units = settings?.units ?: Units.METRIC
     var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val listSnackbar = remember { SnackbarHostState() }
+    val syncResult by vm.syncResult.collectAsStateWithLifecycle()
+    val listError by vm.error.collectAsStateWithLifecycle()
+    LaunchedEffect(syncResult) { syncResult?.let { listSnackbar.showSnackbar(it); vm.clearSyncResult() } }
+    LaunchedEffect(listError) { listError?.let { listSnackbar.showSnackbar(it); vm.clearError() } }
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = { if (acts?.value?.any { it.synthetic } == true) DemoBadge() }) },
+        topBar = {
+            LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = {
+                if (acts?.value?.any { it.synthetic } == true) DemoBadge()
+                // Fetch a run you just finished without waiting for the hourly sync
+                if (busy) androidx.compose.material3.LoadingIndicator(Modifier.padding(horizontal = 12.dp).size(28.dp))
+                else androidx.compose.material3.IconButton(onClick = vm::syncNow) {
+                    androidx.compose.material3.Icon(Icons.Outlined.Sync, "Sync runs now")
+                }
+            })
+        },
+        snackbarHost = { SnackbarHost(listSnackbar) },
     ) { padding ->
         PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val all = acts?.value.orEmpty().filter { it.sport != "other" }
@@ -180,6 +203,7 @@ private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units
 @Composable
 fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewModel(key = id, factory = factory { ActivityVm(it, id) })) {
     val detail by vm.detail.collectAsStateWithLifecycle()
+    val ai by vm.ai.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -265,6 +289,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                         }
                     }
                 }
+                item { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 r.narrative?.takeIf { it.status == "ok" }?.let { n ->
                     item {
                         Group(title = "AI summary · ${n.model ?: n.provider}") {
@@ -377,5 +402,76 @@ private fun Splits(r: PostRunReport, units: Units) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(2.dp))
         }
+    }
+}
+
+
+/** AI input on this run, written only when asked. Every number comes from the analysis; every point cites it. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val shown = v?.takeIf { it.status == "ok" } ?: v?.previous?.takeIf { it.status == "ok" }
+    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeBadge(Icons.Outlined.Psychology, MaterialShapes.Flower, Modifier.size(40.dp), container = cs.tertiary, content = cs.onTertiary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("AI input on this run", style = MaterialTheme.typography.titleMedium)
+                    Text("Coaching from this run's analysis, its week and your plan", style = MaterialTheme.typography.labelMedium,
+                        color = cs.onSurfaceVariant)
+                }
+                if (v?.status == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(28.dp))
+            }
+            when {
+                shown != null -> {
+                    shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                    if (shown.wentWell.isNotEmpty()) {
+                        Text("Went well", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                        shown.wentWell.forEach { p -> Bullet(p.text) }
+                    }
+                    if (shown.toWorkOn.isNotEmpty()) {
+                        Text("To work on", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                        shown.toWorkOn.forEach { p -> Bullet(p.text) }
+                    }
+                    shown.nextTime?.let { n ->
+                        Surface(shape = MaterialTheme.shapes.medium, color = cs.secondaryContainer) {
+                            Column(Modifier.padding(14.dp)) {
+                                Text("Next time · " + when (n.direction) { "easier" -> "easier"; "harder" -> "harder"; else -> "similar effort" },
+                                    style = MaterialTheme.typography.labelLarge, color = cs.onSecondaryContainer)
+                                Text(n.text, style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer)
+                            }
+                        }
+                    }
+                    Text("Written by AI (${shown.model ?: "OpenAI"})" + (if (shown.keySource == "user") " with your key" else "") +
+                        " · numbers come from the app · guidance, not medical advice", style = MaterialTheme.typography.labelSmall,
+                        color = cs.onSurfaceVariant)
+                }
+                v == null || v.status == "none" -> androidx.compose.material3.FilledTonalButton(onClick = onAsk) {
+                    Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Get AI input")
+                }
+                v.status == "pending" -> Text("Reading this run…", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                v.status == "disabled" -> Text("Turn on the AI coach in Settings to get input on your runs.",
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                v.status == "not_configured" -> Text("Add your own OpenAI key in Settings to get input on your runs.",
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                else -> {
+                    Text(if (v.status == "budget_exceeded") "Today's AI limit is reached. Try again tomorrow."
+                        else "The AI input didn't pass the app's checks this time.", style = MaterialTheme.typography.bodyMedium,
+                        color = cs.onSurfaceVariant)
+                    if (v.status != "budget_exceeded") androidx.compose.material3.TextButton(onClick = onAsk) { Text("Try again") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Bullet(text: String) {
+    Row {
+        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
