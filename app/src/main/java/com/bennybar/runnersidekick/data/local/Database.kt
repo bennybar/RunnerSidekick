@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick.data.local
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -11,6 +12,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -53,6 +56,8 @@ data class CheckinEntity(
     val tagsJson: String,
     val clientUpdatedAt: String,
     val pendingSync: Boolean,
+    /** Account that owns this check-in ("<backend url>#<user id>"); "" = written before accounts existed. */
+    @ColumnInfo(defaultValue = "") val account: String = "",
 )
 
 @Dao
@@ -100,14 +105,19 @@ interface ReportDao {
 
 @Dao
 interface CheckinDao {
-    @Query("SELECT * FROM checkin WHERE localDate = :date ORDER BY clientUpdatedAt DESC LIMIT 1")
-    fun observeForDate(date: String): Flow<CheckinEntity?>
+    @Query("SELECT * FROM checkin WHERE localDate = :date AND account = :account ORDER BY clientUpdatedAt DESC LIMIT 1")
+    fun observeForDate(date: String, account: String): Flow<CheckinEntity?>
 
-    @Query("SELECT * FROM checkin ORDER BY localDate DESC")
-    fun observeAll(): Flow<List<CheckinEntity>>
+    @Query("SELECT * FROM checkin WHERE account = :account ORDER BY localDate DESC")
+    fun observeAll(account: String): Flow<List<CheckinEntity>>
 
-    @Query("SELECT * FROM checkin WHERE pendingSync = 1")
-    suspend fun pending(): List<CheckinEntity>
+    /** Only the signed-in account's unsent check-ins are ever uploaded. */
+    @Query("SELECT * FROM checkin WHERE pendingSync = 1 AND account = :account")
+    suspend fun pending(account: String): List<CheckinEntity>
+
+    /** Check-ins written before accounts existed belong to the first account that signs in after the upgrade. */
+    @Query("UPDATE checkin SET account = :account WHERE account = ''")
+    suspend fun adoptLegacy(account: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(c: CheckinEntity)
@@ -119,7 +129,7 @@ interface CheckinDao {
     suspend fun clear()
 }
 
-@Database(entities = [CachedBlob::class, ReportEntity::class, CheckinEntity::class], version = 1, exportSchema = true)
+@Database(entities = [CachedBlob::class, ReportEntity::class, CheckinEntity::class], version = 2, exportSchema = true)
 abstract class SidekickDb : RoomDatabase() {
     abstract fun cache(): CacheDao
     abstract fun reports(): ReportDao
@@ -127,6 +137,13 @@ abstract class SidekickDb : RoomDatabase() {
 
     companion object {
         fun create(context: Context): SidekickDb =
-            Room.databaseBuilder(context, SidekickDb::class.java, "sidekick.db").build()
+            Room.databaseBuilder(context, SidekickDb::class.java, "sidekick.db").addMigrations(MIGRATION_1_2).build()
+
+        /** v2: check-ins get an owning account. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE checkin ADD COLUMN account TEXT NOT NULL DEFAULT ''")
+            }
+        }
     }
 }

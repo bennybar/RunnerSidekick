@@ -29,6 +29,8 @@ data class LocalSettings(
     val units: Units,
     val currentMode: String?,
     val notificationsEnabled: Boolean,
+    /** "<backend url>#<user id>" of the signed-in account, once known. Scopes local check-ins. */
+    val account: String?,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -41,6 +43,7 @@ class SettingsStore(private val context: Context) {
     private val kImperial = booleanPreferencesKey("imperial")
     private val kMode = stringPreferencesKey("current_mode")
     private val kNotify = booleanPreferencesKey("notifications_enabled")
+    private val kAccount = stringPreferencesKey("current_account")
     private val kMorningDate = stringPreferencesKey("notified_morning_date")
     private val kMorningState = stringPreferencesKey("notified_morning_state")
     private val kRunsSeen = stringSetPreferencesKey("notified_runs")
@@ -53,6 +56,7 @@ class SettingsStore(private val context: Context) {
             units = if (p[kImperial] == true) Units.IMPERIAL else Units.METRIC,
             currentMode = p[kMode],
             notificationsEnabled = p[kNotify] ?: false,
+            account = p[kAccount],
         )
     }
 
@@ -88,7 +92,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setMode(mode: String) = context.dataStore.edit { it[kMode] = mode }
 
-    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken) }
+    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount) }
+
+    suspend fun setAccount(account: String) = context.dataStore.edit { it[kAccount] = account }
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

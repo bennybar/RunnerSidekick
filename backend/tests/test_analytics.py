@@ -253,3 +253,23 @@ def test_next_focus_does_not_call_an_uneven_run_intervals():
     splits = [rn.Split(k, 1000.0, 300 + 6 * k, 300 + 6 * k, 160.0, 0.0, 300.0 + 6 * k, True) for k in range(6)]
     assert "faded" in next_focus(uneven, {"eligible": False}, {}, splits, [])
     assert "Interval" in next_focus(intervals, {"eligible": False}, {}, splits, [])
+
+
+def test_good_checkin_without_overnight_data_is_not_reassurance():
+    from sidekick.reports import headline, suggestion_text
+    r = recommend({}, {"energy": 4, "pain": False, "illness": False}, has_overnight_data=False, any_baseline=False)
+    r["planned_run_day"] = True
+    assert r["rule_id"] == "R1c" and r["state"] == "insufficient_data" and r["suppress_intensity"]
+    assert "typical" not in headline(r, [], {"energy": 4}).lower() and "within your usual" not in r["reason"]
+    assert "Go ahead" not in suggestion_text(r)
+
+
+def test_good_checkin_while_still_learning_ranges():
+    r = recommend({}, {"energy": 4, "pain": False, "illness": False}, has_overnight_data=True, any_baseline=False)
+    assert r["rule_id"] == "R1d" and r["suppress_intensity"]
+
+
+def test_suggestion_respects_suppress_flag():
+    from sidekick.reports import suggestion_text
+    rec = {"state": "usual_plan", "suppress_intensity": True, "planned_run_day": True}
+    assert "easy or moderate" in suggestion_text(rec)

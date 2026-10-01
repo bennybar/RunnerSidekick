@@ -18,7 +18,7 @@ from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import utc_now
 
-REPORT_VERSION = "report-1.8"  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-1.9"  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -293,7 +293,8 @@ def headline(rec: dict, findings: list[dict], checkin: dict | None) -> str:
     if rule == "R0":
         return "You reported feeling unwell or in pain."
     if st == "insufficient_data":
-        return "Still learning your usual ranges." if rule == "R1b" else "Waiting for today's data."
+        return {"R1b": "Still learning your usual ranges.", "R1d": "Still learning your usual ranges, and you feel fine.",
+                "R1c": "No overnight data yet, but you feel fine."}.get(rule, "Waiting for today's data.")
     if rule == "R4s":
         return "Readings look typical, but you feel less recovered."
     off = [f for f in findings if f["status"] in ("outside", "sustained")]
@@ -311,6 +312,8 @@ def suggestion_text(rec: dict) -> str:
     st = rec["state"]
     if not rec["planned_run_day"] and st != "consider_easier":
         return "Not a planned running day. Rest or easy movement fits."
+    if st == "usual_plan" and rec["suppress_intensity"]:
+        return "Your usual plan is fine, but keep the effort easy or moderate today."
     return {
         "usual_plan": "Go ahead with your planned session.",
         "consider_easier": "Consider an easier or shorter session, or a rest day.",

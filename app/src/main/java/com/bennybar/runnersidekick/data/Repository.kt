@@ -123,10 +123,32 @@ class Repository(
     val journal: Flow<List<ReportEntity>> = settings.settings.map { it.currentMode }.flatMapLatest { mode ->
         if (mode == null) flowOf(emptyList()) else db.reports().observeAll(mode)
     }
-    val checkins: Flow<List<CheckinEntity>> = db.checkins().observeAll()
+    private val account: Flow<String?> = settings.settings.map { it.account }
+
+    val checkins: Flow<List<CheckinEntity>> = account.flatMapLatest { a -> if (a == null) flowOf(emptyList()) else db.checkins().observeAll(a) }
 
     fun report(id: Long): Flow<ReportEntity?> = db.reports().observe(id)
-    fun checkinFor(date: String): Flow<CheckinEntity?> = db.checkins().observeForDate(date)
+    fun checkinFor(date: String): Flow<CheckinEntity?> =
+        account.flatMapLatest { a -> if (a == null) flowOf(null) else db.checkins().observeForDate(date, a) }
+
+    /**
+     * Identifies the signed-in account and scopes local data to it. A different account than last time clears the
+     * cached reports (never another account's check-ins, which stay hidden and are never uploaded under this account).
+     */
+    private suspend fun establishAccount(): String {
+        val body = api.getRaw("/v1/me")
+        val me = json.decodeFromString<Me>(body)
+        val key = "${settings.settings.first().backendUrl.trimEnd('/')}#${me.id}"
+        val previous = settings.settings.first().account
+        if (previous != key) {
+            db.cache().clear()
+            db.reports().clear()
+            if (previous == null) db.checkins().adoptLegacy(key)
+            settings.setAccount(key)
+        }
+        put("me", body)
+        return key
+    }
 
     private suspend fun put(key: String, body: String) {
         val mode = settings.settings.first().currentMode ?: return
@@ -149,6 +171,7 @@ class Repository(
 
     suspend fun refreshAll() {
         refreshStatus()
+        establishAccount()
         pushPendingCheckins()
         val todayBody = api.getRaw("/v1/today")
         put("today", todayBody)
@@ -158,7 +181,6 @@ class Repository(
         put("insights", api.getRaw("/v1/insights"))
         refreshWeekly()
         refreshFitness()
-        put("me", api.getRaw("/v1/me"))
         refreshJournal()
     }
 
@@ -202,18 +224,20 @@ class Repository(
     suspend fun saveCheckin(
         date: String, energy: Int?, soreness: Int?, recovery: Int?, pain: Boolean, illness: Boolean, notes: String?, tags: List<String>,
     ) {
-        val existing = db.checkins().observeForDate(date).first()
+        val acct = settings.settings.first().account ?: ""
+        val existing = db.checkins().observeForDate(date, acct).first()
         val c = CheckinEntity(
             id = existing?.id ?: UUID.randomUUID().toString(), localDate = date, energy = energy, soreness = soreness,
             recovery = recovery, pain = pain, illness = illness, notes = notes?.takeIf { it.isNotBlank() },
             tagsJson = json.encodeToString(ListSerializer(String.serializer()), tags),
-            clientUpdatedAt = Instant.now().toString(), pendingSync = true,
+            clientUpdatedAt = Instant.now().toString(), pendingSync = true, account = acct,
         )
         db.checkins().put(c)
     }
 
     suspend fun pushPendingCheckins() {
-        for (c in db.checkins().pending()) {
+        val acct = settings.settings.first().account ?: return  // unknown account: upload nothing
+        for (c in db.checkins().pending(acct)) {
             val dto = CheckinDto(
                 localDate = c.localDate, energy = c.energy, soreness = c.soreness, recovery = c.recovery, pain = c.pain,
                 illness = c.illness, notes = c.notes, tags = json.decodeFromString(ListSerializer(String.serializer()), c.tagsJson),
