@@ -329,7 +329,7 @@ def view(row: dict, evidence_targets: dict | None = None) -> dict:
     return v
 
 
-def run(conn, source: str, today: date, model: str, api_key: str, key_source: str, provider=None, budget: int = 20) -> dict:
+def run(conn, source: str, today: date, model: str, api_key: str, key_source: str, provider=None, budget: int = 25) -> dict:
     """Generate (or reuse) the coach analysis for the current evidence. Never raises; failures are recorded."""
     b = build_bundle(conn, source, today)
     h = input_hash(b, model)

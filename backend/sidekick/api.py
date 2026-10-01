@@ -202,7 +202,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             enabled=bool(rp.get_setting(conn, "ai_enabled", False)),
             model=rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
             api_key=os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key"),
-            max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "20")),
+            max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "25")),
         )
 
     def generate_bg(body: dict, key: tuple, db_name: str) -> None:

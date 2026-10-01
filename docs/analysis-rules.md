@@ -276,4 +276,4 @@ Only on request ("Get AI input" on a run). The answer has a short read, up to th
 to work on, and one suggestion for next time with a direction. The evidence is the run's analysis plus its context:
 similar runs, the run's week against the four before, that day's plan, that week's focus, any race goal and today's
 advice. Run names and notes are never sent. The coach's checks apply, and "harder" is rejected while today holds
-intensity back. Cached per run and input hash. Each request counts against the shared daily AI budget.
+intensity back. Cached per run and input hash. Each request counts against the shared daily AI budget (25 calls a day per account).

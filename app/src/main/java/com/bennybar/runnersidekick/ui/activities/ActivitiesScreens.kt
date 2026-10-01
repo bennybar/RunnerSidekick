@@ -204,6 +204,9 @@ private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units
 fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewModel(key = id, factory = factory { ActivityVm(it, id) })) {
     val detail by vm.detail.collectAsStateWithLifecycle()
     val ai by vm.ai.collectAsStateWithLifecycle()
+    val aiScroll = remember { mutableStateOf(0) }
+    val runList = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(aiScroll.value) { if (aiScroll.value > 0) runList.animateScrollToItem(1) }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -217,7 +220,22 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
             TopAppBar(
                 title = { Text(r?.activity?.let { Format.activityTime(it.startUtc, it.utcOffsetS) } ?: "Run", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
-                actions = { if (r?.synthetic == true) DemoBadge() },
+                actions = {
+                    if (r?.synthetic == true) DemoBadge()
+                    // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
+                    if (r != null) {
+                        val st = ai?.value?.status
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { if (st == null || st == "none" || st in setOf("rejected", "failed")) vm.askAi(); aiScroll.value++ },
+                            enabled = st != "pending" && st != "disabled" && st != "not_configured",
+                            contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.padding(end = 8.dp)) {
+                            if (st == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
+                            else Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (st == "ok") "AI input" else "Get AI input")
+                        }
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -228,8 +246,10 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                     if (busy) "Fetching analysis…" else "Connect to the backend to load this run.") } }
                 return@PullToRefreshBox
             }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
+                // Shown at the top once asked for (or already written); the button lives in the top bar
+                if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
                 if (r.story.isNotEmpty()) item {
                     Group(title = "How the run went") {
@@ -289,7 +309,6 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                         }
                     }
                 }
-                item { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 r.narrative?.takeIf { it.status == "ok" }?.let { n ->
                     item {
                         Group(title = "AI summary · ${n.model ?: n.provider}") {

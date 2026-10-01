@@ -188,7 +188,7 @@ class AiConfig:
     enabled: bool
     model: str
     api_key: str | None
-    max_calls_per_day: int = 20
+    max_calls_per_day: int = 25
     timeout_s: float = 30.0
     max_output_tokens: int = 700
 
