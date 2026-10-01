@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.ui.activities
 
+import androidx.compose.material.icons.outlined.CheckCircle
+
 import androidx.compose.animation.animateContentSize
 
 import androidx.compose.material.icons.outlined.Sync
@@ -226,15 +228,17 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                     if (r?.synthetic == true) DemoBadge()
                     // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
                     if (r != null) {
-                        val st = ai?.value?.status
+                        // Any finished AI input for this run counts (also one kept from before the run's data was refreshed)
+                        val st = ai?.value?.let { v -> if (v.status != "ok" && v.previous?.status == "ok") "ok" else v.status }
                         androidx.compose.material3.FilledTonalButton(
-                            onClick = { if (st == null || st == "none" || st in setOf("rejected", "failed")) vm.askAi(); aiScroll.value++ },
-                            enabled = st != "pending" && st != "disabled" && st != "not_configured",
+                            onClick = { vm.askAi(); aiScroll.value++ },
+                            // Already written for this run: nothing more to ask for (it's shown at the top)
+                            enabled = st !in setOf("ok", "pending", "disabled", "not_configured", "budget_exceeded"),
                             contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.padding(end = 8.dp)) {
                             if (st == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
-                            else Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
+                            else Icon(if (st == "ok") Icons.Outlined.CheckCircle else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (st == "ok") "AI input" else "Get AI input")
+                            Text(if (st == "ok") "AI input ready" else "Get AI input")
                         }
                     }
                 },
