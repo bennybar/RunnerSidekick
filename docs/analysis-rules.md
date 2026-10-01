@@ -279,3 +279,23 @@ advice. Run names and notes are never sent. The coach's checks apply, and "harde
 intensity back. Cached per run and input hash. Each request counts against the shared daily AI budget (25 calls a day per account).
 
 Both the coach (coach-1.5) and run input (run-ai-1.1) start with a TL;DR: one checked sentence of up to 120 characters. Today's coach teaser shows the TL;DR.
+
+## The week toward the race (`race-1.1`)
+
+This is a deterministic weekly plan while a race is set. Planned running days get one long run (the last running day;
+none in race week or recovery), the phase's quality sessions (base: strides; build: tempo; sharpen: race pace and
+intervals; taper: race pace; race week: strides), and easy runs for the rest. Weekly minutes are the median of the last
+four weeks you actually ran (weeks with no running are ignored), times a phase factor: base 1.05, build 1.08, sharpen
+1.0, taper 0.7, race week and recovery 0.5. That is never more than +8% a week. The long run is about 30% of the week
+but never shorter than your longest run of the previous four weeks. Easy runs are at least 25 min.
+
+Guardrails: if today's advice holds intensity back, or Garmin rates the load above its range, volume doesn't grow and
+quality sessions become optional. The plan is recomputed every day from what you actually ran. A run on a day off
+stands in for the earliest missed session ("moved"). Missed sessions aren't made up later. If the week's target is
+already met, the plan says so. Durations only, never paces.
+
+## What changed since yesterday
+
+The day's call shows when it was worked out and when the Garmin data is from, plus what changed against yesterday's
+briefing: the call itself, core readings moving outside or back within your usual range, a plan being set and a
+check-in being included. This is computed when the briefing is read, so it never creates report revisions.

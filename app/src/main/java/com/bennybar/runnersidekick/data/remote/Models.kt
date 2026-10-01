@@ -189,6 +189,29 @@ data class MorningReport(
     val narrative: Narrative? = null,
     @SerialName("checkin_prompt") val checkinPrompt: CheckinPrompt? = null,
     val highlights: List<Highlight> = emptyList(),
+    val changes: List<String> = emptyList(),
+    val race: RaceStatus? = null,
+)
+
+@Serializable
+data class RaceSession(
+    val date: String, val kind: String, val text: String, val minutes: Int? = null, val optional: Boolean = false,
+    val status: String, @SerialName("ran_minutes") val ranMinutes: Int? = null, @SerialName("source_id") val sourceId: String? = null,
+    @SerialName("moved_to") val movedTo: String? = null,
+)
+
+@Serializable
+data class RaceWeek(
+    @SerialName("week_start") val weekStart: String, val phase: String,
+    @SerialName("target_minutes") val targetMinutes: Int? = null, @SerialName("done_minutes") val doneMinutes: Int = 0,
+    val sessions: List<RaceSession> = emptyList(), val guardrail: String? = null, val basis: String? = null,
+)
+
+@Serializable
+data class RaceStatus(
+    val headline: String, val phase: String, @SerialName("phase_note") val phaseNote: String,
+    @SerialName("days_to_go") val daysToGo: Int, @SerialName("prediction_text") val predictionText: String? = null,
+    val week: RaceWeek? = null,
 )
 
 @Serializable

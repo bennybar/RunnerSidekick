@@ -121,6 +121,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - "Get AI input" on every run: summary, went well, to work on, next time. Verified live on real runs.
 - Sync button on Activities: syncs with Garmin now and reports how many new runs arrived.
 
+## Race week plan, what changed, TL;DR (2026-10-01, v0.14.0)
+- With a race set, Today shows this week's sessions toward it: done, moved, missed or planned, against a minutes
+  target with guardrails.
+- The day's call shows when it was worked out and what changed since yesterday.
+- From the second OpenAI review: done items 1 and 2. Not yet: focus outcomes across weeks (needs several weeks of
+  focus history), an offline queue for plans and intent (low value for one user), official Garmin import (needs Garmin's
+  developer approval).
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

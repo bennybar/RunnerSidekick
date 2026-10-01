@@ -272,7 +272,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             from . import compare, highlights
             from . import focus as fc
             from . import race
+            from . import changes
             body["race"] = race.status(conn, d)
+            if body["race"]:
+                body["race"]["week"] = race.week_plan(conn, cfg.source, d)
+            body["changes"] = changes.since_yesterday(conn, body, d)
             body["highlights"] = highlights.build(conn, cfg.source, d, compare.build(conn, cfg.source, d), fc.current(conn, cfg.source, d),
                                                   body["race"])
         return body

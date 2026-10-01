@@ -75,3 +75,32 @@ def test_race_settings_round_trip_and_clear(tmp_path):
     client.put("/v1/settings", json={"race_date": None, "race_distance": None, "race_target_s": None, "race_name": None}, headers=h)
     assert client.get("/v1/settings", headers=h).json()["race_date"] is None
     assert client.put("/v1/settings", json={"race_distance": "ultra"}, headers=h).status_code == 422
+
+
+def test_week_plan_shapes_sessions_and_guards_volume():
+    conn = synced()
+    set_race(conn, 60)  # build phase
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    kinds = [s["kind"] for s in w["sessions"]]
+    assert len(w["sessions"]) == 7 and "long" in kinds and "tempo" in kinds
+    assert w["sessions"][0]["date"] == "2026-09-28"  # Monday weeks by default
+    long = next(s for s in w["sessions"] if s["kind"] == "long")
+    assert long["minutes"] >= next(s for s in w["sessions"] if s["kind"] == "easy")["minutes"]
+    assert all(s["status"] in ("done", "missed", "moved", "today", "planned", "rest", "extra") for s in w["sessions"])
+    # Garmin load above its range: no growth, quality optional
+    from sidekick.db import get_setting
+    g = get_setting(conn, "garmin_fitness", {})
+    g["training_status"].update(acute_load=600, chronic_max=520)
+    set_setting(conn, "garmin_fitness", g)
+    w2 = race.week_plan(conn, "fixture", ANCHOR)
+    assert w2["target_minutes"] == w2["recent_minutes"] and "load above its range" in w2["guardrail"]
+    assert all(s["optional"] for s in w2["sessions"] if s["kind"] in ("tempo", "intervals", "race_pace"))
+
+
+def test_race_week_contains_the_race_and_no_long_run():
+    conn = synced()
+    set_race(conn, 3)  # Saturday this week
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    kinds = {s["date"]: s["kind"] for s in w["sessions"]}
+    assert kinds["2026-10-03"] == "race" and "long" not in kinds.values()
+    assert all(k in ("rest", "race") for d, k in kinds.items() if d > "2026-10-03")

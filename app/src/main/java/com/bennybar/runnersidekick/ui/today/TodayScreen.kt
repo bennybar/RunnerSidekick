@@ -168,6 +168,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
+                report.race?.week?.let { w -> animatedItem(key = "raceweek") { RaceWeekCard(report.race, w, onOpenRun) } }
                 // The app asks only when an answer would change today's advice
                 if (checkin == null && report.checkinPrompt?.ask == true) animatedItem(key = "checkin") {
                     CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
@@ -335,6 +336,17 @@ private fun Hero(r: MorningReport, onWhy: () -> Unit) {
             }
             Text(r.headline, style = MaterialTheme.typography.headlineMedium, color = on)
             Text(rec.suggestion, style = MaterialTheme.typography.bodyLarge, color = on)
+            // When the call was made and what moved since yesterday, so a changed call never looks like an old one
+            val made = runCatching { Instant.parse(r.generatedAt) }.getOrNull()
+            Text(listOfNotNull(made?.let { "Worked out ${Format.ago(it)}" }, r.dataCutoff?.let { c ->
+                runCatching { Instant.parse(c) }.getOrNull()?.let { "Garmin data from ${Format.ago(it)}" } }).joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium, color = on.copy(alpha = 0.75f))
+            if (r.changes.isNotEmpty()) Surface(shape = MaterialTheme.shapes.medium, color = cs.surface.copy(alpha = 0.6f)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Since yesterday", style = MaterialTheme.typography.labelLarge, color = on)
+                    r.changes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = on) }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                 OutlinedButton(onClick = onWhy) { Text("Why this suggestion?") }
             }
@@ -614,4 +626,50 @@ private fun garminName(metric: String) = when (metric) {
     "avg_stress" -> "Average stress"
     "garmin_vo2max_running" -> "VO₂ max"
     else -> metric
+}
+
+
+private val SESSION_NAMES = mapOf("easy" to "Easy run", "long" to "Long run", "tempo" to "Tempo", "intervals" to "Intervals",
+    "race_pace" to "Race pace", "strides" to "Easy + strides", "race" to "Race day", "rest" to "Rest")
+
+/** The week toward the race: each day's session, ticked off as runs come in. Recomputed daily from what was run. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
+                         onOpenRun: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Group(title = "This week toward ${race.headline.substringBefore(" in ").substringBefore(" today")} · ${race.phase.replace('_', ' ')}") {
+        custom {
+            Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
+                style = MaterialTheme.typography.titleMedium)
+            w.targetMinutes?.let { t ->
+                androidx.compose.material3.LinearProgressIndicator(progress = { (w.doneMinutes.toFloat() / t).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+            w.guardrail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.tertiary, modifier = Modifier.padding(top = 8.dp)) }
+        }
+        w.sessions.forEach { s ->
+            val day = LocalDate.parse(s.date).let { "${it.dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase)} ${it.dayOfMonth}" }
+            val status = when (s.status) {
+                "done" -> "Done" + (s.ranMinutes?.let { " · $it min" } ?: "")
+                "moved" -> "Moved to ${s.movedTo?.let { LocalDate.parse(it).dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase) } ?: "another day"}"
+                "missed" -> "Missed · not made up"
+                "today" -> "Today"
+                "extra" -> "Extra run" + (s.ranMinutes?.let { " · $it min" } ?: "")
+                else -> null
+            }
+            if (s.kind == "rest" && s.status == "rest") return@forEach
+            val name = SESSION_NAMES[s.kind] ?: s.kind
+            row("$day · $name" + (s.minutes?.let { " · ~$it min" } ?: "") + if (s.optional) " (optional)" else "",
+                supporting = listOfNotNull(s.text.takeIf { s.kind in setOf("tempo", "intervals", "race_pace", "strides") }, status).joinToString(" · ")
+                    .ifBlank { null }, icon = when (s.status) {
+                    "done" -> Icons.Outlined.CheckCircle
+                    "today" -> Icons.AutoMirrored.Outlined.DirectionsRun
+                    else -> Icons.Outlined.EventNote
+                }, iconShape = MaterialShapes.Cookie4Sided,
+                accent = when (s.status) { "done" -> "fitness"; "missed" -> "recovery"; "today" -> "running"; else -> null },
+                onClick = s.sourceId?.let { id -> { onOpenRun(id) } })
+        }
+        custom { w.basis?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) } }
+    }
 }
