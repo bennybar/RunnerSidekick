@@ -16,9 +16,22 @@ android {
         minSdk = 35
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release signing comes from ~/.gradle/gradle.properties (never the repo). Without it, release builds stay unsigned.
+    val releaseStore = providers.gradleProperty("RSK_RELEASE_STORE_FILE").orNull
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = providers.gradleProperty("RSK_RELEASE_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("RSK_RELEASE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("RSK_RELEASE_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
@@ -28,6 +41,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "DEFAULT_BACKEND_URL", "\"https://runnersidekick.ibarak.org\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

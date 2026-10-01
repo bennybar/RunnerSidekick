@@ -26,3 +26,6 @@ garmin_tokens/
 
 # Server data dir (health data, Garmin session) when deployed in-place
 /data/
+
+# Live data audit describes personal data coverage; generated locally, never committed
+docs/data-audit.md
