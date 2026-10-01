@@ -76,3 +76,23 @@ There are no numeric pace or HR prescriptions in v1.
 - Primary sleep is attributed to the **local wake date**, and the original interval is kept. Naps are stored
   separately (`is_nap`) and excluded from `sleep_duration`.
 - Daily Garmin metrics use Garmin's calendar date.
+
+## Insights — `analytics/insights.py` (`insights-1.0`)
+
+A fixed, pre-registered question list. The engine never searches many associations to surface the largest. Every
+question is answered every time, with one of three verdicts: `pattern`, `no_clear_pattern` or `not_enough_data`.
+Confidence starts at *emerging* and becomes *consistent* only if an insights report from at least 14 days earlier
+reached the same verdict.
+
+| ID | Question | Method | Minimum data | Pattern threshold |
+|---|---|---|---|---|
+| intensity | Time across HR zones | moving-time share per Garmin zone (zones fetched from Garmin, with provenance) | 8 runs with HR | ≥ 50 % of time in Z4–Z5 |
+| efficiency | Faster at the same HR? | pace in the user's most common 10-bpm band, first 10 min excluded; Theil–Sen slope **per device** | 6 runs on one watch over ≥ 21 days | ≥ 5 s/km per 30 days and halves agree |
+| pacing | Pacing habit | complete splits; positive = second half > 3 s/km slower | 8 steady runs with ≥ 4 splits | ≥ 60 % positive |
+| evening_sleep | Evening runs vs sleep | nights after runs starting ≥ 18:00 vs other nights; medians | 8 nights per group | sleep ≥ 20 min or HRV ≥ 10 % difference |
+| recovery | Morning after harder runs | HRV/RHR after upper-half Garmin load vs after no-run days | 8 mornings per group | HRV ≤ −10 % or RHR ≥ +2 bpm |
+| consistency | Week-to-week volume | weekly moving time, last 8 weeks, coefficient of variation | 4 weeks with running | CV ≥ 0.4 |
+| durability | Drift on steady runs | median decoupling over eligible runs | 4 eligible runs | median > 5 % |
+
+Practical notes are options, never prescriptions. The only numbers they use are the user's own Garmin zone
+boundaries. Confounders are listed with every insight. HR-based comparisons never cross a device change.

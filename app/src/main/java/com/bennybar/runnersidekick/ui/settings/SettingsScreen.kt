@@ -146,7 +146,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     row(
                         if (s == null) "Not connected" else if (s.synthetic) "Demo data source" else "Garmin (unofficial connector)",
                         supporting = s?.let {
-                            "Connection ${it.connection.state.replace('_', ' ')} · last fetch ${Format.ago(it.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
+                            "${it.connection.state.replace('_', ' ').replaceFirstChar(Char::uppercase)} · last fetch ${Format.ago(it.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
                                 (it.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
                         } ?: "Enter the backend address and device token.",
                         icon = if (ok) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff, iconShape = MaterialShapes.Cookie9Sided,

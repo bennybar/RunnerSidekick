@@ -41,6 +41,15 @@ Status: accepted for prototype · 2026-10-01
 10. **Offline.** The app caches raw API JSON in Room (keyed per mode) plus report bodies. Check-ins are written to
     Room first and pushed later. The conflict policy is last-writer-wins on `client_updated_at`.
 
+11. **Material 3 Expressive (2026-10-01).** At the user's request the UI uses M3 Expressive (MaterialExpressiveTheme,
+    shape badges, ShortNavigationBar, LoadingIndicator, segmented groups). Those APIs are public only in
+    `androidx.compose.material3` 1.5.0 alpha, so `material3` is pinned to `1.5.0-alpha29` over the Compose BOM (stable
+    1.4.0). Revert the single version override once 1.5 is stable.
+12. **Insight engine (2026-10-01).** A pre-registered question list answered from the user's data. See
+    analysis-rules.md. Insights are stored as a revisioned `insights` report.
+13. **Deployment.** a systemd unit for the API, an hourly cron sync, and nginx TLS for `runnersidekick.ibarak.org`. See
+    docs/DEPLOY.md.
+
 ## Module / package layout
 
 ```

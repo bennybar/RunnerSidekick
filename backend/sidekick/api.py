@@ -233,9 +233,19 @@ def create_app(cfg: Config, connector=None, narrative_provider=None) -> FastAPI:
         out = []
         for r in conn.execute(q, args):
             b = json.loads(r["body_json"])
+            title = b.get("headline")
+            if r["type"] == "post_run":
+                a = b.get("activity") or {}
+                pace = b.get("pace_moving_s_per_km")
+                name = a.get("name") if a.get("name") and a.get("name").lower() not in ("running", "run") else None
+                title = " · ".join(x for x in (f"{(a.get('distance_m') or 0) / 1000:.1f} km",
+                                                f"{int(pace) // 60}:{int(pace) % 60:02d} /km" if pace else None, name) if x)
+            elif r["type"] == "insights":
+                n = sum(1 for i in b.get("insights", []) if i["verdict"] == "pattern")
+                title = f"{n} pattern{'s' if n != 1 else ''} found" if n else "No clear patterns"
             out.append({"id": r["id"], "type": r["type"], "subject_key": r["subject_key"], "local_date": r["local_date"],
                         "revision": r["revision"], "generated_at": r["generated_at"], "synthetic": b.get("synthetic", False),
-                        "title": b.get("headline") or (b.get("activity") or {}).get("name"),
+                        "title": title,
                         "state": (b.get("recommendation") or {}).get("state")})
         return out
 

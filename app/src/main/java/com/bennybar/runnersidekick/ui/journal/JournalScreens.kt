@@ -1,6 +1,18 @@
 package com.bennybar.runnersidekick.ui.journal
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.bennybar.runnersidekick.data.remote.InsightsReport
+import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.insights.InsightCard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -56,50 +68,55 @@ import com.bennybar.runnersidekick.ui.components.SectionHeader
 import com.bennybar.runnersidekick.ui.factory
 import kotlinx.serialization.json.Json
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factory = factory(::JournalVm))) {
     val reports by vm.reports.collectAsStateWithLifecycle()
     val checkins by vm.checkins.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    Scaffold(topBar = { TopAppBar(title = { Text("Journal") }) }) { padding ->
-        Column(Modifier.padding(padding)) {
-            PrimaryTabRow(selectedTabIndex = tab) {
-                Tab(tab == 0, { tab = 0 }, text = { Text("Reports") })
-                Tab(tab == 1, { tab = 1 }, text = { Text("Check-ins") })
-            }
-            PullToRefreshBox(busy, vm::refresh, Modifier.fillMaxSize()) {
-                LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                    if (tab == 0) {
-                        if (reports.isEmpty()) item { EmptyState(Icons.Outlined.MenuBook, "No reports yet", "Reports appear here after your first sync.") }
-                        items(reports, key = { it.id }) { r ->
-                            ListItem(
-                                modifier = Modifier.clickable { onOpenReport(r.id) },
-                                leadingContent = {
-                                    Icon(if (r.type == "morning") Icons.Outlined.WbSunny else Icons.AutoMirrored.Outlined.DirectionsRun, null,
-                                        tint = MaterialTheme.colorScheme.primary)
-                                },
-                                overlineContent = { Text((if (r.type == "morning") "Morning briefing" else "Run report") + " · " + Format.shortDate(r.localDate)) },
-                                headlineContent = { Text(r.title ?: "Report") },
-                                trailingContent = {
-                                    if (r.revision > 1) Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer) { Text("Revised") }
-                                },
-                            )
+    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        topBar = { LargeTopAppBar(title = { Text("Journal") }, scrollBehavior = scroll) },
+    ) { padding ->
+        PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        listOf("Reports", "Check-ins").forEachIndexed { i, l ->
+                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
                         }
-                    } else {
-                        if (checkins.isEmpty()) item { EmptyState(Icons.Outlined.EditNote, "No check-ins yet", "Your daily check-ins from the Today screen appear here.") }
-                        items(checkins, key = { it.id }) { c ->
-                            ListItem(
-                                overlineContent = { Text(Format.shortDate(c.localDate)) },
-                                headlineContent = { Text("Energy ${c.energy ?: "–"} · Soreness ${c.soreness ?: "–"} · Recovery ${c.recovery ?: "–"}") },
-                                supportingContent = {
-                                    val flags = listOfNotNull("Pain".takeIf { c.pain }, "Unwell".takeIf { c.illness }, "Not uploaded yet".takeIf { c.pendingSync })
-                                    val text = listOfNotNull(flags.joinToString(" · ").ifEmpty { null }, c.notes).joinToString("\n")
-                                    if (text.isNotEmpty()) Text(text)
-                                },
-                            )
+                    }
+                }
+                if (tab == 0) {
+                    if (reports.isEmpty()) item { EmptyState(Icons.Outlined.MenuBook, "No reports yet", "Reports appear here after your first sync.") }
+                    reports.groupBy { it.localDate.take(7) }.forEach { (month, rs) ->
+                        item(key = "m$month") {
+                            Group(title = java.time.YearMonth.parse(month).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))) {
+                                rs.forEach { r ->
+                                    val (icon, shape, kind) = when (r.type) {
+                                        "morning" -> Triple(Icons.Outlined.WbSunny, MaterialShapes.Sunny, "Morning briefing")
+                                        "post_run" -> Triple(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided, "Run report")
+                                        else -> Triple(Icons.Outlined.Insights, MaterialShapes.Flower, "Insights update")
+                                    }
+                                    row(r.title ?: kind, overline = "$kind · ${Format.shortDate(r.localDate)}" + if (r.revision > 1) " · revised" else "",
+                                        icon = icon, iconShape = shape, onClick = { onOpenReport(r.id) })
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if (checkins.isEmpty()) item { EmptyState(Icons.Outlined.EditNote, "No check-ins yet", "Your daily check-ins from Today appear here.") }
+                    if (checkins.isNotEmpty()) item {
+                        Group {
+                            checkins.forEach { c ->
+                                val flags = listOfNotNull("Pain".takeIf { c.pain }, "Unwell".takeIf { c.illness }, "Not uploaded yet".takeIf { c.pendingSync })
+                                row("Energy ${c.energy ?: "–"} · Soreness ${c.soreness ?: "–"} · Recovery ${c.recovery ?: "–"}",
+                                    overline = Format.shortDate(c.localDate),
+                                    supporting = listOfNotNull(flags.joinToString(" · ").ifEmpty { null }, c.notes).joinToString("\n").ifEmpty { null },
+                                    icon = Icons.Outlined.EditNote, iconShape = MaterialShapes.Cookie4Sided)
+                            }
                         }
                     }
                 }
@@ -119,6 +136,7 @@ fun ReportScreen(id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: 
     val body = entity?.json
     val morning = remember(body) { if (entity?.type == "morning" && body != null) runCatching { json.decodeFromString<MorningReport>(body) }.getOrNull() else null }
     val run = remember(body) { if (entity?.type == "post_run" && body != null) runCatching { json.decodeFromString<PostRunReport>(body) }.getOrNull() else null }
+    val ins = remember(body) { if (entity?.type == "insights" && body != null) runCatching { json.decodeFromString<InsightsReport>(body) }.getOrNull() else null }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(entity?.let { Format.shortDate(it.localDate) } ?: "Report") },
@@ -127,7 +145,11 @@ fun ReportScreen(id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: 
         )
     }) { padding ->
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (morning == null && run == null) {
+            ins?.let { r ->
+                item { Text("Insights as they stood on ${Format.shortDate(r.localDate)}", style = MaterialTheme.typography.titleMedium) }
+                items(r.insights, key = { it.id }) { i -> InsightCard(i, emphasised = i.verdict == "pattern") {} }
+            }
+            if (morning == null && run == null && ins == null) {
                 item { EmptyState(Icons.Outlined.MenuBook, "Report not cached", "Connect to the backend once to save this report for offline reading.") }
             }
             morning?.let { m ->

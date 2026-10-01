@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -86,7 +87,7 @@ private fun App() {
                     val sel = dest?.hierarchy?.any { it.route == t.route } == true
                     ShortNavigationBarItem(
                         selected = sel, onClick = { go(t.route) },
-                        icon = { Icon(if (sel) t.selected else t.unselected, null) }, label = { Text(t.label) },
+                        icon = { Icon(if (sel) t.selected else t.unselected, null) }, label = { Text(t.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
                     )
                 }
             }
