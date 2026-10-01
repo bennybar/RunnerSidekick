@@ -118,6 +118,14 @@ private fun androidx.compose.animation.AnimatedContentScope.Detail(content: @Com
         .background(androidx.compose.material3.MaterialTheme.colorScheme.surface)) { content() }
 }
 
+private val gestureIn = androidx.compose.animation.fadeIn(spec(300), initialAlpha = 0.6f) +
+    androidx.compose.animation.scaleIn(spec(400), initialScale = 0.97f)
+
+private fun gestureOut(edge: Int) = androidx.compose.animation.scaleOut(spec(400), targetScale = 0.9f) +
+    androidx.compose.animation.slideOutHorizontally(spec(400)) { w -> (if (edge == androidx.activity.BackEventCompat.EDGE_RIGHT) -1 else 1) * w / 20 } +
+    // Opaque while the finger drags it (the page behind must not show through); fades only in the last stretch
+    androidx.compose.animation.fadeOut(spec(80, delay = 320))
+
 private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
 
 private val TABS = listOf(
@@ -177,6 +185,10 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             // Every back (gesture or button), from a detail or from a tab to Today, shrinks the page away as a card
             popEnterTransition = { popIn },
             popExitTransition = { popOut },
+            // The back swipe has its own transitions in Navigation 2.10 (the default shrinks the page to ~70%, centred).
+            // Material's: the page shrinks to 90% and drifts toward the side being swiped from, the screen behind eases in.
+            predictivePopEnterTransition = { _ -> gestureIn },
+            predictivePopExitTransition = { edge -> gestureOut(edge) },
             modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
