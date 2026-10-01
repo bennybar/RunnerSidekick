@@ -70,7 +70,10 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     val focus = repo.focus.state(null)
     val coach = repo.coach.state(null)
 
-    fun setPlan(date: String, kind: String?, minutes: Int?) = launchIo { repo.setPlan(date, kind, minutes) }
+    // A plan or check-in changes the evidence, so the coach is asked again rather than left showing older advice
+    private fun updateCoach() = viewModelScope.launch { repo.pollCoach() }
+
+    fun setPlan(date: String, kind: String?, minutes: Int?) = launchIo { repo.setPlan(date, kind, minutes); updateCoach() }
     fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 
@@ -78,6 +81,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 
     fun refresh() = launchIo {
         repo.refreshAll()
+        updateCoach()
         // An AI summary may still be in progress; check back a few times (bounded).
         for (attempt in 0 until 6) {
             if (today.value?.value?.narrative?.status != "pending") break
@@ -91,6 +95,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
         launchIo {
             repo.saveCheckin(date, energy, soreness, recovery, pain, illness, notes, emptyList())
             repo.refreshAll() // pushes the check-in and fetches the revised briefing; offline it stays pending
+            updateCoach()
         }
 }
 
@@ -100,14 +105,10 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     private val _coachLoading = MutableStateFlow(false)
     val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
 
-    /** Polls (bounded) while the backend writes a new analysis in the background. */
     fun loadCoach() = viewModelScope.launch {
         _coachLoading.value = true
         try {
-            for (attempt in 0 until 20) {
-                if (runCatching { repo.refreshCoach() }.getOrDefault("failed") != "pending") break
-                kotlinx.coroutines.delay(4000)
-            }
+            repo.pollCoach()
         } finally {
             _coachLoading.value = false
         }

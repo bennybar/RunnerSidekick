@@ -27,44 +27,56 @@ from .narrative import OpenAIProvider
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "coach-1.2"
+PROMPT_VERSION = "coach-1.3"
 MAX_ITEMS = 4
 CATEGORIES = ["training", "recovery", "sleep", "pacing", "habits"]
 FACT = re.compile(r"\{fact:([a-z0-9_]+)\}")
 BANNED = re.compile(
     r"\b(diagnos\w*|disease|infection|illness|sick|covid|flu|overtrain\w*|injur\w*|disorder|syndrome|medical|medication|"
-    r"caus\w*|leads? to|result(?:s|ed)? in|proves?|definitely|certainly|guarantee\w*|always|never)\b", re.IGNORECASE)
+    r"caus\w*|leads? to|result(?:s|ed)? in|proves?|definitely|certainly|guarantee\w*|always|never|every day)\b", re.IGNORECASE)
+# Quantities spelled out in words would bypass the digit check; numbers must come from facts
+NUMBER_WORDS = re.compile(
+    r"\b(zero|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|seventy|"
+    r"eighty|ninety|hundred|thousand|percent|twice|double[ds]?|tripled?|triples|halved|quadrupled?)\b", re.IGNORECASE)
+DIRECTIONS = ["easier", "same", "harder"]
+# How much confidence each kind of evidence can support; an item is capped at the strongest evidence it cites
+EVIDENCE_CONFIDENCE = {"consistent": "high", "emerging": "medium"}
+LEVELS = ["low", "medium", "high"]
 
 SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["summary", "insights", "recommendations"],
+    "type": "object", "additionalProperties": False, "required": ["summary", "summary_evidence_ids", "insights", "recommendations"],
     "properties": {
         "summary": {"type": "string"},
+        "summary_evidence_ids": {"type": "array", "items": {"type": "string"}},
         "insights": {"type": "array", "maxItems": MAX_ITEMS, "items": {
             "type": "object", "additionalProperties": False, "required": ["title", "text", "evidence_ids", "confidence"],
             "properties": {"title": {"type": "string"}, "text": {"type": "string"},
                            "evidence_ids": {"type": "array", "items": {"type": "string"}},
                            "confidence": {"type": "string", "enum": ["low", "medium", "high"]}}}},
         "recommendations": {"type": "array", "maxItems": MAX_ITEMS, "items": {
-            "type": "object", "additionalProperties": False, "required": ["title", "text", "why", "evidence_ids", "category"],
+            "type": "object", "additionalProperties": False, "required": ["title", "text", "why", "evidence_ids", "category", "direction"],
             "properties": {"title": {"type": "string"}, "text": {"type": "string"}, "why": {"type": "string"},
                            "evidence_ids": {"type": "array", "items": {"type": "string"}},
-                           "category": {"type": "string", "enum": CATEGORIES}}}},
+                           "category": {"type": "string", "enum": CATEGORIES},
+                           "direction": {"type": "string", "enum": DIRECTIONS}}}},
     },
 }
 
 SYSTEM = """You are a thoughtful running coach and data analyst writing for one runner. You receive a JSON evidence
 bundle computed from their Garmin data, check-ins and plans. Write:
-- summary: two or three sentences on where they stand right now.
+- summary: two or three sentences on where they stand right now, with the evidence ids it relies on.
 - insights: up to four connections a runner would not easily see alone, especially across areas (training intensity,
   pacing, volume, sleep, recovery readings, Garmin's own fitness numbers, plans and intent vs what actually happened,
   their weekly focus). Prefer synthesis over repeating single findings. Give each a confidence.
 - recommendations: up to four specific, practical options for the coming days, ordered by importance, each with a
-  short "why". Respect today's plan and their goal type. Frame them as options, not orders.
+  short "why". Respect today's plan and their goal type. Frame them as options, not orders. Give each a direction:
+  easier, same or harder than what they have been doing. When the bundle's plan:today has intensity_held_back true or
+  state consider_easier, no recommendation may be harder.
 
 Hard rules:
 - Use only the bundle. Cite the evidence ids every item relies on (at least one per item), only in "evidence_ids".
   Never write evidence ids or fact ids inside any text.
-- Never write digits. For any number use a placeholder {fact:<id>} with an id from the bundle's "facts".
+- Never write digits or numbers in words. For any number use a placeholder {fact:<id>} with an id from the bundle's "facts".
   Refer to runs in words ("your most recent run", "your Sunday run"), not by number.
 - No medical terms, diagnoses or claims about what causes what in the body; describe associations.
 - Keep uncertainty: where evidence is thin, emerging or "learning", say so and lower confidence.
@@ -98,7 +110,7 @@ class Bundle:
 
 def build_bundle(conn, source: str, today: date) -> Bundle:
     b = Bundle()
-    zones = rp.get_setting(conn, "source_hr_zones", None)
+    zones = rp.hr_zones(conn)
     if zones:
         b.fact("zone2_top_bpm", "top of zone 2 (easy)", f"{zones['floors'][2]} bpm", zones["floors"][2])
         b.fact("zone4_floor_bpm", "start of zone 4", f"{zones['floors'][3]} bpm", zones["floors"][3])
@@ -106,7 +118,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
            running_days_per_week=len(rp.get_setting(conn, "running_days", [0, 2, 4, 5])),
            usual_minutes=rp.get_setting(conn, "available_minutes", None))
     if b.items["profile:runner"]["usual_minutes"]:
-        b.fact("usual_minutes", "usual time per run", f"{b.items['profile']['usual_minutes']} min", b.items["profile:runner"]["usual_minutes"])
+        b.fact("usual_minutes", "usual time per run", f"{b.items['profile:runner']['usual_minutes']} min", b.items["profile:runner"]["usual_minutes"])
 
     m = rp.build_morning(conn, source, today, False)
     rec = m["recommendation"]
@@ -220,8 +232,10 @@ def validate(raw: str, b: Bundle) -> dict:
         d = json.loads(raw)
     except (TypeError, json.JSONDecodeError) as e:
         raise CoachError(f"not JSON: {e}")
-    if not isinstance(d, dict) or set(d) != {"summary", "insights", "recommendations"}:
+    if not isinstance(d, dict) or set(d) != {"summary", "summary_evidence_ids", "insights", "recommendations"}:
         raise CoachError("schema mismatch")
+    today = b.items.get("plan:today", {})
+    held_back = bool(today.get("intensity_held_back")) or today.get("state") == "consider_easier"
 
     # Only structured ids (with ":") are stripped from prose, so ordinary words are never touched
     known_ids = sorted((k for k in b.items if ":" in k), key=len, reverse=True)
@@ -243,6 +257,8 @@ def validate(raw: str, b: Bundle) -> dict:
             raise CoachError(f"{field}: malformed placeholder")
         if m := BANNED.search(bare):
             raise CoachError(f"{field}: disallowed wording {m.group(0)!r}")
+        if m := NUMBER_WORDS.search(bare):
+            raise CoachError(f"{field}: number in words {m.group(0)!r}")
         return FACT.sub(lambda m_: b.facts[m_.group(1)]["display"], s.strip())
 
     def ids(lst, field):
@@ -253,20 +269,33 @@ def validate(raw: str, b: Bundle) -> dict:
             raise CoachError(f"{field}: unknown evidence {unknown}")
         return lst
 
-    out = {"summary": text(d["summary"], "summary", 600), "insights": [], "recommendations": []}
+    def capped(conf, cited):
+        """Confidence no higher than the strongest cited evidence supports."""
+        allowed = max((LEVELS.index(EVIDENCE_CONFIDENCE.get(b.items[c].get("confidence"), "low")) if b.items[c].get("kind") == "insight"
+                       else LEVELS.index("low") if c in ("profile:runner", "plan:today") else LEVELS.index("medium")) for c in cited)
+        return LEVELS[min(LEVELS.index(conf), allowed)]
+
+    out = {"summary": text(d["summary"], "summary", 600), "summary_evidence_ids": ids(d["summary_evidence_ids"], "summary"),
+           "insights": [], "recommendations": []}
     if len(d["insights"]) > MAX_ITEMS or len(d["recommendations"]) > MAX_ITEMS:
         raise CoachError("too many items")
     for k, it in enumerate(d["insights"]):
         if it.get("confidence") not in ("low", "medium", "high"):
             raise CoachError("bad confidence")
+        cited = ids(it["evidence_ids"], f"insight {k}")
         out["insights"].append({"title": text(it["title"], f"insight {k} title", 90), "text": text(it["text"], f"insight {k}", 500),
-                                "evidence_ids": ids(it["evidence_ids"], f"insight {k}"), "confidence": it["confidence"]})
+                                "evidence_ids": cited, "confidence": capped(it["confidence"], cited)})
     for k, it in enumerate(d["recommendations"]):
         if it.get("category") not in CATEGORIES:
             raise CoachError("bad category")
+        if it.get("direction") not in DIRECTIONS:
+            raise CoachError("bad direction")
+        if held_back and it["direction"] == "harder":
+            raise CoachError(f"rec {k}: harder while today's advice holds intensity back")
         out["recommendations"].append({"title": text(it["title"], f"rec {k} title", 90), "text": text(it["text"], f"rec {k}", 400),
                                        "why": text(it["why"], f"rec {k} why", 300),
-                                       "evidence_ids": ids(it["evidence_ids"], f"rec {k}"), "category": it["category"]})
+                                       "evidence_ids": ids(it["evidence_ids"], f"rec {k}"), "category": it["category"],
+                                       "direction": it["direction"]})
     return out
 
 
@@ -298,20 +327,22 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
     hit = conn.execute("SELECT * FROM coach_analysis WHERE input_hash=? AND status='ok'", (h,)).fetchone()
     if hit:
         return view(dict(hit))
-    day = utc_now()[:10]
-    used = conn.execute("SELECT COUNT(*) FROM coach_analysis WHERE substr(created_at,1,10)=?", (day,)).fetchone()[0] + \
-        conn.execute("SELECT COUNT(*) FROM narrative WHERE substr(created_at,1,10)=?", (day,)).fetchone()[0]
-    if used >= budget:
-        return {"status": "budget_exceeded", "detail": f"daily limit of {budget} AI calls reached"}
-    provider = provider or OpenAIProvider(model, api_key)
+    from .narrative import finish_call, reserve_call
+    call = reserve_call(conn, "coach", budget)
     status, out, detail = "ok", None, None
-    try:
-        raw = provider.generate(SYSTEM, b.to_json(), SCHEMA, 90.0, 2500)
-        out = validate(raw, b)
-    except CoachError as e:
-        status, detail = "rejected", str(e)
-    except Exception as e:  # network, auth, timeout; never log the key or the bundle
-        status, detail = "failed", type(e).__name__
+    if call is None:
+        # Recorded so the app sees the limit instead of waiting on a result that will never come
+        status, detail = "budget_exceeded", f"daily limit of {budget} AI calls reached"
+    else:
+        provider = provider or OpenAIProvider(model, api_key)
+        try:
+            raw = provider.generate(SYSTEM, b.to_json(), SCHEMA, 90.0, 2500)
+            out = validate(raw, b)
+        except CoachError as e:
+            status, detail = "rejected", str(e)
+        except Exception as e:  # network, auth, timeout; never log the key or the bundle
+            status, detail = "failed", type(e).__name__
+        finish_call(conn, call, status)
     log.info("coach %s: %s", status, detail or "")
     # Where each evidence id leads in the app (run ids map back to activities internally, never sent to the model)
     acts = list(reversed(rp.activities(conn, source, (today - timedelta(days=42)).isoformat(), today.isoformat())))[:10]

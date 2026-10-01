@@ -16,6 +16,7 @@ FOCUS_VERSION = "focus-1.0"
 FADE_TARGET_S = 5.0          # "even" = second half no more than 5 s/km slower than the first
 EASY_SHARE = 0.7             # an easy run spends >= 70% of moving time below the zone-3 floor
 VOLUME_BAND = 0.15           # steady volume = within ±15% of the previous week
+MIN_HR_COVERAGE = 0.5        # a run's intensity is judged only if valid HR covers at least half its moving time
 
 KINDS = {
     "even_pacing": "Start slower and finish even",
@@ -42,27 +43,39 @@ def _runs(conn, source, start: date, end: date) -> list[dict]:
 
 
 def run_fade(conn, a: dict) -> float | None:
-    sp = [s.pace_s_per_km for s in rn.splits_from_laps(rp.laps_for(conn, a["id"])) if s.complete and s.pace_s_per_km]
+    """Second-half minus first-half pace on complete splits, for steady runs only (as in the pacing insight)."""
+    laps = rp.laps_for(conn, a["id"])
+    if rn.classify(rp.samples_for(conn, a["id"]), laps)["kind"] != "steady":
+        return None
+    sp = [s.pace_s_per_km for s in rn.splits_from_laps(laps) if s.complete and s.pace_s_per_km]
     if len(sp) < 4:
         return None
     h = len(sp) // 2
     return sum(sp[h:]) / (len(sp) - h) - sum(sp[:h]) / h
 
 
-def easy_share(conn, a: dict, floors: list[float]) -> float | None:
+def zone_shares(conn, a: dict, floors: list[float]) -> dict | None:
+    """Share of valid-HR moving time below zone 3 (easy) and in zones 4–5 (hard). None when HR covers too little of the run."""
     s = rp.samples_for(conn, a["id"])
     if s is None:
         return None
     r = ins.RunData(a["source_id"], a["local_date"], datetime.min, None, a["distance_m"], a["moving_s"], None, s, [], "steady")
     zt = ins.zone_time(r, floors)
     tot = sum(zt)
-    return (zt[0] + zt[1] + zt[2]) / tot if tot else None
+    if not tot or (a["moving_s"] and tot < MIN_HR_COVERAGE * a["moving_s"]):
+        return None
+    return {"easy": (zt[0] + zt[1] + zt[2]) / tot, "hard": (zt[4] + zt[5]) / tot}
+
+
+def easy_share(conn, a: dict, floors: list[float]) -> float | None:
+    z = zone_shares(conn, a, floors)
+    return z["easy"] if z else None
 
 
 def options(conn, source: str, today: date) -> list[dict]:
     """Up to three suggested focuses, each with the reason drawn from the runner's data, ordered by goal type."""
     goal = rp.get_setting(conn, "goal_type", None)
-    zones = rp.get_setting(conn, "source_hr_zones", None)
+    zones = rp.hr_zones(conn)
     insights = {}
     r = conn.execute("SELECT body_json FROM report WHERE type='insights' ORDER BY local_date DESC, revision DESC LIMIT 1").fetchone()
     if r:
@@ -85,16 +98,22 @@ def options(conn, source: str, today: date) -> list[dict]:
         reasons["recovery"] = f"Garmin rates your training as {status.lower()}."
     reasons.setdefault("consistency", "Regular running is what makes every other trend in the app meaningful.")
     order = GOAL_ORDER.get(goal or "", list(reasons))
+    # Reported pain or illness in the last 3 days comes first, as it does in the morning recommendation
+    flagged = conn.execute("SELECT 1 FROM checkin WHERE deleted=0 AND (pain=1 OR illness=1) AND local_date>=?",
+                           ((today - timedelta(days=3)).isoformat(),)).fetchone()
+    if flagged:
+        reasons["recovery"] = "You reported pain or feeling unwell in the last few days."
+        order = ["recovery"] + [k for k in order if k != "recovery"]
     ranked = sorted(reasons, key=lambda k: order.index(k) if k in order else 99)
     return [{"kind": k, "title": KINDS[k], "reason": reasons[k]} for k in ranked[:3]]
 
 
-def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
+def evaluate(conn, source: str, ws: date, kind: str, today: date, params: dict | None = None) -> dict:
     """How the chosen focus went (or is going) this week. Partial weeks are 'in progress', never 'missed'."""
     we = ws + timedelta(days=6)
     done = today > we
     runs = _runs(conn, source, ws, min(we, today))
-    zones = rp.get_setting(conn, "source_hr_zones", None)
+    zones = rp.hr_zones(conn)
     rpes = {r["activity_source_id"]: r["rpe"] for r in conn.execute("SELECT * FROM activity_effort")}
     out = {"kind": kind, "title": KINDS.get(kind, kind), "week_start": ws.isoformat(), "complete": done, "runs": [],
            "algorithm_version": FOCUS_VERSION}
@@ -110,7 +129,10 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
         out["baseline"] = {"label": "typical fade before", "value": round(median(prior), 1) if prior else None, "unit": "s/km", "n": len(prior)}
         out["summary"] = (f"{met} of {len(out['runs'])} runs finished even" if out["runs"] else "No runs with full splits yet this week") + (
             f" (your typical fade before: {median(prior):.0f} s/km)." if prior else ".")
-        out["status"] = "achieved" if out["runs"] and met == len(out["runs"]) else ("in_progress" if not done else ("partly" if met else "missed"))
+        out["status"] = ("achieved" if out["runs"] and met == len(out["runs"]) else "in_progress" if not done else
+                         "unavailable" if not out["runs"] else "partly" if met else "missed")
+        if out["status"] == "unavailable":
+            out["summary"] = "No steady runs with full splits this week, so pacing couldn't be measured."
     elif kind == "easy_runs":
         if not zones:
             return {**out, "status": "unavailable", "summary": "Needs Garmin heart-rate zones."}
@@ -124,7 +146,9 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
         out["target"] = f"At least one run with {round(100 * EASY_SHARE)}% of the time below {ceiling} bpm"
         out["summary"] = (f"{met} easy run{'s' if met != 1 else ''} this week" + (
             f"; your easiest had {max(r['value'] for r in out['runs'])}% below {ceiling} bpm." if out["runs"] else "."))
-        out["status"] = "achieved" if met >= 1 else ("in_progress" if not done else "missed")
+        out["status"] = "achieved" if met >= 1 else "in_progress" if not done else "unavailable" if runs and not out["runs"] else "missed"
+        if out["status"] == "unavailable":
+            out["summary"] = "This week's runs didn't have enough heart-rate data to judge."
     elif kind == "steady_volume":
         prev = sum(a["moving_s"] or 0 for a in _runs(conn, source, ws - timedelta(days=7), ws - timedelta(days=1)))
         cur = sum(a["moving_s"] or 0 for a in runs)
@@ -134,7 +158,7 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
         out["summary"] = f"{rp.fmt_duration(cur) if cur else '0 min'} so far" + (" this week." if not done else " this week, in total.")
         out["status"] = ("achieved" if lo <= cur <= hi else "missed") if done else ("over" if cur > hi else "in_progress")
     elif kind == "consistency":
-        planned = rp.get_setting(conn, "running_days", [0, 2, 4, 5])
+        planned = (params or {}).get("running_days") or rp.get_setting(conn, "running_days", [0, 2, 4, 5])
         days = [ws + timedelta(days=k) for k in range(7) if (ws + timedelta(days=k)).weekday() in planned and ws + timedelta(days=k) <= today]
         ran = {a["local_date"] for a in runs}
         for d in days:
@@ -145,17 +169,25 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
         out["summary"] = f"Ran on {met} of {len(days)} planned days so far." if not done else f"Ran on {met} of {total} planned days."
         out["status"] = "achieved" if done and met == total else ("in_progress" if not done else ("partly" if met else "missed"))
     elif kind == "recovery":
-        hard = []
-        if zones:
-            for a in runs:
-                e = easy_share(conn, a, zones["floors"])
-                if e is not None:
-                    out["runs"].append({"date": a["local_date"], "source_id": a["source_id"], "value": round(100 * (1 - e)), "met": e >= 0.5,
-                                        "rpe": rpes.get(a["source_id"])})
-                    hard.append(e < 0.5)
         out["target"] = "No hard runs (most of the time in zones 4–5) this week"
-        out["summary"] = f"{sum(hard)} hard run{'s' if sum(hard) != 1 else ''} this week."
-        out["status"] = ("achieved" if not any(hard) else "missed") if done else ("in_progress" if not any(hard) else "off_track")
+        if not zones:
+            return {**out, "status": "unavailable", "summary": "Needs Garmin heart-rate zones."}
+        hard = []
+        for a in runs:
+            z = zone_shares(conn, a, zones["floors"])
+            if z is not None:
+                out["runs"].append({"date": a["local_date"], "source_id": a["source_id"], "value": round(100 * z["hard"]), "met": z["hard"] < 0.5,
+                                    "rpe": rpes.get(a["source_id"])})
+                hard.append(z["hard"] >= 0.5)
+        unmeasured = len(runs) - len(hard)
+        out["summary"] = f"{sum(hard)} hard run{'s' if sum(hard) != 1 else ''} this week" + (
+            f"; {unmeasured} run{'s' if unmeasured != 1 else ''} without enough heart-rate data." if unmeasured else ".")
+        if any(hard):
+            out["status"] = "missed" if done else "off_track"
+        elif unmeasured:
+            out["status"] = "unavailable" if done else "in_progress"
+        else:
+            out["status"] = "achieved" if done else "in_progress"
     rp_vals = [r["rpe"] for r in out["runs"] if r.get("rpe")]
     if rp_vals:
         out["felt"] = f"You rated these runs {min(rp_vals)}–{max(rp_vals)} out of 10 for effort." if len(rp_vals) > 1 else \
@@ -171,14 +203,15 @@ def current(conn, source: str, today: date) -> dict:
         # Picked for the runner from the data; they can change it, but nothing is required
         with conn:
             conn.execute("INSERT OR IGNORE INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,?,?)",
-                         (ws.isoformat(), opts[0]["kind"], json.dumps({"auto": True}), utc_now()))
+                         (ws.isoformat(), opts[0]["kind"], json.dumps({"auto": True, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])}),
+                          utc_now()))
         row = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", (ws.isoformat(),)).fetchone()
     prev = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", ((ws - timedelta(days=7)).isoformat(),)).fetchone()
     return {
         "week_start": ws.isoformat(),
-        "current": ({**evaluate(conn, source, ws, row["kind"], today), "auto": json.loads(row["params_json"]).get("auto", False)}
-                    if row else None),
-        "last_week": evaluate(conn, source, ws - timedelta(days=7), prev["kind"], today) if prev else None,
+        "current": ({**evaluate(conn, source, ws, row["kind"], today, json.loads(row["params_json"])),
+                     "auto": json.loads(row["params_json"]).get("auto", False)} if row else None),
+        "last_week": evaluate(conn, source, ws - timedelta(days=7), prev["kind"], today, json.loads(prev["params_json"])) if prev else None,
         "options": opts,
     }
 
@@ -187,5 +220,6 @@ def choose(conn, ws: date, kind: str) -> None:
     if kind not in KINDS:
         raise ValueError(kind)
     with conn:
-        conn.execute("INSERT INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,'{}',?) ON CONFLICT (week_start) DO UPDATE SET"
-                     " kind=excluded.kind, params_json='{}', chosen_at=excluded.chosen_at", (ws.isoformat(), kind, utc_now()))
+        params = json.dumps({"running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])})
+        conn.execute("INSERT INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,?,?) ON CONFLICT (week_start) DO UPDATE SET"
+                     " kind=excluded.kind, params_json=excluded.params_json, chosen_at=excluded.chosen_at", (ws.isoformat(), kind, params, utc_now()))

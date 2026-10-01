@@ -49,6 +49,7 @@ class Repository(
     val settings: SettingsStore,
 ) {
     private val json = api.json
+    private val withNulls = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = true }
 
     private fun <T> observe(key: String, decode: (String) -> T): Flow<Cached<T>?> =
         settings.settings.map { it.currentMode }.flatMapLatest { mode ->
@@ -73,12 +74,20 @@ class Repository(
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
     val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
 
-    /** Fetches the coach analysis. A "pending" answer keeps showing the previous analysis until the new one exists. */
+    /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
+    suspend fun pollCoach() {
+        for (attempt in 0 until 20) {
+            if (runCatching { refreshCoach() }.getOrDefault("failed") != "pending") return
+            delay(4000)
+        }
+    }
+
+    /** A "pending" answer carries the previous analysis, which the UI shows marked as updating. */
     suspend fun refreshCoach(): String {
-        val body = api.getRaw("/v1/coach")
-        val v = json.decodeFromString<CoachView>(body)
-        if (v.status != "pending" || db.cache().get("coach") == null) put("coach", body)
-        return v.status
+        // The runner's own key goes only with this request, never with any other call
+        val body = api.getRaw("/v1/coach", headers = settings.ownAiKey()?.let { mapOf("X-OpenAI-Key" to it) } ?: emptyMap())
+        put("coach", body)
+        return json.decodeFromString<CoachView>(body).status
     }
 
     suspend fun refreshFocus() = put("focus", api.getRaw("/v1/focus"))
@@ -90,6 +99,8 @@ class Repository(
         val body = if (kind == null) api.delete("/v1/plan/$date", emptyMap())
         else api.putRaw("/v1/plan/$date", json.encodeToString(DayPlanIn(kind, minutes, Instant.now().toString())))
         put("today", body)
+        val r = json.decodeFromString<MorningReport>(body)
+        cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, body)
     }
 
     suspend fun setIntent(activityId: String, kind: String, note: String?) {
@@ -177,9 +188,11 @@ class Repository(
         val key = "${settings.settings.first().backendUrl.trimEnd('/')}#${me.id}"
         val previous = settings.settings.first().account
         if (previous != key) {
+            val status = db.cache().get("status")  // fetched just before; keep it
             db.cache().clear()
             db.reports().clear()
-            if (previous == null) db.checkins().adoptLegacy(key)
+            status?.let { db.cache().put(it) }
+            if (previous == null) db.checkins().adoptLegacy(key) else settings.setOwnAiKey(null)  // a key belongs to one account
             settings.setAccount(key)
         }
         put("me", body)
@@ -209,6 +222,7 @@ class Repository(
         refreshStatus()
         establishAccount()
         pushPendingCheckins()
+        pullCheckins()
         val todayBody = api.getRaw("/v1/today")
         put("today", todayBody)
         val r = json.decodeFromString<MorningReport>(todayBody)
@@ -280,20 +294,41 @@ class Repository(
                 illness = c.illness, notes = c.notes, tags = json.decodeFromString(ListSerializer(String.serializer()), c.tagsJson),
                 clientUpdatedAt = c.clientUpdatedAt,
             )
-            api.putRaw("/v1/checkins/${c.id}", json.encodeToString(dto))
-            db.checkins().markSynced(c.id, c.clientUpdatedAt)
+            val stored = json.decodeFromString<CheckinDto>(api.putRaw("/v1/checkins/${c.id}", json.encodeToString(dto)))
+            // A newer version on the server wins; keep that one instead of ours
+            if (stored.clientUpdatedAt != c.clientUpdatedAt) mergeServerCheckin(stored, acct) else db.checkins().markSynced(c.id, c.clientUpdatedAt)
         }
+    }
+
+    /** Pulls the account's check-ins so a reinstall or second phone shows the same history. Last write wins. */
+    suspend fun pullCheckins() {
+        val acct = settings.settings.first().account ?: return
+        json.decodeFromString(ListSerializer(CheckinDto.serializer()), api.getRaw("/v1/checkins")).forEach { mergeServerCheckin(it, acct) }
+    }
+
+    private suspend fun mergeServerCheckin(s: CheckinDto, acct: String) {
+        val id = s.id ?: return
+        val local = db.checkins().get(id)
+        if (local != null && local.clientUpdatedAt >= s.clientUpdatedAt) return
+        if (s.deleted) { if (local != null) db.checkins().delete(id); return }
+        db.checkins().put(CheckinEntity(
+            id = id, localDate = s.localDate, energy = s.energy, soreness = s.soreness, recovery = s.recovery, pain = s.pain,
+            illness = s.illness, notes = s.notes, tagsJson = json.encodeToString(ListSerializer(String.serializer()), s.tags),
+            clientUpdatedAt = s.clientUpdatedAt, pendingSync = false, account = acct,
+        ))
     }
 
     suspend fun setEffort(activityId: String, rpe: Int) {
         api.putRaw("/v1/activities/$activityId/effort", json.encodeToString(EffortIn(rpe, Instant.now().toString())))
         refreshActivity(activityId)
+        refreshFocus()  // the weekly focus reports perceived effort
     }
 
     suspend fun remoteSettings(): SettingsDto = json.decodeFromString(api.getRaw("/v1/settings"))
 
     suspend fun saveRemoteSettings(s: SettingsDto): SettingsDto =
-        json.decodeFromString(api.putRaw("/v1/settings", json.encodeToString(s)))
+        // Nulls are sent on purpose: a cleared goal or usual time must clear it on the server too
+        json.decodeFromString(api.putRaw("/v1/settings", withNulls.encodeToString(s)))
 
     suspend fun exportJson(): String = api.getRaw("/v1/export")
 

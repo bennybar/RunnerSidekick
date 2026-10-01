@@ -62,7 +62,7 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
         limitations=["Calendar week, Monday to Sunday, in your local time zone."]))
 
     # Intensity (Garmin zones)
-    zones = rp.get_setting(conn, "source_hr_zones", None)
+    zones = rp.hr_zones(conn)
     hard = None
     if zones and week:
         totals = [0.0] * 6
@@ -132,8 +132,8 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
 
     focus = next_week_focus(flagged_days, ratio, hard, zones, len(week))
     from . import focus as fc
-    chosen = conn.execute("SELECT kind FROM weekly_focus WHERE week_start=?", (wid,)).fetchone()
-    focus_result = fc.evaluate(conn, source, ws, chosen["kind"], we + timedelta(days=1)) if chosen else None
+    chosen = conn.execute("SELECT kind, params_json FROM weekly_focus WHERE week_start=?", (wid,)).fetchone()
+    focus_result = fc.evaluate(conn, source, ws, chosen["kind"], we + timedelta(days=1), json.loads(chosen["params_json"])) if chosen else None
     if focus_result:
         findings.insert(0, _f(f"w:{wid}:focus", "focus", "weekly_focus", f"Your focus: {focus_result['title']}",
                               focus_result["summary"] + (" " + focus_result["felt"] if focus_result.get("felt") else ""),

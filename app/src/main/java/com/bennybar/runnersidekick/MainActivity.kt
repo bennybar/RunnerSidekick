@@ -52,11 +52,22 @@ import com.bennybar.runnersidekick.ui.theme.RunnerTheme
 import com.bennybar.runnersidekick.ui.today.TodayScreen
 
 class MainActivity : ComponentActivity() {
+    /** A run to open, from a run-report notification. */
+    private val openRun = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { RunnerTheme { App() } }
+        if (savedInstanceState == null) openRun.value = intent?.getStringExtra(EXTRA_OPEN_RUN)
+        setContent { RunnerTheme { App(openRun) } }
     }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_OPEN_RUN)?.let { openRun.value = it }
+    }
+
+    companion object { const val EXTRA_OPEN_RUN = "open_run" }
 }
 
 private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
@@ -70,20 +81,24 @@ private val TABS = listOf(
 )
 
 @Composable
-private fun App() {
+private fun App(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
     val repo = (LocalContext.current.applicationContext as RunnerApp).repository
     val local by repo.settings.settings.collectAsStateWithLifecycle(initialValue = null)
     when (local?.hasToken) {
         null -> Unit                  // settings still loading: draw nothing for a frame rather than flash sign-in
         false -> SignInScreen()
-        true -> MainNav()
+        true -> MainNav(openRun)
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun MainNav() {
+private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
     val nav = rememberNavController()
+    val pendingRun by openRun.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(pendingRun) {
+        pendingRun?.let { nav.navigate("activity/$it"); openRun.value = null }
+    }
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination
     val onTab = TABS.any { t -> dest?.hierarchy?.any { it.route == t.route } == true }

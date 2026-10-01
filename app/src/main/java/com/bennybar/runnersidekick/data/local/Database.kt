@@ -122,6 +122,12 @@ interface CheckinDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(c: CheckinEntity)
 
+    @Query("SELECT * FROM checkin WHERE id = :id")
+    suspend fun get(id: String): CheckinEntity?
+
+    @Query("DELETE FROM checkin WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Query("UPDATE checkin SET pendingSync = 0 WHERE id = :id AND clientUpdatedAt = :clientUpdatedAt")
     suspend fun markSynced(id: String, clientUpdatedAt: String)
 

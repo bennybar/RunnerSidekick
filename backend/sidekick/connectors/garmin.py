@@ -278,11 +278,11 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
     if not rows:
         return None
 
-    def col(key: str) -> list[float | None]:
+    def col(key: str, parse=non_negative) -> list[float | None]:
         i = idx.get(key)
         if i is None:
             return [None] * len(rows)
-        return [non_negative(r[i]) if i < len(r) else None for r in rows]
+        return [parse(r[i]) if i < len(r) else None for r in rows]
 
     ts = col("directTimestamp")
     if any(v is not None for v in ts):
@@ -295,7 +295,7 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
     pick = lambda xs: [xs[i] for i in keep]  # noqa: E731
     cadence = col("directDoubleCadence") if "directDoubleCadence" in idx else [None] * len(rows)
     return Samples(t=[round(t[i], 1) for i in keep], hr=pick(col("directHeartRate")), speed=pick(col("directSpeed")),
-                   dist=pick(col("sumDistance")), elev=pick(col("directElevation")), cad=pick(cadence))
+                   dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence))
 
 
 # ---------------------------------------------------------------- connector

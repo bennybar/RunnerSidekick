@@ -21,8 +21,7 @@ class RunnerApp : Application() {
     override fun onCreate() {
         super.onCreate()
         val settings = SettingsStore(this)
-        repository = Repository(SidekickDb.create(this),
-            ApiClient({ settings.credentials() }, { settings.ownAiKey()?.let { mapOf("X-OpenAI-Key" to it) } ?: emptyMap() }), settings)
+        repository = Repository(SidekickDb.create(this), ApiClient { settings.credentials() }, settings)
         Notifier.createChannels(this)
         // Best-effort background refresh; timing is up to the OS (hourly at most, so the morning window can be met).
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(

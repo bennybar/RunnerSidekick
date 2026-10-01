@@ -121,6 +121,13 @@ def get_setting(conn, key: str, default):
     return json.loads(r["value_json"]) if r else default
 
 
+def hr_zones(conn) -> dict | None:
+    """The heart-rate zones analysis should use: Garmin's, unless the runner chose not to use zones."""
+    if get_setting(conn, "hr_zone_source", "garmin") == "none":
+        return None
+    return get_setting(conn, "source_hr_zones", None)
+
+
 def data_cutoff(conn, source: str) -> str | None:
     r = conn.execute("SELECT last_success_at FROM source_connection WHERE source=?", (source,)).fetchone()
     return r["last_success_at"] if r else None
@@ -263,7 +270,7 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     rec["planned_run_day"] = d.weekday() in running_days
     plan_row = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (ds,)).fetchone()
     plan = {"kind": plan_row["kind"], "minutes": plan_row["minutes"]} if plan_row else None
-    zones = get_setting(conn, "source_hr_zones", None)
+    zones = hr_zones(conn)
     rec["plan"] = plan
     rec["suggestion"] = suggestion_text(rec, plan, zones["floors"][2] if zones else None, get_setting(conn, "available_minutes", None))
     findings.sort(key=lambda f: f["priority"])
@@ -297,7 +304,9 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     }
     inputs = {"findings": [{k: f.get(k) for k in ("id", "observed", "comparison", "status")} for f in findings],
               "checkin": checkin, "running_days": running_days, "garmin": garmin_ctx, "recent": recent_run, "v": ALGORITHMS,
-              "plan": plan, "available": get_setting(conn, "available_minutes", None)}
+              "plan": plan, "available": get_setting(conn, "available_minutes", None), "zones": zones,
+              # everything displayed, so no input that changes the text can leave an old revision in place
+              "shown": [body["headline"], rec["suggestion"], rec["reason"], checkin_prompt]}
     return save_report(conn, "morning", ds, ds, body, input_hash(inputs), data_cutoff(conn, source))
 
 
@@ -309,7 +318,9 @@ def headline(rec: dict, findings: list[dict], checkin: dict | None) -> str:
         return {"R1b": "Still learning your usual ranges.", "R1d": "Still learning your usual ranges, and you feel fine.",
                 "R1c": "No overnight data yet, but you feel fine."}.get(rule, "Waiting for today's data.")
     if rule == "R4s":
-        return "Readings look typical, but you feel less recovered."
+        # Only call readings typical when there are comparable readings
+        typical = any(f["status"] == "within" and f.get("comparison") for f in findings if f["metric"] in CORE_METRICS)
+        return "Readings look typical, but you feel less recovered." if typical else "You feel less recovered today."
     if rule == "R1e":
         return "Recent running is well above your usual." if "load" in rec.get("reason", "") or "running" in rec.get("reason", "") \
             else "One reading stands out; ranges still being learned."
@@ -498,7 +509,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             "limitations": ["Only runs synced to Runner Sidekick count; GPS distance has some error."],
             "algorithm_version": rn.RUNNING_VERSION, "derived": True,
         })
-    zones = get_setting(conn, "source_hr_zones", None)
+    zones = hr_zones(conn)
     details = rn.split_details(samples_for(conn, a["id"]), laps, zones["floors"] if zones else None)
     story = rn.run_story(splits, details, fmt_pace)
     intent = run_intent(conn, a)
@@ -558,7 +569,7 @@ def run_intent(conn, a: dict) -> dict | None:
 
 def infer_intent(conn, a: dict) -> dict | None:
     """What the run looks like from the data alone (labelled 'inferred'; never used to flag 'meant to be easy')."""
-    zones = get_setting(conn, "source_hr_zones", None)
+    zones = hr_zones(conn)
     an = run_analysis(conn, a)
     cls = an["classification"]
     if "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15:
@@ -632,7 +643,7 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
     for r in conn.execute("SELECT wake_date, start_utc, utc_offset_s FROM sleep_session WHERE source=? AND is_nap=0 AND wake_date>=?", (source, since)):
         st = _dt.fromisoformat(r["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=r["utc_offset_s"] or 0)
         bedtimes[r["wake_date"]] = st.hour + st.minute / 60 + (24 if st.hour < 12 else 0)
-    zones = get_setting(conn, "source_hr_zones", None)
+    zones = hr_zones(conn)
     items = ins.compute_all(runs, obs, bedtimes, zones, drifts, today)
     # Confidence: a pattern is "consistent" only if an insights report from >= 14 days earlier reached the same verdict.
     prev = conn.execute("SELECT body_json FROM report WHERE type='insights' AND local_date<=? ORDER BY local_date DESC, revision DESC LIMIT 1",
@@ -654,7 +665,8 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
         i["user_state"] = st["state"] if st and st["verdict_at_dismissal"] == i["verdict"] else None
     body = {"type": "insights", "local_date": today.isoformat(), "synthetic": synthetic, "insights": items, "narrative": None,
             "window": [since, today.isoformat()]}
-    inputs = {"items": [{k: i.get(k) for k in ("id", "verdict", "effect", "sample_size", "confidence", "novelty", "user_state")} for i in items], "v": ALGORITHMS,
+    inputs = {"items": [{k: i.get(k) for k in ("id", "verdict", "effect", "sample_size", "confidence", "novelty", "user_state", "headline", "detail",
+                                                "practical")} for i in items], "v": ALGORITHMS,
               "iv": ins.INSIGHTS_VERSION}
     return save_report(conn, "insights", today.isoformat(), today.isoformat(), body, input_hash(inputs), data_cutoff(conn, source))
 

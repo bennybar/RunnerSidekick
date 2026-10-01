@@ -38,9 +38,11 @@ object Notifier {
     private fun allowed(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun openApp(ctx: Context) = PendingIntent.getActivity(
-        ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-        PendingIntent.FLAG_IMMUTABLE,
+    private fun openApp(ctx: Context, run: String? = null) = PendingIntent.getActivity(
+        ctx, run?.hashCode() ?: 0,
+        Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .apply { run?.let { putExtra(MainActivity.EXTRA_OPEN_RUN, it) } },
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     suspend fun check(ctx: Context, repo: Repository, now: Instant = Instant.now()) {
@@ -58,7 +60,8 @@ object Notifier {
             val isToday = r.localDate == local.toLocalDate().toString()
             val inWindow = local.toLocalTime() >= start
             val ready = !r.provisional || local.toLocalTime() >= end
-            val stateKey = r.recommendation.state
+            // A changed plan or suggestion updates the notification even when the state stays the same
+            val stateKey = "${r.recommendation.state}|${r.recommendation.suggestion.hashCode()}"
             if (isToday && inWindow && ready && (state.morningDate != r.localDate || state.morningState != stateKey)) {
                 val firstToday = state.morningDate != r.localDate
                 // The app asks only when an answer would change today's advice
@@ -88,7 +91,7 @@ object Notifier {
                 .setSmallIcon(R.drawable.ic_stat_pulse)
                 .setContentTitle("Run report ready")
                 .setContentText("${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)} · ${Format.shortDate(a.localDate)}")
-                .setContentIntent(openApp(ctx)).setAutoCancel(true)
+                .setContentIntent(openApp(ctx, a.sourceId)).setAutoCancel(true)
                 .build()
             @Suppress("MissingPermission") nm.notify(a.sourceId.hashCode(), n)
         }

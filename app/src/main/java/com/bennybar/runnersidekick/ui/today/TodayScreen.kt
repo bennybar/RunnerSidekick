@@ -160,9 +160,15 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
                         onMore = { sheet = "checkin" })
                 }
-                coach?.value?.let { c -> (if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" })?.summary?.let { s ->
-                    item { CoachTeaser(s, onOpenInsights) }
-                } }
+                coach?.value?.let { c ->
+                    val shown = if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" }
+                    shown?.summary?.let { s ->
+                        // Older advice is labelled as such, so it never reads as current next to a changed briefing
+                        val note = if (shown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")
+                            else "Updated ${Format.ago(runCatching { Instant.parse(shown.generatedAt) }.getOrNull())}"
+                        item { CoachTeaser(s, note, onOpenInsights) }
+                    }
+                }
                 focus?.value?.let { f -> item { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
                 // Prefer what's new or changed; skip what the runner dismissed or is already working on
@@ -352,9 +358,9 @@ private fun CheckinPromptCard(reason: String?, onQuick: (Int) -> Unit, onMore: (
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CoachTeaser(summary: String, onOpen: () -> Unit) {
+private fun CoachTeaser(summary: String, note: String, onOpen: () -> Unit) {
     Group {
-        row("From your AI coach", supporting = summary, icon = Icons.Outlined.Psychology, iconShape = MaterialShapes.Flower, onClick = onOpen)
+        row("From your AI coach", overline = note, supporting = summary, icon = Icons.Outlined.Psychology, iconShape = MaterialShapes.Flower, onClick = onOpen)
     }
 }
 

@@ -95,7 +95,8 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setMode(mode: String) = context.dataStore.edit { it[kMode] = mode }
 
-    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount) }
+    /** Signing out also forgets the runner's own OpenAI key, so a later account never inherits it. */
+    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount); it.remove(kAiKey) }
 
     suspend fun setAccount(account: String) = context.dataStore.edit { it[kAccount] = account }
 

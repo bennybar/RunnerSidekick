@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -392,12 +392,15 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if hit:
             return ch.view(dict(hit))
         db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
-        if db_path not in coach_inflight:
+        last = ch.latest(conn)
+        # The same evidence that just failed or hit the limit isn't retried for 30 minutes
+        cooling = bool(last and last["status"] != "ok" and last["input_hash"] == h and
+                       (datetime.now(timezone.utc) - datetime.fromisoformat(last["created_at"].replace("Z", "+00:00"))).total_seconds() < 1800)
+        if db_path not in coach_inflight and not cooling:
             coach_inflight.add(db_path)
             threading.Thread(target=coach_bg, args=(db_path, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
                              daemon=True).start()
         prev = ch.latest(conn, ok_only=True)
-        last = ch.latest(conn)
         out = {"status": "pending", "previous": ch.view(prev) if prev else None}
         if last and last["status"] != "ok" and last["input_hash"] == h:
             out = {"status": last["status"], "detail": last["detail"], "previous": out["previous"]}
@@ -412,7 +415,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         report = rp.build_insights(conn, cfg.source, d, synthetic)
         easy = next((i for i in report["insights"] if i["id"] == "easy_pace"), None)
         return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2, "records": rp.records(conn, cfg.source),
-                "easy_pace": easy, "zones": rp.get_setting(conn, "source_hr_zones", None), "synthetic": synthetic}
+                "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
     @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
@@ -545,7 +548,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if body.running_days is not None and any(not 0 <= d <= 6 for d in body.running_days):
             raise HTTPException(422, "running_days are 0 (Mon) .. 6 (Sun)")
         with conn:
-            for k, v in body.model_dump(exclude_none=True).items():
+            for k, v in body.model_dump(exclude_unset=True).items():
+                if v is None:
+                    # An explicit null clears an optional setting; it never clears required ones
+                    if k in ("goal", "available_minutes", "goal_type"):
+                        conn.execute("DELETE FROM user_settings WHERE key=?", (k,))
+                    continue
                 conn.execute("INSERT INTO user_settings VALUES (?,?) ON CONFLICT (key) DO UPDATE SET value_json=excluded.value_json",
                              (k, json.dumps(v)))
         return get_settings(conn)
@@ -567,8 +575,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def export(conn=Depends(db)):
         out = {}
         for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings",
-                  "day_plan", "run_intent", "weekly_focus", "insight_state"):
+                  "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis"):
             out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
+        out["activity_samples"] = [{"activity_id": r["activity_id"], "samples": json.loads(r["samples_json"])}
+                                   for r in conn.execute("SELECT * FROM activity_samples")]
         out["reports"] = [json.loads(r["body_json"]) for r in conn.execute("SELECT body_json FROM report")]
         return {"mode": cfg.source, "synthetic": synthetic, "exported_at": utc_now(), "data": out}
 

@@ -203,8 +203,22 @@ def _key(report: dict) -> str:
 
 
 def calls_today(conn: sqlite3.Connection) -> int:
+    """AI calls made today by any feature (narrative and coach share one budget)."""
     day = datetime.now(timezone.utc).date().isoformat()
-    return conn.execute("SELECT COUNT(*) FROM narrative WHERE substr(created_at, 1, 10)=?", (day,)).fetchone()[0]
+    return conn.execute("SELECT COUNT(*) FROM ai_call WHERE substr(created_at, 1, 10)=?", (day,)).fetchone()[0]
+
+
+def reserve_call(conn: sqlite3.Connection, feature: str, limit: int) -> int | None:
+    """Records an AI call before it is made; None when today's budget is used up."""
+    with conn:
+        if calls_today(conn) >= limit:
+            return None
+        return conn.execute("INSERT INTO ai_call (feature, created_at) VALUES (?,?)", (feature, utc_now())).lastrowid
+
+
+def finish_call(conn: sqlite3.Connection, call_id: int, outcome: str) -> None:
+    with conn:
+        conn.execute("UPDATE ai_call SET outcome=? WHERE id=?", (outcome, call_id))
 
 
 def generate(conn: sqlite3.Connection, report: dict, cfg: AiConfig, provider: Provider | None = None, force: bool = False) -> dict:
@@ -216,7 +230,8 @@ def generate(conn: sqlite3.Connection, report: dict, cfg: AiConfig, provider: Pr
     hit = cached(conn, report, cfg.model)
     if hit and not force:
         return view(hit)
-    if calls_today(conn) >= cfg.max_calls_per_day:
+    call = reserve_call(conn, "narrative", cfg.max_calls_per_day)
+    if call is None:
         return {"status": "budget_exceeded", "detail": f"daily limit of {cfg.max_calls_per_day} AI calls reached"}
     provider = provider or OpenAIProvider(cfg.model, cfg.api_key)
     bundle = evidence_bundle(report)
@@ -228,6 +243,7 @@ def generate(conn: sqlite3.Connection, report: dict, cfg: AiConfig, provider: Pr
         status, detail = "rejected", str(e)
     except Exception as e:  # network, auth, timeout. Never log the key or the bundle
         status, detail = "failed", type(e).__name__
+    finish_call(conn, call, status)
     log.info("narrative %s for %s/%s: %s", status, report["type"], _key(report), detail or "")
     with conn:
         conn.execute(

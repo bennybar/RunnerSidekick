@@ -64,7 +64,11 @@ fun CoachCard(view: CoachView, loading: Boolean, insights: List<Insight>, onOpen
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("AI coach", style = MaterialTheme.typography.titleMedium)
-                        Text(if (view.status == "pending" || loading) "Updating with your latest data…" else "Across running, sleep, recovery and habits",
+                        Text(when {
+                            view.status == "pending" || loading -> "Updating with your latest data…"
+                            shown !== view -> "From an earlier analysis · ${Format.ago(runCatching { java.time.Instant.parse(shown.generatedAt) }.getOrNull())}"
+                            else -> "Across running, sleep, recovery and habits"
+                        },
                             style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                     }
                     if (view.status == "pending" || loading) LoadingIndicator(Modifier.size(28.dp))

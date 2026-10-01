@@ -18,11 +18,7 @@ sealed class ApiException(message: String) : Exception(message) {
     class Network(cause: IOException) : ApiException("Backend unreachable: ${cause.message}")
 }
 
-class ApiClient(
-    private val credentials: suspend () -> Pair<String, String>?,
-    /** Extra headers, e.g. the user's own OpenAI key (sent over TLS, used per request, never stored by the server). */
-    private val extraHeaders: suspend () -> Map<String, String> = { emptyMap() },
-) {
+class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -32,7 +28,8 @@ class ApiClient(
         .build()
 
     /** Returns the raw JSON body so callers can cache exactly what the backend said. */
-    suspend fun getRaw(path: String, query: Map<String, String> = emptyMap()): String = call("GET", path, query, null)
+    suspend fun getRaw(path: String, query: Map<String, String> = emptyMap(), headers: Map<String, String> = emptyMap()): String =
+        call("GET", path, query, null, headers)
 
     suspend fun putRaw(path: String, body: String): String = call("PUT", path, emptyMap(), body)
 
@@ -50,15 +47,15 @@ class ApiClient(
         }
     }
 
-    private suspend fun call(method: String, path: String, query: Map<String, String>, body: String?): String =
+    private suspend fun call(method: String, path: String, query: Map<String, String>, body: String?,
+                             headers: Map<String, String> = emptyMap()): String =
         withContext(Dispatchers.IO) {
             val (base, token) = credentials() ?: throw ApiException.NotConfigured()
             val url = (base.trimEnd('/') + path).toHttpUrl().newBuilder().apply {
                 query.forEach { (k, v) -> addQueryParameter(k, v) }
             }.build()
-            val extra = extraHeaders()
             val req = Request.Builder().url(url)
-                .apply { extra.forEach { (k, v) -> header(k, v) } }
+                .apply { headers.forEach { (k, v) -> header(k, v) } }
                 .header("Authorization", "Bearer $token")
                 .method(method, body?.toRequestBody("application/json".toMediaType()))
                 .build()

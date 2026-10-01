@@ -34,10 +34,10 @@ class Fake:
 def good(bundle):
     facts = bundle["facts"]
     fid = next(iter(facts))
-    return {"summary": f"Today's picture: {{fact:{fid}}} stands out (plan:today).",
+    return {"summary": f"Today's picture: {{fact:{fid}}} stands out (plan:today).", "summary_evidence_ids": ["plan:today"],
             "insights": [{"title": "A connection", "text": "Volume and intensity move together.", "evidence_ids": ["plan:today"], "confidence": "low"}],
             "recommendations": [{"title": "Keep it easy", "text": "An easy run fits.", "why": "Recent load is up.",
-                                 "evidence_ids": ["plan:today"], "category": "training"}]}
+                                 "evidence_ids": ["plan:today"], "category": "training", "direction": "easier"}]}
 
 
 @pytest.fixture
@@ -63,6 +63,10 @@ def test_valid_output_renders_facts_and_strips_echoed_ids(conn):
     (lambda d: d["insights"][0].update(evidence_ids=[]), "at least one"),
     (lambda d: d["recommendations"][0].update(text="This is caused by fatigue."), "disallowed"),
     (lambda d: d.update(summary="See {fact:nope}."), "unknown fact"),
+    (lambda d: d.update(summary="Your fitness has doubled."), "number in words"),
+    (lambda d: d["recommendations"][0].update(text="Run hard every day this week."), "disallowed"),
+    (lambda d: d.update(summary_evidence_ids=[]), "at least one"),
+    (lambda d: d["recommendations"][0].update(direction="sideways"), "bad direction"),
 ])
 def test_unsupported_output_rejected(conn, mutate, why):
     def bad(b):
@@ -107,3 +111,35 @@ def test_api_disabled_byok_and_key_never_stored(tmp_path):
     assert v["status"] == "ok" and v["key_source"] == "user"
     dbfile = next((tmp_path / "users").glob("*/fixture.db"))
     assert b"sk-user-own-key-123" not in dbfile.read_bytes()
+
+
+def test_harder_rejected_when_intensity_held_back_and_confidence_capped():
+    b = coach.Bundle()
+    b.item("plan:today", "today", state="usual_plan", intensity_held_back=True)
+    b.item("insight:pacing", "insight", confidence="emerging")
+    raw = {"summary": "A picture.", "summary_evidence_ids": ["plan:today"],
+           "insights": [{"title": "T", "text": "X.", "evidence_ids": ["plan:today"], "confidence": "high"},
+                        {"title": "T", "text": "Y.", "evidence_ids": ["insight:pacing"], "confidence": "high"}],
+           "recommendations": [{"title": "Go", "text": "Add a fast session.", "why": "Why.", "evidence_ids": ["plan:today"],
+                                "category": "training", "direction": "harder"}]}
+    with pytest.raises(coach.CoachError, match="harder"):
+        coach.validate(json.dumps(raw), b)
+    raw["recommendations"][0]["direction"] = "same"
+    out = coach.validate(json.dumps(raw), b)
+    assert [i["confidence"] for i in out["insights"]] == ["low", "medium"]
+
+
+def test_usual_minutes_setting_does_not_break_the_bundle(conn):
+    with conn:
+        conn.execute("INSERT INTO user_settings VALUES ('available_minutes', '45')")
+    b = coach.build_bundle(conn, "fixture", ANCHOR)
+    assert b.facts["usual_minutes"]["display"] == "45 min"
+
+
+def test_budget_counts_calls_and_is_shared(conn):
+    p = Fake(good)
+    assert coach.run(conn, "fixture", ANCHOR, "m", "k", "server", provider=p, budget=1)["status"] == "ok"
+    # A different model needs a new call, but the one allowed call is spent; the limit is recorded, not left pending
+    v = coach.run(conn, "fixture", ANCHOR, "m2", "k", "server", provider=p, budget=1)
+    assert v["status"] == "budget_exceeded" and p.calls == 1
+    assert coach.latest(conn)["status"] == "budget_exceeded"

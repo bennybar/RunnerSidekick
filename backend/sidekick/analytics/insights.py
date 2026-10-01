@@ -89,7 +89,7 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
         return insight("intensity", q, "training", "not_enough_data", "Heart-rate zones not available",
                        "Garmin heart-rate zones couldn't be read, so intensity can't be grouped.", method="time in Garmin HR zones")
     floors = zones["floors"]  # zone1..zone5 floors in bpm
-    usable = [r for r in runs if r.samples]
+    usable = [r for r in runs if r.samples and sum(zone_time(r, floors)) > 0]  # runs with usable heart rate
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",
                        f"Needs {MIN_RUNS} runs with heart rate; {len(usable)} so far.", n=len(usable), method="time in Garmin HR zones")

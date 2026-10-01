@@ -24,6 +24,8 @@ from .connectors.base import AuthRequired, Capability, Connector, ConnectionStat
 from .db import utc_now
 from .store import activity_hash, purge_raw, save_activity, save_day
 
+REFETCH_EVERY_H = 6  # recent activities (within refetch_days) are re-read at most this often, for late samples/laps
+
 log = logging.getLogger(__name__)
 
 
@@ -174,9 +176,14 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
     # Newest first, so a bounded run covers recent activities before old ones
     summaries.sort(key=lambda s: s["start"], reverse=True)
     fetched = 0
+    recent = (today - timedelta(days=refetch_days)).isoformat()
+    stale_before = (datetime.now(timezone.utc) - timedelta(hours=REFETCH_EVERY_H)).isoformat().replace("+00:00", "Z")
     for s in summaries:
         if activity_hash(conn, source, s["source_id"]) == s["content_hash"]:
-            continue
+            # Samples and laps can arrive or be corrected after the summary; re-read recent runs now and then
+            row = conn.execute("SELECT local_date, updated_at FROM activity WHERE source=? AND source_id=?", (source, s["source_id"])).fetchone()
+            if not (row and row["local_date"] >= recent and row["updated_at"] < stale_before):
+                continue
         if fetched >= max_details:
             res.outcome = "partial"
             res.detail = "Activity detail limit reached for this run; next sync continues"

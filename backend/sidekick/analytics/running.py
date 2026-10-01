@@ -320,17 +320,19 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     if len(full) < 3:
         return []
     paces = [s.pace_s_per_km for s, _ in full]
+    # Laps are only called kilometres when they are about a kilometre long (mile or workout laps are just "laps")
+    unit = "km" if all(s.distance_m and 950 <= s.distance_m <= 1050 for s, _ in full) else "lap"
     out = []
     fastest = min(full, key=lambda x: x[0].pace_s_per_km)[0]
     slowest = max(full, key=lambda x: x[0].pace_s_per_km)[0]
-    out.append(f"Fastest km was #{fastest.idx + 1} ({fmt_pace(fastest.pace_s_per_km)}); slowest was #{slowest.idx + 1} "
+    out.append(f"Fastest {unit} was #{fastest.idx + 1} ({fmt_pace(fastest.pace_s_per_km)}); slowest was #{slowest.idx + 1} "
                f"({fmt_pace(slowest.pace_s_per_km)}).")
     h = len(paces) // 2
     fade = sum(paces[h:]) / (len(paces) - h) - sum(paces[:h]) / h
     if fade > 5:
         mean_first = sum(paces[:h]) / h
         k = next((s.idx for s, _ in full[h:] if s.pace_s_per_km > mean_first + 5), None)
-        out.append(f"You faded by about {fade:.0f} s/km in the second half" + (f", from km #{k + 1}." if k is not None else "."))
+        out.append(f"You faded by about {fade:.0f} s/km in the second half" + (f", from {unit} #{k + 1}." if k is not None else "."))
     elif fade < -5:
         out.append(f"You finished strongly: the second half was {abs(fade):.0f} s/km faster (a negative split).")
     else:
@@ -339,7 +341,7 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     if zones:
         first_hard = next((s.idx for s, d in full if (d.get("zone") or 0) >= 4), None)
         if first_hard is not None:
-            out.append(f"Heart rate was mostly in zone 4 or higher from km #{first_hard + 1}" +
+            out.append(f"Heart rate was mostly in zone 4 or higher from {unit} #{first_hard + 1}" +
                        (" onwards." if all((d.get("zone") or 0) >= 4 for s, d in full if s.idx >= first_hard) else ", with some easier stretches."))
         else:
             out.append("Heart rate stayed at or below zone 3 throughout.")
@@ -351,5 +353,5 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     hilly = [(s, d) for s, d in full if d.get("gap_pace_s_per_km") and s.pace_s_per_km - d["gap_pace_s_per_km"] > 8]
     if hilly:
         s, d = max(hilly, key=lambda x: x[0].pace_s_per_km - x[1]["gap_pace_s_per_km"])
-        out.append(f"Km #{s.idx + 1} was uphill: {fmt_pace(s.pace_s_per_km)} actual, about {fmt_pace(d['gap_pace_s_per_km'])} on the flat.")
+        out.append(f"{unit.capitalize()} #{s.idx + 1} was uphill: {fmt_pace(s.pace_s_per_km)} actual, about {fmt_pace(d['gap_pace_s_per_km'])} on the flat.")
     return out

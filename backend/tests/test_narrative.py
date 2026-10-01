@@ -141,3 +141,11 @@ def test_api_attaches_narrative_without_blocking(tmp_path):
             break
         time.sleep(0.05)
     assert n["status"] == "ok" and n["sentences"]
+
+
+def test_forced_regeneration_counts_every_call(setup):
+    conn, report = setup
+    p = FakeProvider(good)
+    for _ in range(5):
+        nv.generate(conn, report, cfg(max_calls_per_day=2), provider=p, force=True)
+    assert p.calls == 2 and nv.calls_today(conn) == 2
