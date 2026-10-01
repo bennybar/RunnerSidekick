@@ -125,6 +125,7 @@ data class FocusEval(
     val kind: String, val title: String, @SerialName("week_start") val weekStart: String, val complete: Boolean = false,
     val target: String? = null, val summary: String? = null, val status: String? = null, val felt: String? = null,
     val runs: List<FocusRun> = emptyList(),
+    val auto: Boolean = false,
 )
 
 @Serializable
@@ -185,6 +186,7 @@ data class MorningReport(
     @SerialName("recent_run") val recentRun: RecentRun? = null,
     @SerialName("algorithm_version") val algorithmVersion: Map<String, String> = emptyMap(),
     val narrative: Narrative? = null,
+    @SerialName("checkin_prompt") val checkinPrompt: CheckinPrompt? = null,
 )
 
 @Serializable
@@ -515,3 +517,31 @@ data class AuthResult(val token: String, val user: Me)
 
 @Serializable
 data class GoogleSignInBody(@SerialName("id_token") val idToken: String, @SerialName("device_name") val deviceName: String)
+
+@Serializable
+data class CheckinPrompt(val ask: Boolean = false, val reason: String? = null)
+
+@Serializable
+data class CoachInsight(val title: String, val text: String, @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList(),
+                        val confidence: String = "low")
+
+@Serializable
+data class CoachRec(val title: String, val text: String, val why: String, @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList(),
+                    val category: String = "training")
+
+@Serializable
+data class CoachTarget(val type: String, val id: String? = null, val date: String? = null)
+
+@Serializable
+data class CoachView(
+    val status: String,                       // ok | pending | disabled | not_configured | rejected | failed | budget_exceeded
+    val model: String? = null,
+    @SerialName("generated_at") val generatedAt: String? = null,
+    @SerialName("key_source") val keySource: String? = null,
+    val summary: String? = null,
+    val insights: List<CoachInsight> = emptyList(),
+    val recommendations: List<CoachRec> = emptyList(),
+    val targets: Map<String, CoachTarget> = emptyMap(),
+    val detail: String? = null,
+    val previous: CoachView? = null,
+)

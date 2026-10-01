@@ -24,11 +24,12 @@ import androidx.compose.material.icons.automirrored.outlined.TrendingFlat
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
@@ -39,7 +40,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,12 +60,12 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -125,7 +126,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     var sheet by rememberSaveable { mutableStateOf<String?>(null) } // checkin | why | briefing
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
-    val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex < 2 } }
+    val coach by vm.coach.collectAsStateWithLifecycle()
 
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
     val report = today?.value
@@ -142,13 +143,6 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 scrollBehavior = scroll,
             )
         },
-        floatingActionButton = {
-            if (report != null) ExtendedFloatingActionButton(
-                onClick = { sheet = "checkin" }, expanded = fabExpanded,
-                icon = { Icon(Icons.Outlined.EditNote, null) },
-                text = { Text(if (checkin == null) "Check in" else "Edit check-in") },
-            )
-        },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         PullToRefreshBox(isRefreshing = busy && report != null, onRefresh = vm::refresh, modifier = Modifier.padding(padding).fillMaxSize()) {
@@ -161,7 +155,14 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 item { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") item { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 item { Hero(report, onWhy = { sheet = "why" }) }
-                item { PlanCard(report.recommendation.plan) { kind, minutes -> vm.setPlan(report.localDate, kind, minutes) } }
+                // The app asks only when an answer would change today's advice
+                if (checkin == null && report.checkinPrompt?.ask == true) item {
+                    CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
+                        onMore = { sheet = "checkin" })
+                }
+                coach?.value?.let { c -> (if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" })?.summary?.let { s ->
+                    item { CoachTeaser(s, onOpenInsights) }
+                } }
                 focus?.value?.let { f -> item { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
                 // Prefer what's new or changed; skip what the runner dismissed or is already working on
@@ -183,17 +184,23 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                                 com.bennybar.runnersidekick.ui.insights.trainingStatusLabel(g.trainingStatus?.phrase),
                                 g.racePredictions?.k5?.let { "5K ${(it / 60).toInt()}:${"%02d".format(it.toInt() % 60)}" })
                             if (parts.isNotEmpty()) row("Your fitness", supporting = parts.joinToString(" · ") + " (Garmin)",
-                                icon = Icons.Outlined.MonitorHeart, iconShape = MaterialShapes.Cookie9Sided, onClick = onOpenInsights)
+                                icon = Icons.Outlined.MonitorHeart, iconShape = MaterialShapes.Cookie9Sided, onClick = onOpenInsights,
+                                accent = "fitness")
                         }
-                        checkin?.let { c ->
-                            row("Your check-in", supporting = checkinSummary(c), icon = Icons.Outlined.TaskAlt, iconShape = MaterialShapes.Cookie4Sided,
-                                onClick = { sheet = "checkin" })
-                        }
+                        val plan = report.recommendation.plan
+                        row("Today's plan", supporting = plan?.let { p -> (PLAN_KINDS.firstOrNull { it.first == p.kind }?.second ?: p.kind) +
+                            (p.minutes?.let { " · $it min" } ?: "") } ?: "Optional · the suggestion adapts to it",
+                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie4Sided, onClick = { sheet = "plan" },
+                            accent = "habits")
+                        row(if (checkin == null) "Check in" else "Your check-in", supporting = checkin?.let(::checkinSummary) ?: "Optional",
+                            icon = Icons.Outlined.TaskAlt, iconShape = MaterialShapes.Cookie4Sided, onClick = { sheet = "checkin" },
+                            accent = "recovery")
                         report.recentRun?.let { run ->
                             row(run.name ?: "Run", overline = "Latest run · ${Format.shortDate(run.localDate)}",
                                 supporting = "${Format.distance(run.distanceM, units)} · ${Format.duration(run.movingS)} moving · " +
                                     Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units),
-                                icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(run.sourceId) })
+                                icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(run.sourceId) },
+                                accent = "running")
                         }
                         row("Full briefing", supporting = "All findings, Garmin scores and report details", icon = Icons.AutoMirrored.Outlined.ListAlt,
                             iconShape = MaterialShapes.Clover4Leaf, onClick = { sheet = "briefing" })
@@ -206,6 +213,11 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
         "checkin" -> report?.let { r ->
             CheckinSheet(r.localDate, checkin, onDismiss = { sheet = null }) { e, s, rec, p, i, n ->
                 vm.saveCheckin(r.localDate, e, s, rec, p, i, n); sheet = null
+            }
+        }
+        "plan" -> report?.let { r ->
+            SheetColumn(onDismiss = { sheet = null }) {
+                PlanCard(r.recommendation.plan) { kind, minutes -> vm.setPlan(r.localDate, kind, minutes) }
             }
         }
         "why" -> report?.let { WhySheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
@@ -280,7 +292,6 @@ private data class StateStyle(val label: String, val icon: ImageVector, val shap
 private fun styleFor(state: String) = when (state) {
     "usual_plan" -> StateStyle("Usual plan", Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided)
     "consider_easier" -> StateStyle("Consider easier", Icons.Outlined.SelfImprovement, MaterialShapes.SoftBurst)
-    "check_in_needed" -> StateStyle("Check in first", Icons.Outlined.TaskAlt, MaterialShapes.Sunny)
     else -> StateStyle("Not enough data", Icons.Outlined.Info, MaterialShapes.Clover8Leaf)
 }
 
@@ -310,6 +321,40 @@ private fun Hero(r: MorningReport, onWhy: () -> Unit) {
                 OutlinedButton(onClick = onWhy) { Text("Why this suggestion?") }
             }
         }
+    }
+}
+
+private val QUICK = listOf(4 to "Fresh", 3 to "Okay", 2 to "Tired")
+
+/** Shown only when the backend says an answer matters today; one tap answers "how recovered do you feel?". */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun CheckinPromptCard(reason: String?, onQuick: (Int) -> Unit, onMore: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeBadge(Icons.Outlined.TaskAlt, MaterialShapes.Sunny, Modifier.size(36.dp), container = cs.tertiaryContainer, content = cs.onTertiaryContainer)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("How recovered do you feel?", style = MaterialTheme.typography.titleMedium)
+                    reason?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                QUICK.forEach { (v, l) -> FilledTonalButton(onClick = { onQuick(v) }) { Text(l) } }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onMore) { Text("More") }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun CoachTeaser(summary: String, onOpen: () -> Unit) {
+    Group {
+        row("From your AI coach", supporting = summary, icon = Icons.Outlined.Psychology, iconShape = MaterialShapes.Flower, onClick = onOpen)
     }
 }
 

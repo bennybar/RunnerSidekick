@@ -121,3 +121,30 @@ def test_load_signal_without_baselines_is_cautious_not_typical():
     assert r["rule_id"] == "R1e" and r["suppress_intensity"]
     assert "typical" not in rp.headline(r, [], {}).lower()
     assert "optional" in rp.suggestion_text(r, {"kind": "intervals", "minutes": 45}, 132)
+
+
+def test_checkin_is_asked_only_when_it_matters(tmp_path):
+    conn = synced(tmp_path)
+    calm = rp.build_morning(conn, "fixture", ANCHOR, True)            # typical day in the fixture
+    episode = rp.build_morning(conn, "fixture", date(2026, 9, 21), True)  # synthetic recovery dip
+    assert calm["checkin_prompt"]["ask"] is False
+    assert episode["recommendation"]["state"] == "consider_easier" or episode["checkin_prompt"]["ask"]
+
+
+def test_focus_is_picked_automatically_and_can_be_changed(tmp_path):
+    conn = synced(tmp_path)
+    cur = fc.current(conn, "fixture", ANCHOR)
+    assert cur["current"] and cur["current"]["auto"] is True
+    fc.choose(conn, fc.week_start(ANCHOR), "steady_volume")
+    again = fc.current(conn, "fixture", ANCHOR)
+    assert again["current"]["kind"] == "steady_volume" and again["current"]["auto"] is False
+
+
+def test_intent_is_inferred_but_never_flags_meant_to_be_easy(tmp_path):
+    conn = synced(tmp_path)
+    set_zones(conn)
+    r = rp.build_post_run(conn, "fixture", "fx-run-2026-09-30", True)  # fixture intervals on Wednesday
+    assert r["intent"]["source"] == "inferred" and r["intent"]["kind"] == "intervals"
+    easyish = rp.build_post_run(conn, "fixture", "fx-run-2026-09-28", True)
+    assert easyish["intent"]["source"] == "inferred"
+    assert not any(f["metric"] == "intent_vs_actual" for f in easyish["findings"])

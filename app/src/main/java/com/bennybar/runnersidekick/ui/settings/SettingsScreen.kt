@@ -106,6 +106,11 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         message.value = "Saved"
     }
 
+    fun setOwnAiKey(key: String?) = launchIo {
+        repo.settings.setOwnAiKey(key)
+        message.value = if (key.isNullOrBlank()) "Your key was removed" else "Key saved on this phone"
+    }
+
     fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }
     fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }
 
@@ -281,10 +286,15 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                 }
                             }
                         }
-                        Group(title = "AI summaries (optional)") {
-                            row("Write a short summary of each report", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
-                                supporting = if (r.aiAvailable) "Uses OpenAI. Off by default." else "Unavailable: the backend has no OPENAI_API_KEY.",
-                                trailing = { Switch(checked = aiOn, enabled = r.aiAvailable || aiOn, onCheckedChange = { aiOn = it }) })
+                        val ownKey = local?.hasOwnAiKey == true
+                        Group(title = "AI coach and summaries (optional)") {
+                            row("AI coach and report summaries", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
+                                supporting = when {
+                                    ownKey -> "Uses OpenAI with your own key."
+                                    r.aiAvailable -> "Uses OpenAI. Off by default."
+                                    else -> "Add your own OpenAI key below to use it."
+                                },
+                                trailing = { Switch(checked = aiOn, enabled = r.aiAvailable || ownKey || aiOn, onCheckedChange = { aiOn = it }) })
                             custom {
                                 Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. " +
                                     "Numbers in the summary are filled in from the report, not written by the AI. If its output doesn't pass checks, " +
@@ -292,6 +302,19 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, enabled = aiOn,
                                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+                            }
+                            custom {
+                                var key by remember { mutableStateOf("") }
+                                Text("Your own OpenAI key (optional)", style = MaterialTheme.typography.titleSmall)
+                                Text("Encrypted on this phone and sent only with AI requests. The server uses it for that request and never stores it.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                OutlinedTextField(key, { key = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    label = { Text(if (ownKey) "Saved · enter a new key to replace" else "sk-…") },
+                                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                                    FilledTonalButton(onClick = { vm.setOwnAiKey(key); key = "" }, enabled = key.startsWith("sk-")) { Text("Save key") }
+                                    if (ownKey) TextButton(onClick = { vm.setOwnAiKey(null) }) { Text("Remove") }
+                                }
                             }
                         }
                         Button(

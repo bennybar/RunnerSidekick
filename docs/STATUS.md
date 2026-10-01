@@ -62,6 +62,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   suggestion text respects suppressed intensity; local check-ins scoped per account (Room v2).
 - New running icon (runner above a heart-rate line).
 
+## AI coach and less interaction (2026-10-01)
+- AI coach (`GET /v1/coach`): cross-domain insights and recommendations with evidence chips that open runs and
+  insights; shown at the top of Insights with a one-line teaser on Today. Server key or the runner's own key (Settings).
+  Verified live on real data (status ok, about 35 s, cached afterwards).
+- Fewer questions: no FAB; the app asks for a one-tap check-in only when it would change the advice
+  (`checkin_prompt`); the plan is an optional row; the weekly focus is picked automatically; run type is inferred.
+- A little colour: soft category accents on icon badges (training, sleep, recovery, running, fitness, habits).
+- Not exercised on the emulator: the check-in prompt card itself (today's report already had a check-in).
+
 ## Blockers
 - None blocking. Live Garmin sync demonstrated 2026-10-01: 90-day backfill, 31 runs, 53 days of wellness data (audit in docs/data-audit.md, generated locally and not committed).
 

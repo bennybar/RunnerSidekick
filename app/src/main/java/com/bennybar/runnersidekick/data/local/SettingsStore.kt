@@ -31,6 +31,7 @@ data class LocalSettings(
     val notificationsEnabled: Boolean,
     /** "<backend url>#<user id>" of the signed-in account, once known. Scopes local check-ins. */
     val account: String?,
+    val hasOwnAiKey: Boolean = false,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -44,6 +45,7 @@ class SettingsStore(private val context: Context) {
     private val kMode = stringPreferencesKey("current_mode")
     private val kNotify = booleanPreferencesKey("notifications_enabled")
     private val kAccount = stringPreferencesKey("current_account")
+    private val kAiKey = stringPreferencesKey("own_openai_key_enc")
     private val kMorningDate = stringPreferencesKey("notified_morning_date")
     private val kMorningState = stringPreferencesKey("notified_morning_state")
     private val kRunsSeen = stringSetPreferencesKey("notified_runs")
@@ -57,6 +59,7 @@ class SettingsStore(private val context: Context) {
             currentMode = p[kMode],
             notificationsEnabled = p[kNotify] ?: false,
             account = p[kAccount],
+            hasOwnAiKey = p[kAiKey] != null,
         )
     }
 
@@ -95,6 +98,11 @@ class SettingsStore(private val context: Context) {
     suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount) }
 
     suspend fun setAccount(account: String) = context.dataStore.edit { it[kAccount] = account }
+
+    /** The user's own OpenAI key, Keystore-encrypted like the device token. */
+    suspend fun setOwnAiKey(key: String?) = context.dataStore.edit { if (key.isNullOrBlank()) it.remove(kAiKey) else it[kAiKey] = encrypt(key.trim()) }
+
+    suspend fun ownAiKey(): String? = context.dataStore.data.first()[kAiKey]?.let { decrypt(it) }
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

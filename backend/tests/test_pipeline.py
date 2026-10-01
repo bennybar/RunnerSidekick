@@ -140,7 +140,8 @@ def test_reports_revision_on_input_change_and_keep_history(conn):
 def test_every_top_finding_has_evidence(conn):
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
     r = rp.build_morning(conn, "fixture", date(2026, 9, 21), True)  # inside the synthetic recovery episode
-    assert r["recommendation"]["state"] in ("consider_easier", "check_in_needed")
+    assert r["recommendation"]["state"] in ("consider_easier", "usual_plan")
+    assert r["recommendation"]["state"] == "consider_easier" or r["checkin_prompt"]["ask"]  # app asks when unsure
     assert r["recommendation"]["evidence_ids"]
     ids = {f["id"] for f in r["findings"]}
     assert set(r["recommendation"]["evidence_ids"]) - {"checkin"} <= ids

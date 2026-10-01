@@ -51,6 +51,47 @@ private fun dataColors(cs: ColorScheme, dark: Boolean) = DataColors(
     band = cs.primary.copy(alpha = 0.12f),
 )
 
+/** A container/on-container pair for a small accent (icon badges). */
+@Immutable
+data class Accent(val container: Color, val content: Color)
+
+/** A few soft accent hues so categories are easy to tell apart at a glance. Used sparingly, on icon badges only. */
+@Immutable
+data class Accents(val training: Accent, val sleep: Accent, val recovery: Accent, val running: Accent, val fitness: Accent, val habits: Accent)
+
+private val LightAccents = Accents(
+    training = Accent(Color(0xFFFFDCC2), Color(0xFF6E3900)),
+    sleep = Accent(Color(0xFFE0E0FF), Color(0xFF2F3A8C)),
+    recovery = Accent(Color(0xFFFFD9E0), Color(0xFF7A2941)),
+    running = Accent(Color(0xFFB8F0E6), Color(0xFF00504A)),
+    fitness = Accent(Color(0xFFD4EDB0), Color(0xFF2D4F00)),
+    habits = Accent(Color(0xFFF6E1A6), Color(0xFF574500)),
+)
+private val DarkAccents = Accents(
+    training = Accent(Color(0xFF5A3010), Color(0xFFFFDCC2)),
+    sleep = Accent(Color(0xFF353F7A), Color(0xFFE0E0FF)),
+    recovery = Accent(Color(0xFF5E2335), Color(0xFFFFD9E0)),
+    running = Accent(Color(0xFF00433D), Color(0xFFB8F0E6)),
+    fitness = Accent(Color(0xFF2E4513), Color(0xFFD4EDB0)),
+    habits = Accent(Color(0xFF4D3F00), Color(0xFFF6E1A6)),
+)
+
+val LocalAccents = staticCompositionLocalOf { LightAccents }
+
+/** Accent for an insight/coach category; unknown categories get null (callers fall back to the theme's own colours). */
+@Composable
+fun accentFor(category: String): Accent? = LocalAccents.current.let { a ->
+    when (category) {
+        "training", "intensity", "pacing" -> a.training
+        "sleep" -> a.sleep
+        "recovery" -> a.recovery
+        "running" -> a.running
+        "fitness" -> a.fitness
+        "habits" -> a.habits
+        else -> null
+    }
+}
+
 private val base = Typography()
 // Expressive: heavier display/headline weights for hero numerals and headlines, medium-weight titles and labels.
 private val AppTypography = base.copy(
@@ -79,7 +120,7 @@ fun RunnerTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = true, 
         dark -> Dark
         else -> Light
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark)) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides if (dark) DarkAccents else LightAccents) {
         @OptIn(ExperimentalMaterial3ExpressiveApi::class)
         MaterialExpressiveTheme(colorScheme = cs, typography = AppTypography, shapes = AppShapes,
             motionScheme = MotionScheme.expressive(), content = content)

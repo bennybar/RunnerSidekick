@@ -132,7 +132,8 @@ def verify_google_id_token(token: str) -> dict:
         raise HTTPException(401, "Google sign-in could not be verified")
 
 
-def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token) -> FastAPI:
+def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token,
+               coach_provider=None) -> FastAPI:
     accounts.app_db(cfg.data_dir).close()  # create/migrate the accounts DB (and move a single-user layout into users/<owner>)
     synthetic = cfg.source == SOURCE_FIXTURE
     sync_locks: dict[int, threading.Lock] = {}
@@ -359,6 +360,49 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         with lock_reports:
             return rp.build_insights(conn, cfg.source, today(conn), synthetic)
 
+    # ---------------------------------------------------------------- AI coach
+
+    coach_inflight: set[str] = set()
+
+    def coach_bg(db_path: str, model: str, key: str, key_source: str, budget: int) -> None:
+        from . import coach as ch
+        c = connect(db_path)
+        try:
+            ch.run(c, cfg.source, today(c), model, key, key_source, provider=coach_provider, budget=budget)
+        except Exception:
+            log.exception("coach generation failed")
+        finally:
+            c.close()
+            coach_inflight.discard(db_path)
+
+    @api.get("/v1/coach")
+    def get_coach(conn=Depends(db), x_openai_key: str | None = Header(default=None)):
+        """Latest validated coach analysis for the current evidence; generates in the background when inputs changed.
+        A user's own key (X-OpenAI-Key) is used for that call only and never stored or logged."""
+        from . import coach as ch
+        ai = ai_config(conn)
+        if not ai.enabled:
+            return {"status": "disabled"}
+        key = (x_openai_key or "").strip() or ai.api_key
+        if not key and coach_provider is None:
+            return {"status": "not_configured", "detail": "No OpenAI key: add one in Settings or on the server"}
+        b = ch.build_bundle(conn, cfg.source, today(conn))
+        h = ch.input_hash(b, ai.model)
+        hit = conn.execute("SELECT * FROM coach_analysis WHERE input_hash=? AND status='ok' ORDER BY id DESC LIMIT 1", (h,)).fetchone()
+        if hit:
+            return ch.view(dict(hit))
+        db_path = conn.execute("PRAGMA database_list").fetchone()["file"]
+        if db_path not in coach_inflight:
+            coach_inflight.add(db_path)
+            threading.Thread(target=coach_bg, args=(db_path, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
+                             daemon=True).start()
+        prev = ch.latest(conn, ok_only=True)
+        last = ch.latest(conn)
+        out = {"status": "pending", "previous": ch.view(prev) if prev else None}
+        if last and last["status"] != "ok" and last["input_hash"] == h:
+            out = {"status": last["status"], "detail": last["detail"], "previous": out["previous"]}
+        return out
+
     @api.get("/v1/fitness")
     def fitness(conn=Depends(db)):
         """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace."""
@@ -510,8 +554,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def delete_data(scope: Literal["raw", "reports", "all"], conn=Depends(db)):
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
-        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative"],
-                  "all": ["raw_payload", "report", "narrative", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis"],
+                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
         with conn:
             for t in tables:

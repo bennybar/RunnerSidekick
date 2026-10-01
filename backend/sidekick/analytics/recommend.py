@@ -12,9 +12,9 @@ here, because they already incorporate sleep/HRV and would double count.
 
 from __future__ import annotations
 
-RULES_VERSION = "rules-1.3"  # 1.2: no reassurance without overnight data/baselines (R1c/R1d); 1.3: R1e
+RULES_VERSION = "rules-1.4"  # 1.2: no reassurance without data (R1c/R1d); 1.3: R1e; 1.4: app-initiated check-ins
 
-STATES = ("usual_plan", "consider_easier", "check_in_needed", "insufficient_data")
+STATES = ("usual_plan", "consider_easier", "insufficient_data")
 
 
 def recommend(signals: dict[str, list[str]], checkin: dict | None, has_overnight_data: bool,
@@ -43,7 +43,7 @@ def recommend(signals: dict[str, list[str]], checkin: dict | None, has_overnight
     if not any_baseline and groups:
         # Something stands out, but there are no personal ranges to say the rest is typical: stay cautious
         what = "Your recent running is well above your usual" if "load" in groups else f"One signal stands out ({_label(groups[0])})"
-        return _r("usual_plan" if checkin else "check_in_needed", "R1e",
+        return _r("usual_plan", "R1e",
                   f"{what}, and your personal ranges are still being learned.", evidence + (["checkin"] if checkin else []),
                   suppress=True, uncertainty="Without personal ranges, overnight readings can't be called typical yet.")
     if not any_baseline and not groups:
@@ -57,7 +57,7 @@ def recommend(signals: dict[str, list[str]], checkin: dict | None, has_overnight
                   evidence + (["checkin"] if checkin else []), suppress=True,
                   uncertainty="These readings are associations, not a diagnosis; how you feel matters most.")
     if len(groups) == 1 and not checkin:
-        return _r("check_in_needed", "R3", f"One signal is outside your usual range ({_label(groups[0])}). A quick check-in would help.",
+        return _r("usual_plan", "R3", f"One signal is outside your usual range ({_label(groups[0])}). Keep the effort comfortable.",
                   evidence, suppress=True, uncertainty="A single reading often reflects day-to-day noise.")
     if len(groups) == 1:
         return _r("usual_plan", "R4", f"One signal is outside your usual range ({_label(groups[0])}), but nothing else points the same way.",

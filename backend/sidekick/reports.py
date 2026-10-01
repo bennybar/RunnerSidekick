@@ -18,7 +18,7 @@ from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import utc_now
 
-REPORT_VERSION = "report-2.1"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.2"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -280,8 +280,16 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     if recent:
         a = recent[-1]
         recent_run = {k: a[k] for k in ("source_id", "local_date", "name", "distance_m", "moving_s", "avg_hr", "start_utc")}
+    # App-initiated check-in: only ask when how the runner feels would change the advice
+    ask = checkin is None and (rec["rule_id"] in ("R3", "R1e", "R1", "R1b") or bool(signals) and rec["state"] != "consider_easier")
+    checkin_prompt = {"ask": ask, "reason": (
+        "One reading is outside your usual range. How you feel decides whether today stays easy." if rec["rule_id"] == "R3" else
+        "Your recent running is well above usual. How do you feel today?" if rec["rule_id"] == "R1e" else
+        "No overnight data yet. A quick answer tailors today's advice." if rec["rule_id"] == "R1" else
+        "Your personal ranges are still being learned. How you feel helps meanwhile." if rec["rule_id"] == "R1b" else
+        "A quick answer helps tailor today's advice.") if ask else None}
     body = {
-        "type": "morning", "local_date": ds, "synthetic": synthetic,
+        "type": "morning", "local_date": ds, "synthetic": synthetic, "checkin_prompt": checkin_prompt,
         "provisional": completeness["sleep_duration"] != "measured",
         "headline": headline(rec, findings, checkin), "recommendation": rec,
         "top_finding_ids": [f["id"] for f in top], "findings": findings, "garmin_context": garmin_ctx,
@@ -309,7 +317,7 @@ def headline(rec: dict, findings: list[dict], checkin: dict | None) -> str:
     within = [f for f in findings if f["status"] == "within"]
     if st == "consider_easier":
         return "Mixed recovery signals today." if within else "Several recovery signals are off today."
-    if st == "check_in_needed":
+    if rule == "R3":
         return f"{off[0]['title']} is outside your usual range." if off else "One reading is outside your usual range."
     if rule == "R4":
         return "Mostly typical, with one reading to watch."
@@ -335,8 +343,6 @@ def suggestion_text(rec: dict, plan: dict | None = None, easy_ceiling: float | N
         if st == "consider_easier":
             return (f"Consider swapping the {name} for an easy run or rest." if kind in HARD_KINDS else
                     f"Consider keeping the {name} short and easy, or resting.") + (easy_hint if kind != "race" else "")
-        if st == "check_in_needed":
-            return f"Do a quick check-in first, then decide on the {name}."
         if st == "insufficient_data" or suppress:
             return (f"Keep the {name} conditional on how you feel; make the hard parts optional." if kind in HARD_KINDS else
                     f"An {name}{mins} by feel fits." if kind == "easy" else f"Your {name}{mins} is fine; keep the effort comfortable.")
@@ -350,7 +356,6 @@ def suggestion_text(rec: dict, plan: dict | None = None, easy_ceiling: float | N
     return {
         "usual_plan": "Go ahead with your planned session.",
         "consider_easier": "Consider an easier or shorter session, or a rest day.",
-        "check_in_needed": "Take a 10-second check-in to tailor today's suggestion. Until then, keep any hard session optional.",
         "insufficient_data": "Train by feel. Keep any hard session conditional on how you feel.",
     }[st]
 
@@ -497,7 +502,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     details = rn.split_details(samples_for(conn, a["id"]), laps, zones["floors"] if zones else None)
     story = rn.run_story(splits, details, fmt_pace)
     intent = run_intent(conn, a)
-    if intent and intent["kind"] in ("easy", "recovery") and zones:
+    if intent and intent["kind"] in ("easy", "recovery") and intent["source"] != "inferred" and zones:
         from .focus import easy_share
         es = easy_share(conn, a, zones["floors"])
         if es is not None and es < 0.5:
@@ -548,6 +553,25 @@ def run_intent(conn, a: dict) -> dict | None:
     p = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (a["local_date"],)).fetchone()
     if p and p["kind"] != "rest":
         return {"kind": "easy" if p["kind"] == "easy" else p["kind"], "note": None, "source": "plan"}
+    return infer_intent(conn, a)
+
+
+def infer_intent(conn, a: dict) -> dict | None:
+    """What the run looks like from the data alone (labelled 'inferred'; never used to flag 'meant to be easy')."""
+    zones = get_setting(conn, "source_hr_zones", None)
+    an = run_analysis(conn, a)
+    cls = an["classification"]
+    if "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15:
+        return {"kind": "intervals", "note": None, "source": "inferred"}
+    recent = [x["moving_s"] for x in activities(conn, a["source"], (date.fromisoformat(a["local_date"]) - timedelta(days=42)).isoformat(),
+                                                   a["local_date"]) if x["moving_s"]]
+    if a["moving_s"] and recent and a["moving_s"] >= max(3600, 1.3 * median(recent)):
+        return {"kind": "long", "note": None, "source": "inferred"}
+    if zones:
+        from .focus import easy_share
+        es = easy_share(conn, a, zones["floors"])
+        if es is not None:
+            return {"kind": "easy" if es >= 0.7 else "tempo" if es < 0.4 else "other", "note": None, "source": "inferred"}
     return None
 
 
@@ -557,7 +581,7 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
     full = [s for s in (splits or []) if s.complete and s.pace_s_per_km]
     zones = [d.get("zone") for d in (details or []) if d.get("zone") is not None]
     hard_share = (sum(1 for z in zones if z >= 4) / len(zones)) if zones else 0
-    if intent and intent["kind"] in ("easy", "recovery") and hard_share >= 0.5 and easy_ceiling:
+    if intent and intent["kind"] in ("easy", "recovery") and intent["source"] != "inferred" and hard_share >= 0.5 and easy_ceiling:
         return f"This was meant to be easy. Next time, keep heart rate below {round(easy_ceiling)} bpm, even if that means a slower pace."
     if intent and intent["kind"] == "intervals":
         return "Interval session: compare the repeated efforts with each other rather than with steady runs."

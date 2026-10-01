@@ -176,8 +176,9 @@ def test_feeling_flat_with_typical_readings_suppresses_intensity():
     assert r["rule_id"] == "R4s" and r["state"] == "consider_easier" and r["suppress_intensity"]
 
 
-def test_single_signal_without_checkin_asks_for_checkin():
-    assert recommend({"sleep": ["m:sleep"]}, None, True, True)["state"] == "check_in_needed"
+def test_single_signal_without_checkin_is_cautious_and_the_app_asks():
+    r = recommend({"sleep": ["m:sleep"]}, None, True, True)
+    assert r["state"] == "usual_plan" and r["rule_id"] == "R3" and r["suppress_intensity"]
 
 
 def test_two_independent_signals_suggest_easier():

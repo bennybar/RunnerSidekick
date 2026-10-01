@@ -82,12 +82,13 @@ private fun statusLabel(s: String?) = when (s) {
 fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val cur = state.current
-    if (cur == null) {
+    var changing by remember { mutableStateOf(false) }
+    if (cur == null || changing) {
         Group(title = "Choose this week's focus") {
             state.lastWeek?.let { lw -> row("Last week: ${lw.title}", supporting = "${statusLabel(lw.status)}. ${lw.summary ?: ""}") }
             state.options.forEach { o ->
                 row(o.title, supporting = o.reason, icon = Icons.Outlined.CenterFocusStrong, iconShape = MaterialShapes.Sunny,
-                    onClick = { onChoose(o.kind) })
+                    onClick = { changing = false; onChoose(o.kind) })
             }
         }
         return
@@ -98,7 +99,8 @@ fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String)
                 ShapeBadge(Icons.Outlined.CenterFocusStrong, MaterialShapes.Sunny, Modifier.size(40.dp), container = cs.secondary, content = cs.onSecondary)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("This week's focus", style = MaterialTheme.typography.labelLarge, color = cs.onSecondaryContainer)
+                    Text(if (cur.auto) "This week's focus · picked for you" else "This week's focus", style = MaterialTheme.typography.labelLarge,
+                        color = cs.onSecondaryContainer)
                     Text(cur.title, style = MaterialTheme.typography.titleLarge, color = cs.onSecondaryContainer)
                 }
                 Surface(shape = MaterialTheme.shapes.small, color = if (cur.status == "achieved") cs.primary else cs.surface) {
@@ -121,6 +123,7 @@ fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String)
                 Text("Last week (${lw.title.lowercase()}): ${statusLabel(lw.status).lowercase()}. ${lw.summary ?: ""}",
                     style = MaterialTheme.typography.bodySmall, color = cs.onSecondaryContainer.copy(alpha = 0.8f))
             }
+            if (state.options.size > 1) TextButton(onClick = { changing = true }) { Text("Change") }
         }
     }
 }
@@ -133,6 +136,15 @@ val INTENT_KINDS = listOf("easy" to "Easy", "recovery" to "Recovery", "long" to 
 fun IntentPicker(intent: RunIntent?, onSave: (String, String?) -> Unit) {
     var note by remember(intent?.note) { mutableStateOf(intent?.note ?: "") }
     var kind by remember(intent?.kind) { mutableStateOf(intent?.kind) }
+    // An inferred kind needs no answer; it stays a one-line summary unless the runner wants to correct it
+    var open by remember(intent?.source) { mutableStateOf(intent?.source != "inferred") }
+    if (!open) {
+        Group(title = "Run type") {
+            row("Looks like: ${INTENT_KINDS.firstOrNull { it.first == intent?.kind }?.second ?: intent?.kind}",
+                supporting = "Inferred from pace and heart rate · tap to change", onClick = { open = true })
+        }
+        return
+    }
     Group(title = "What was this run meant to be?") {
         custom {
             if (intent?.source == "plan") Text("Pre-filled from today's plan. Change it if it was something else.",
@@ -143,7 +155,7 @@ fun IntentPicker(intent: RunIntent?, onSave: (String, String?) -> Unit) {
             }
             OutlinedTextField(note, { note = it }, label = { Text("Note (private, never sent to AI)") }, maxLines = 3,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            val changed = kind != null && (kind != intent?.kind || note != (intent?.note ?: "") || intent?.source == "plan")
+            val changed = kind != null && (kind != intent?.kind || note != (intent?.note ?: "") || intent?.source in setOf("plan", "inferred"))
             FilledTonalButton(onClick = { kind?.let { onSave(it, note) } }, enabled = changed, modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (intent?.source == "user" && !changed) "Saved" else "Save")
             }

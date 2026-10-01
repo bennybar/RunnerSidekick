@@ -18,7 +18,11 @@ sealed class ApiException(message: String) : Exception(message) {
     class Network(cause: IOException) : ApiException("Backend unreachable: ${cause.message}")
 }
 
-class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
+class ApiClient(
+    private val credentials: suspend () -> Pair<String, String>?,
+    /** Extra headers, e.g. the user's own OpenAI key (sent over TLS, used per request, never stored by the server). */
+    private val extraHeaders: suspend () -> Map<String, String> = { emptyMap() },
+) {
 
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -52,7 +56,9 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
             val url = (base.trimEnd('/') + path).toHttpUrl().newBuilder().apply {
                 query.forEach { (k, v) -> addQueryParameter(k, v) }
             }.build()
+            val extra = extraHeaders()
             val req = Request.Builder().url(url)
+                .apply { extra.forEach { (k, v) -> header(k, v) } }
                 .header("Authorization", "Bearer $token")
                 .method(method, body?.toRequestBody("application/json".toMediaType()))
                 .build()

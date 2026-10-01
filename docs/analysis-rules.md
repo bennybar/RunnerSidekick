@@ -47,7 +47,7 @@ Percentages are omitted when the median is 0.
   only. Calendar week is shown separately in run reports. There's no ACWR and no injury-risk number.
 - **Session-RPE load** = RPE × moving minutes. It's a separate measure and is never combined with Garmin load.
 
-## Recommendation rules — `analytics/recommend.py` (`rules-1.1`)
+## Recommendation rules — `analytics/recommend.py` (`rules-1.4`)
 
 Signal groups (correlated inputs count once): `overnight_autonomic` (RHR high **or** HRV low), `sleep`,
 `subjective` (check-in energy ≤ 2 or recovery ≤ 2 or soreness ≥ 4), `load` (7-day moving time > 1.5× prior weekly
@@ -61,16 +61,21 @@ double counting.
 | R1b | no baseline yet and no check-in | insufficient_data | yes |
 | R2 | ≥ 2 signal groups | consider_easier | yes |
 | R4s | only `subjective` fired | consider_easier | yes |
-| R3 | 1 group, no check-in | check_in_needed | yes |
+| R3 | 1 group, no check-in | usual_plan ("go by feel") | yes |
 | R4 | 1 group, check-in without concerns | usual_plan | no |
 | R5 | no groups | usual_plan | only if overnight data missing |
 | R1c | check-in but no overnight data | insufficient_data | yes |
 | R1d | overnight data and check-in, no personal ranges, no signal | insufficient_data | yes |
-| R1e | a signal (e.g. load) but no personal ranges | usual_plan (with check-in) / check_in_needed | yes |
+| R1e | a signal (e.g. load) but no personal ranges | usual_plan ("go by feel") | yes |
 
 "Readings look typical" is only said when overnight data and personal ranges exist (rules-1.3). With a day plan,
 the suggestion names the planned session: swap it (consider_easier), keep its hard parts optional (suppressed
 intensity), or go ahead.
+
+There is no `check_in_needed` state (rules-1.4): advice never waits on the runner. Instead the morning report carries
+`checkin_prompt {ask, reason}`, and the app asks one question ("how recovered do you feel?") only when no check-in
+exists and the answer would change the advice: R3, R1e, R1, R1b, or any signal that hasn't already made the day easier.
+The morning notification mentions the question only then. Checking in is otherwise an optional row.
 
 A single low HRV never cancels a run by itself (R3/R4). A good score never overrides reported pain (R0).
 There are no numeric pace or HR prescriptions in v1.
@@ -167,4 +172,23 @@ independent confirmation.
 | recovery | runs with ≥ 50 % of moving time in zones 4–5 | none |
 
 Suggestions come from the latest insights (pacing, intensity), last week's volume jump (> 1.5× the prior 4-week mean)
-and Garmin's training status. They're ordered by goal type. A week in progress is never scored as missed.
+and Garmin's training status. They're ordered by goal type. A week in progress is never scored as missed. If the runner hasn't chosen one, the top
+suggestion is picked automatically (`auto: true`, shown as "picked for you"); they can change it.
+
+## Run intent
+
+User choice → today's plan → inferred (`source: "inferred"`): intervals if the run is structured or its lap-pace
+coefficient of variation is > 0.15; long if moving time ≥ max(60 min, 1.3× the 6-week median); otherwise by share of
+time below the zone-3 floor: easy (≥ 70 %), tempo (< 40 %), else other. An inferred intent never produces the
+"meant to be easy" finding; the app shows it as one line ("Looks like: …") that can be corrected.
+
+## AI coach — `coach.py` (`coach-1.2`)
+
+Cross-domain insights (≤ 4) and recommendations (≤ 4; training, recovery, sleep, pacing, habits) written by the
+selected OpenAI model from a bundle of deterministic outputs only: profile, today's plan and advice, today's readings,
+Garmin fitness, insights, the last four weeks, weekly focus, the last 10 runs (no names, notes or IDs) and habit
+summaries. Strict JSON schema. Accepted only if every item cites known evidence IDs, the text has no digits outside
+`{fact:id}` placeholders (the server fills in the values), and no medical, causal or certainty words. The model is
+told never to ask for more logging or check-ins. Cached by input hash; shares the daily AI budget with summaries.
+Key: the server's, or the runner's own key sent per request as `X-OpenAI-Key` (Keystore-encrypted on the phone,
+never stored by the server).

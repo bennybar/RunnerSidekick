@@ -55,9 +55,10 @@ class GroupScope internal constructor() {
         icon: ImageVector? = null,
         iconShape: RoundedPolygon? = null,
         onClick: (() -> Unit)? = null,
+        accent: String? = null, // accent category, see accentFor()
         trailing: (@Composable RowScope.() -> Unit)? = null,
     ) {
-        rows += { shape -> GroupRow(shape, headline, supporting, overline, icon, iconShape, onClick, trailing) }
+        rows += { shape -> GroupRow(shape, headline, supporting, overline, icon, iconShape, onClick, accent, trailing) }
     }
 
     fun custom(content: @Composable ColumnScope.() -> Unit) {
@@ -85,7 +86,7 @@ fun Group(modifier: Modifier = Modifier, title: String? = null, content: GroupSc
 @Composable
 private fun GroupRow(
     shape: Shape, headline: String, supporting: String?, overline: String?, icon: ImageVector?, iconShape: RoundedPolygon?,
-    onClick: (() -> Unit)?, trailing: (@Composable RowScope.() -> Unit)?,
+    onClick: (() -> Unit)?, accentCategory: String?, trailing: (@Composable RowScope.() -> Unit)?,
 ) {
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -94,7 +95,10 @@ private fun GroupRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                ShapeBadge(icon, iconShape ?: MaterialShapes.Circle, Modifier.size(40.dp))
+                val accent = accentCategory?.let { com.bennybar.runnersidekick.ui.theme.accentFor(it) }
+                ShapeBadge(icon, iconShape ?: MaterialShapes.Circle, Modifier.size(40.dp),
+                    container = accent?.container ?: MaterialTheme.colorScheme.primaryContainer,
+                    content = accent?.content ?: MaterialTheme.colorScheme.onPrimaryContainer)
                 Spacer(Modifier.width(16.dp))
             }
             Column(Modifier.weight(1f)) {

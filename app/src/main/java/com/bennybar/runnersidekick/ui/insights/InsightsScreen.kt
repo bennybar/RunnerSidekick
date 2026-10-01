@@ -44,6 +44,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,7 @@ import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.theme.accentFor
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
@@ -101,6 +103,9 @@ fun InsightsScreen(
     val settings by vm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val coach by vm.coach.collectAsStateWithLifecycle()
+    val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.loadCoach() }
     var method by remember { mutableStateOf<Insight?>(null) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
@@ -124,6 +129,7 @@ fun InsightsScreen(
                     }
                     return@LazyColumn
                 }
+                coach?.value?.let { c -> item { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
                 fitness?.value?.let { f ->
                     item { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun) }
                 }
@@ -147,7 +153,8 @@ fun InsightsScreen(
                     Group(title = "Still collecting data") {
                         waiting.forEach { i ->
                             val (icon, shape) = categoryStyle(i.category)
-                            row(i.question, supporting = i.detail.ifBlank { i.headline }, icon = icon, iconShape = shape, onClick = { method = i })
+                            row(i.question, supporting = i.detail.ifBlank { i.headline }, icon = icon, iconShape = shape, onClick = { method = i },
+                                accent = i.category)
                         }
                     }
                 }
@@ -187,11 +194,13 @@ fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit, onState: 
     val cs = MaterialTheme.colorScheme
     val container = if (emphasised) cs.surfaceContainerHigh else cs.surfaceContainer
     val (icon, shape) = categoryStyle(i.category)
+    val accent = accentFor(i.category)
     Surface(shape = MaterialTheme.shapes.extraLarge, color = container, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ShapeBadge(icon, shape, Modifier.size(44.dp),
-                    container = if (emphasised) cs.primary else cs.secondaryContainer, content = if (emphasised) cs.onPrimary else cs.onSecondaryContainer)
+                    container = if (emphasised) accent?.container ?: cs.primary else cs.secondaryContainer,
+                    content = if (emphasised) accent?.content ?: cs.onPrimary else cs.onSecondaryContainer)
                 Spacer(Modifier.width(12.dp))
                 Text(i.question, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
                 if (i.verdict == "pattern" && i.novelty in setOf("new", "changed")) {

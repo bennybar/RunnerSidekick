@@ -68,6 +68,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
     val fitness = repo.fitness.state(null)
     val focus = repo.focus.state(null)
+    val coach = repo.coach.state(null)
 
     fun setPlan(date: String, kind: String?, minutes: Int?) = launchIo { repo.setPlan(date, kind, minutes) }
     fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
@@ -95,6 +96,22 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
+    val coach = repo.coach.state(null)
+    private val _coachLoading = MutableStateFlow(false)
+    val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
+
+    /** Polls (bounded) while the backend writes a new analysis in the background. */
+    fun loadCoach() = viewModelScope.launch {
+        _coachLoading.value = true
+        try {
+            for (attempt in 0 until 20) {
+                if (runCatching { repo.refreshCoach() }.getOrDefault("failed") != "pending") break
+                kotlinx.coroutines.delay(4000)
+            }
+        } finally {
+            _coachLoading.value = false
+        }
+    }
     val weekly = repo.weekly.state(null)
     val fitness = repo.fitness.state(null)
     private val _days = MutableStateFlow(28)
@@ -105,6 +122,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
 
     init { refresh() }
     fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); repo.refreshTrends(_days.value) }
+        .also { loadCoach() }
     fun setDays(d: Int) { _days.value = d; launchIo { repo.refreshTrends(d) } }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 }

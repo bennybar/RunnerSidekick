@@ -166,12 +166,20 @@ def evaluate(conn, source: str, ws: date, kind: str, today: date) -> dict:
 def current(conn, source: str, today: date) -> dict:
     ws = week_start(today)
     row = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", (ws.isoformat(),)).fetchone()
+    opts = options(conn, source, today)
+    if row is None and opts:
+        # Picked for the runner from the data; they can change it, but nothing is required
+        with conn:
+            conn.execute("INSERT OR IGNORE INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,?,?)",
+                         (ws.isoformat(), opts[0]["kind"], json.dumps({"auto": True}), utc_now()))
+        row = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", (ws.isoformat(),)).fetchone()
     prev = conn.execute("SELECT * FROM weekly_focus WHERE week_start=?", ((ws - timedelta(days=7)).isoformat(),)).fetchone()
     return {
         "week_start": ws.isoformat(),
-        "current": evaluate(conn, source, ws, row["kind"], today) if row else None,
+        "current": ({**evaluate(conn, source, ws, row["kind"], today), "auto": json.loads(row["params_json"]).get("auto", False)}
+                    if row else None),
         "last_week": evaluate(conn, source, ws - timedelta(days=7), prev["kind"], today) if prev else None,
-        "options": options(conn, source, today),
+        "options": opts,
     }
 
 
@@ -179,5 +187,5 @@ def choose(conn, ws: date, kind: str) -> None:
     if kind not in KINDS:
         raise ValueError(kind)
     with conn:
-        conn.execute("INSERT INTO weekly_focus (week_start, kind, chosen_at) VALUES (?,?,?) ON CONFLICT (week_start) DO UPDATE SET"
-                     " kind=excluded.kind, chosen_at=excluded.chosen_at", (ws.isoformat(), kind, utc_now()))
+        conn.execute("INSERT INTO weekly_focus (week_start, kind, params_json, chosen_at) VALUES (?,?,'{}',?) ON CONFLICT (week_start) DO UPDATE SET"
+                     " kind=excluded.kind, params_json='{}', chosen_at=excluded.chosen_at", (ws.isoformat(), kind, utc_now()))

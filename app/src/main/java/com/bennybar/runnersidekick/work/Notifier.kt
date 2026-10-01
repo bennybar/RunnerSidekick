@@ -61,11 +61,13 @@ object Notifier {
             val stateKey = r.recommendation.state
             if (isToday && inWindow && ready && (state.morningDate != r.localDate || state.morningState != stateKey)) {
                 val firstToday = state.morningDate != r.localDate
+                // The app asks only when an answer would change today's advice
+                val body = r.recommendation.suggestion + if (r.checkinPrompt?.ask == true) "\nOne quick question in the app: how recovered do you feel?" else ""
                 val n = NotificationCompat.Builder(ctx, CH_MORNING)
                     .setSmallIcon(R.drawable.ic_stat_pulse)
                     .setContentTitle((if (r.provisional) "Provisional · " else "") + r.headline)
                     .setContentText(r.recommendation.suggestion)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(r.recommendation.suggestion))
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     .setContentIntent(openApp(ctx)).setAutoCancel(true)
                     .setOnlyAlertOnce(true).setSilent(!firstToday) // a revision updates quietly
                     .build()

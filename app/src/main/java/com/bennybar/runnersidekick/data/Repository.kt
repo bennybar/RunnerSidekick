@@ -11,6 +11,7 @@ import com.bennybar.runnersidekick.data.remote.ApiClient
 import com.bennybar.runnersidekick.data.remote.CheckinDto
 import com.bennybar.runnersidekick.data.remote.EffortIn
 import com.bennybar.runnersidekick.data.remote.AuthResult
+import com.bennybar.runnersidekick.data.remote.CoachView
 import com.bennybar.runnersidekick.data.remote.DayPlanIn
 import com.bennybar.runnersidekick.data.remote.Fitness
 import com.bennybar.runnersidekick.data.remote.FocusState
@@ -70,6 +71,15 @@ class Repository(
     suspend fun refreshFitness() = put("fitness", api.getRaw("/v1/fitness"))
 
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
+    val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+
+    /** Fetches the coach analysis. A "pending" answer keeps showing the previous analysis until the new one exists. */
+    suspend fun refreshCoach(): String {
+        val body = api.getRaw("/v1/coach")
+        val v = json.decodeFromString<CoachView>(body)
+        if (v.status != "pending" || db.cache().get("coach") == null) put("coach", body)
+        return v.status
+    }
 
     suspend fun refreshFocus() = put("focus", api.getRaw("/v1/focus"))
 
