@@ -1,0 +1,12 @@
+# /etc/systemd/system/runnersidekick-sync.timer
+[Unit]
+Description=Hourly Runner Sidekick Garmin sync
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

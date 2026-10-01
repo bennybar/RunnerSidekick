@@ -1,0 +1,5 @@
+# Runtime dependencies for the API server (pinned to the versions tested on 2026-10-01).
+garminconnect==0.3.17
+fastapi==0.142.2
+uvicorn==0.54.0
+openai==3.22.1

@@ -13,3 +13,13 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Backend: virtualenv, local data, secrets. Runtime data lives in ~/.runner-sidekick by default.
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-journal
+garmin_tokens/
+.env

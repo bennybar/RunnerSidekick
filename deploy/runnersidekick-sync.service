@@ -1,0 +1,25 @@
+# /etc/systemd/system/runnersidekick-sync.service
+# One Garmin sync run plus report regeneration. Triggered by runnersidekick-sync.timer.
+# The sync engine applies its own backoff, and stops on authentication failure, so a timer can't cause retry storms.
+[Unit]
+Description=Runner Sidekick Garmin sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=runnersidekick
+Group=runnersidekick
+WorkingDirectory=/var/www/RunnerSidekick/backend
+Environment=RSK_SOURCE=garmin
+Environment=RSK_DATA_DIR=/var/lib/runnersidekick
+EnvironmentFile=-/etc/runnersidekick.env
+ExecStart=/var/www/RunnerSidekick/backend/.venv/bin/python -m sidekick sync
+StateDirectory=runnersidekick
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/runnersidekick
+UMask=0077
