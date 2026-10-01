@@ -164,3 +164,12 @@ fun MetricTile(
         }
     }
 }
+
+
+/** A lazy-list item that fades in, fades out and moves into place when the list changes (a tab or range switch,
+ *  a card appearing), using Material's emphasized timing. */
+fun androidx.compose.foundation.lazy.LazyListScope.animatedItem(key: Any, content: @Composable () -> Unit) =
+    item(key = key) {
+        Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, 60),
+            fadeOutSpec = androidx.compose.animation.core.tween(90))) { content() }
+    }

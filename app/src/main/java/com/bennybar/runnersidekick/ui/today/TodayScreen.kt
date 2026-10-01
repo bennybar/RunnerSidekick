@@ -95,6 +95,7 @@ import com.bennybar.runnersidekick.ui.components.DemoBadge
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.EvidenceSheet
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.animatedItem
 import com.bennybar.runnersidekick.ui.components.MetricTile
 import com.bennybar.runnersidekick.ui.components.OfflineBanner
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
@@ -153,11 +154,11 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
             }
             LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 112.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { Freshness(status?.value, today?.fetchedAt, report, offline) }
-                status?.value?.connection?.let { c -> if (c.state != "connected") item { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
+                animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
+                status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // Order: the day's call, what stands out, the readings, then commentary
-                item { Hero(report, onWhy = { sheet = "why" }) }
-                if (report.highlights.isNotEmpty()) item {
+                animatedItem(key = "hero") { Hero(report, onWhy = { sheet = "why" }) }
+                if (report.highlights.isNotEmpty()) animatedItem(key = "highlights") {
                     StandsOut(report.highlights) { t ->
                         when (t.type) {
                             "run" -> t.id?.let(onOpenRun)
@@ -167,12 +168,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     }
                 }
                 // The app asks only when an answer would change today's advice
-                if (checkin == null && report.checkinPrompt?.ask == true) item {
+                if (checkin == null && report.checkinPrompt?.ask == true) animatedItem(key = "checkin") {
                     CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
                         onMore = { sheet = "checkin" })
                 }
-                item { Readings(report) { evidence = it } }
-                focus?.value?.let { f -> item { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
+                animatedItem(key = "readings") { Readings(report) { evidence = it } }
+                focus?.value?.let { f -> animatedItem(key = "focus") { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 // One AI voice: the coach's summary when there is one, otherwise the report summary
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 coachShown?.summary?.let { s ->
@@ -180,12 +181,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     // Older advice is labelled as such, so it never reads as current next to a changed briefing
                     val note = if (coachShown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")
                         else "Updated ${Format.ago(runCatching { Instant.parse(coachShown.generatedAt) }.getOrNull())}"
-                    item { CoachTeaser(s, note, onOpenInsights) }
-                } ?: report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
+                    animatedItem(key = "coach") { CoachTeaser(s, note, onOpenInsights) }
+                } ?: report.narrative?.let { n -> animatedItem(key = "narrative") { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
                 // Prefer what's new or changed; skip what the runner dismissed or is already working on
                 insights?.value?.insights?.filter { it.verdict == "pattern" && it.userState == null }
                     ?.sortedBy { if (it.novelty == "continuing") 1 else 0 }?.firstOrNull()?.let { top ->
-                    item {
+                    animatedItem(key = "noticed") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Something we noticed", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(start = 4.dp, top = 8.dp))
@@ -193,7 +194,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
-                item {
+                animatedItem(key = "more") {
                     Group(title = "More") {
                         fitness?.value?.garmin?.let { g ->
                             val parts = listOfNotNull(g.vo2max?.let { "VO₂ max %.1f".format(it.value) },

@@ -94,6 +94,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Today: a new "Stands out today" section (Garmin status, load, bests, VO₂ max movement, focus, comparisons, run intent)
   directly under the day's call, then readings; a single AI voice instead of two.
 
+## Motion (2026-10-01, v0.8.0)
+- Predictive back: opted in (`enableOnBackInvokedCallback`). While swiping back, a detail screen (run, report, day)
+  shrinks and slides with the finger, rounding its corners, with the previous screen visible behind it; cancelling
+  snaps it back. Checked on the emulator.
+- Material 3 motion: emphasized easing, fade-through between tabs, a horizontal shared axis for details; lists fade and
+  reflow when tabs, ranges or cards change; expandable cards animate their height.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

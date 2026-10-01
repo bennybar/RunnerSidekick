@@ -1,5 +1,6 @@
 package com.bennybar.runnersidekick.ui.insights
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -107,7 +108,7 @@ private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
     val accent = accentFor(cat)
     var more by remember { mutableStateOf(false) }
     Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.animateContentSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ShapeBadge(icon, shape, Modifier.size(40.dp), container = accent?.container ?: cs.secondaryContainer,
                     content = accent?.content ?: cs.onSecondaryContainer)

@@ -1,6 +1,10 @@
 package com.bennybar.runnersidekick
 
 import android.os.Bundle
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.animateDp
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -70,6 +74,38 @@ class MainActivity : ComponentActivity() {
     companion object { const val EXTRA_OPEN_RUN = "open_run" }
 }
 
+// Material 3 motion: emphasized easing; fade-through between tabs, a horizontal shared axis into and out of details.
+// Navigation drives the pop transitions with the predictive back gesture, so the screen follows the finger.
+private val Emphasized = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val EmphasizedDecelerate = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val EmphasizedAccelerate = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+private val TAB_ROUTES = setOf("today", "insights", "activities", "journal", "settings")
+
+private fun isTab(route: String?) = route in TAB_ROUTES
+
+private fun <T> spec(ms: Int, easing: androidx.compose.animation.core.Easing = Emphasized, delay: Int = 0) =
+    androidx.compose.animation.core.tween<T>(ms, delay, easing)
+
+private val fadeThroughIn = androidx.compose.animation.fadeIn(spec(210, EmphasizedDecelerate, 90)) +
+    androidx.compose.animation.scaleIn(spec(210, EmphasizedDecelerate, 90), initialScale = 0.96f)
+private val fadeThroughOut = androidx.compose.animation.fadeOut(spec(90, EmphasizedAccelerate))
+
+private val pushIn = androidx.compose.animation.slideInHorizontally(spec(400)) { it / 4 } + androidx.compose.animation.fadeIn(spec(300))
+private val pushOut = androidx.compose.animation.slideOutHorizontally(spec(400)) { -it / 10 } + androidx.compose.animation.fadeOut(spec(250))
+// Back (gesture or button): the detail shrinks and slides toward the edge while the screen behind settles into place
+private val popIn = androidx.compose.animation.slideInHorizontally(spec(400)) { -it / 10 } +
+    androidx.compose.animation.fadeIn(spec(300)) + androidx.compose.animation.scaleIn(spec(400), initialScale = 0.97f)
+private val popOut = androidx.compose.animation.scaleOut(spec(400), targetScale = 0.9f) +
+    androidx.compose.animation.slideOutHorizontally(spec(400)) { it / 4 } + androidx.compose.animation.fadeOut(spec(350))
+
+/** A detail destination: while it enters or leaves (including mid back gesture) its corners round like a card. */
+@Composable
+private fun androidx.compose.animation.AnimatedContentScope.Detail(content: @Composable () -> Unit) {
+    val corner by transition.animateDp(label = "corner") { if (it == androidx.compose.animation.EnterExitState.Visible) 0.dp else 32.dp }
+    androidx.compose.foundation.layout.Box(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(corner))
+        .background(androidx.compose.material3.MaterialTheme.colorScheme.surface)) { content() }
+}
+
 private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
 
 private val TABS = listOf(
@@ -123,7 +159,12 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             }
         },
     ) { padding ->
-        NavHost(nav, startDestination = "today", modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
+        NavHost(nav, startDestination = "today",
+            enterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else pushIn },
+            exitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else pushOut },
+            popEnterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else popIn },
+            popExitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else popOut },
+            modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
             }
@@ -131,16 +172,18 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
                 InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
                     onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") })
             }
-            composable("day/{date}") { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) }
+            composable("day/{date}") { Detail { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
             composable("activities") { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) }
             composable("journal") { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) }
             composable("settings") { SettingsScreen() }
             composable("activity/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() })
+                Detail { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
             }
             composable("report/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                ReportScreen(it.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate("activity/$id") },
-                    onOpenReport = { id -> nav.navigate("report/$id") })
+                Detail {
+                    ReportScreen(it.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onOpenRun = { id -> nav.navigate("activity/$id") },
+                        onOpenReport = { id -> nav.navigate("report/$id") })
+                }
             }
         }
     }

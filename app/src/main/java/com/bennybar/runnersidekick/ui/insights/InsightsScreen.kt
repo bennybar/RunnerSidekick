@@ -70,6 +70,7 @@ import com.bennybar.runnersidekick.ui.InsightsVm
 import com.bennybar.runnersidekick.ui.components.DemoBadge
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.animatedItem
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.factory
 import com.bennybar.runnersidekick.ui.theme.accentFor
@@ -124,7 +125,7 @@ fun InsightsScreen(
         PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val items = data?.value?.insights.orEmpty()
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item {
+                animatedItem(key = "tabs") {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf("Insights", "Compare", "Trends").forEachIndexed { i, l ->
                             SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(l) }
@@ -132,37 +133,37 @@ fun InsightsScreen(
                     }
                 }
                 if (tab == 1) {
-                    item { CompareSection(compare?.value, onOpenSettings = onOpenSettings, onOpenRun = onOpenRun) }
+                    animatedItem(key = "compare") { CompareSection(compare?.value, onOpenSettings = onOpenSettings, onOpenRun = onOpenRun) }
                     return@LazyColumn
                 }
                 if (tab == 2) {
-                    item {
+                    animatedItem(key = "trends") {
                         TrendsSection(trends?.value, days, settings?.units ?: com.bennybar.runnersidekick.data.local.Units.METRIC, loading = busy,
                             onDays = vm::setDays, onOpenDay = onOpenDay, onOpenRun = onOpenRun)
                     }
                     return@LazyColumn
                 }
-                coach?.value?.let { c -> item { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
+                coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
                 fitness?.value?.let { f ->
-                    item { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun) }
+                    animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun) }
                 }
-                weekly?.value?.let { w -> item { WeeklyCard(w) { onOpenReport(w.id) } } }
-                item {
+                weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
+                animatedItem(key = "intro") {
                     Text("A fixed set of questions answered from your own data. Every answer is shown, including \"no clear pattern\".",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (items.isEmpty()) item { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
+                if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
                 val patterns = items.filter { it.verdict == "pattern" }
                 val nulls = items.filter { it.verdict == "no_clear_pattern" }
                 val waiting = items.filter { it.verdict == "not_enough_data" }
-                patterns.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i },
+                patterns.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i },
                     onState = { st -> vm.setInsightState(i.id, st) }) } }
-                if (nulls.isNotEmpty()) item {
+                if (nulls.isNotEmpty()) animatedItem(key = "nulls-title") {
                     Text("Checked, nothing notable", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp, top = 12.dp))
                 }
-                nulls.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = false, onMethod = { method = i }) } }
-                if (waiting.isNotEmpty()) item {
+                nulls.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = false, onMethod = { method = i }) } }
+                if (waiting.isNotEmpty()) animatedItem(key = "waiting") {
                     Group(title = "Still collecting data") {
                         waiting.forEach { i ->
                             val (icon, shape) = categoryStyle(i.category)
@@ -172,7 +173,7 @@ fun InsightsScreen(
                     }
                 }
                 data?.value?.let { r ->
-                    item {
+                    animatedItem(key = "footer") {
                         Text("Updated ${Format.shortDate(r.localDate)} · revision ${r.revision} · ${items.firstOrNull()?.algorithmVersion ?: ""}",
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
