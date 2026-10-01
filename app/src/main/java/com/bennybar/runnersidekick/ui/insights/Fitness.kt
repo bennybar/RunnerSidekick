@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick.ui.insights
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,7 +34,6 @@ import com.bennybar.runnersidekick.data.remote.TrainingStatus
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
-import com.bennybar.runnersidekick.ui.components.Sparkline
 
 /** Garmin's training-status phrases (e.g. "OVERREACHING_3") as Garmin names them in its app. */
 fun trainingStatusLabel(phrase: String?): String? = phrase?.substringBefore('_')?.let {
@@ -95,9 +95,7 @@ fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit)
                         g.trainingStatus?.let { st -> StatusBlock(st, Modifier.weight(1f)) }
                     }
                     if (f.vo2maxSeries.size >= 2) {
-                        // VO2 max is only recorded on some days; plot the measurements in order (a slowly changing score)
-                        Sparkline(f.vo2maxSeries.map { it.value }, Modifier.fillMaxWidth().height(36.dp),
-                            description = "VO2 max, ${f.vo2maxSeries.size} measurements over the last 4 months")
+                        Vo2Bars(f.vo2maxSeries)
                         Text("VO₂ max: ${f.vo2maxSeries.size} Garmin measurements since ${Format.shortDate(f.vo2maxSeries.first().date)} " +
                             "(%.1f → %.1f)".format(f.vo2maxSeries.first().value, f.vo2maxSeries.last().value),
                             style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
@@ -195,5 +193,49 @@ private fun LoadBar(st: TrainingStatus) {
         }
         Text(if (acute > hi) "Above Garmin's optimal range" else if (acute < lo) "Below Garmin's optimal range" else "Inside Garmin's optimal range",
             style = MaterialTheme.typography.labelMedium, color = if (acute > hi) cs.error else cs.onSurfaceVariant)
+    }
+}
+
+/** VO2 max by week (Garmin's latest reading each week, last 8 weeks), each bar labelled with its value. */
+@Composable
+private fun Vo2Bars(series: List<com.bennybar.runnersidekick.data.remote.Point>) {
+    val cs = MaterialTheme.colorScheme
+    val weeks = series.groupBy { java.time.LocalDate.parse(it.date).let { d -> d.minusDays(d.dayOfWeek.value - 1L) } }
+        .mapValues { (_, pts) -> pts.maxBy { it.date }.value }.toSortedMap().entries.toList().takeLast(8)
+    if (weeks.size < 2) return
+    // Scores move in tenths, so bars start just below the lowest week; the caption says where
+    val base = kotlin.math.floor(weeks.minOf { it.value }) - 1
+    val top = weeks.maxOf { it.value }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+            contentDescription = "VO2 max by week: " + weeks.joinToString { "${Format.shortDate(it.key.toString())} %.1f".format(it.value) }
+        }, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+            weeks.forEachIndexed { i, (week, v) ->
+                // Weeks without a reading are marked, never bridged, so a gap doesn't read as a steady trend
+                if (i > 0 && week.minusWeeks(1) != weeks[i - 1].key) {
+                    Column(Modifier.weight(0.6f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("gap", style = MaterialTheme.typography.labelSmall, color = cs.outline, maxLines = 1)
+                        Spacer(Modifier.height(24.dp))
+                    }
+                }
+                val last = i == weeks.lastIndex
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("%.1f".format(v), style = if (last) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelSmall,
+                        color = if (last) cs.primary else cs.onSurfaceVariant)
+                    Spacer(Modifier.height(4.dp))
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth()
+                        .height((16 + 64 * ((v - base) / (top - base).coerceAtLeast(0.1))).dp)
+                        .background(if (last) cs.primary else cs.primary.copy(alpha = 0.35f),
+                            androidx.compose.foundation.shape.RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 3.dp, bottomEnd = 3.dp)))
+                    Spacer(Modifier.height(4.dp))
+                    Text("${week.dayOfMonth} ${week.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())}",
+                        style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 1)
+                }
+            }
+        }
+        val gaps = weeks.zipWithNext().any { (a, b) -> b.key.minusWeeks(1) != a.key }
+        Text("By week (latest Garmin reading) · bars start at %.0f".format(base) + if (gaps) " · gap = weeks without a reading" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = cs.onSurfaceVariant)
     }
 }
