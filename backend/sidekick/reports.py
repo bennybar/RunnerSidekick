@@ -18,7 +18,7 @@ from .analytics.recommend import RULES_VERSION, recommend
 from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import utc_now
 
-REPORT_VERSION = "report-1.9"  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.1"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -261,7 +261,11 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     rec = recommend(signals, checkin, has_overnight, any_baseline)
     running_days = get_setting(conn, "running_days", [0, 2, 4, 5])
     rec["planned_run_day"] = d.weekday() in running_days
-    rec["suggestion"] = suggestion_text(rec)
+    plan_row = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (ds,)).fetchone()
+    plan = {"kind": plan_row["kind"], "minutes": plan_row["minutes"]} if plan_row else None
+    zones = get_setting(conn, "source_hr_zones", None)
+    rec["plan"] = plan
+    rec["suggestion"] = suggestion_text(rec, plan, zones["floors"][2] if zones else None, get_setting(conn, "available_minutes", None))
     findings.sort(key=lambda f: f["priority"])
     top = [f for f in findings if f["status"] not in ("missing",)][:3]
     garmin_ctx = []
@@ -284,7 +288,8 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
         "completeness": completeness, "checkin": checkin, "recent_run": recent_run, "narrative": None,
     }
     inputs = {"findings": [{k: f.get(k) for k in ("id", "observed", "comparison", "status")} for f in findings],
-              "checkin": checkin, "running_days": running_days, "garmin": garmin_ctx, "recent": recent_run, "v": ALGORITHMS}
+              "checkin": checkin, "running_days": running_days, "garmin": garmin_ctx, "recent": recent_run, "v": ALGORITHMS,
+              "plan": plan, "available": get_setting(conn, "available_minutes", None)}
     return save_report(conn, "morning", ds, ds, body, input_hash(inputs), data_cutoff(conn, source))
 
 
@@ -297,6 +302,9 @@ def headline(rec: dict, findings: list[dict], checkin: dict | None) -> str:
                 "R1c": "No overnight data yet, but you feel fine."}.get(rule, "Waiting for today's data.")
     if rule == "R4s":
         return "Readings look typical, but you feel less recovered."
+    if rule == "R1e":
+        return "Recent running is well above your usual." if "load" in rec.get("reason", "") or "running" in rec.get("reason", "") \
+            else "One reading stands out; ranges still being learned."
     off = [f for f in findings if f["status"] in ("outside", "sustained")]
     within = [f for f in findings if f["status"] == "within"]
     if st == "consider_easier":
@@ -308,12 +316,37 @@ def headline(rec: dict, findings: list[dict], checkin: dict | None) -> str:
     return "Recovery signals look typical today."
 
 
-def suggestion_text(rec: dict) -> str:
-    st = rec["state"]
+HARD_KINDS = {"tempo", "intervals", "race"}
+PLAN_NAMES = {"easy": "easy run", "long": "long run", "tempo": "tempo run", "intervals": "interval session", "race": "race",
+              "other": "planned session"}
+
+
+def suggestion_text(rec: dict, plan: dict | None = None, easy_ceiling: float | None = None, available_min: int | None = None) -> str:
+    """What to do today. With a plan, the advice speaks to that session; numbers come only from the runner's own
+    settings (planned minutes, usual time) and Garmin zones."""
+    st, suppress = rec["state"], rec["suppress_intensity"]
+    if plan:
+        kind = plan["kind"]
+        name = PLAN_NAMES.get(kind, "planned session")
+        mins = f" of about {plan['minutes']} min" if plan.get("minutes") else ""
+        easy_hint = f" Keep it below {round(easy_ceiling)} bpm to stay easy." if easy_ceiling else ""
+        if kind == "rest":
+            return "Rest day planned. That fits." if st != "usual_plan" or suppress else "Rest day planned. Enjoy it."
+        if st == "consider_easier":
+            return (f"Consider swapping the {name} for an easy run or rest." if kind in HARD_KINDS else
+                    f"Consider keeping the {name} short and easy, or resting.") + (easy_hint if kind != "race" else "")
+        if st == "check_in_needed":
+            return f"Do a quick check-in first, then decide on the {name}."
+        if st == "insufficient_data" or suppress:
+            return (f"Keep the {name} conditional on how you feel; make the hard parts optional." if kind in HARD_KINDS else
+                    f"An {name}{mins} by feel fits." if kind == "easy" else f"Your {name}{mins} is fine; keep the effort comfortable.")
+        return f"Go ahead with your {name}{mins}." + (easy_hint if kind == "easy" else "")
     if not rec["planned_run_day"] and st != "consider_easier":
         return "Not a planned running day. Rest or easy movement fits."
     if st == "usual_plan" and rec["suppress_intensity"]:
         return "Your usual plan is fine, but keep the effort easy or moderate today."
+    if st == "usual_plan" and available_min:
+        return f"Go ahead with your planned session (your usual is about {available_min} min)."
     return {
         "usual_plan": "Go ahead with your planned session.",
         "consider_easier": "Consider an easier or shorter session, or a rest day.",
@@ -463,6 +496,22 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     zones = get_setting(conn, "source_hr_zones", None)
     details = rn.split_details(samples_for(conn, a["id"]), laps, zones["floors"] if zones else None)
     story = rn.run_story(splits, details, fmt_pace)
+    intent = run_intent(conn, a)
+    if intent and intent["kind"] in ("easy", "recovery") and zones:
+        from .focus import easy_share
+        es = easy_share(conn, a, zones["floors"])
+        if es is not None and es < 0.5:
+            findings.append({
+                "id": f"r:{sid}:intent", "category": "running", "metric": "intent_vs_actual", "title": "Meant to be easy",
+                "observed": {"value": round(100 * (1 - es)), "unit": "%"}, "comparison": {"kind": "intent", "value": None},
+                "delta": None, "status": "outside", "priority": 0,
+                "statement": (f"You planned this as {'an easy' if intent['kind'] == 'easy' else 'a recovery'} run, but "
+                              f"{round(100 * (1 - es))}% of it was at or above {zones['floors'][2]} bpm (zone 3+)."),
+                "interpretation": "Easy running only does its job when it's actually easy.",
+                "evidence": {"record_ids": [sid], "date_range": [a["local_date"]] * 2}, "sample_size": 1, "coverage": None,
+                "limitations": ["Garmin zones; wrist heart rate can read high early in a run."],
+                "algorithm_version": rn.RUNNING_VERSION, "derived": True,
+            })
     week_start = d - timedelta(days=d.weekday())
     week_acts = activities(conn, source, week_start.isoformat(), a["local_date"])
     rpe = conn.execute("SELECT rpe FROM activity_effort WHERE activity_source_id=?", (sid,)).fetchone()
@@ -483,19 +532,37 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "classification": an["classification"], "decoupling": dc,
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_start.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
-        "next_focus": next_focus(an, dc, comp, splits, details), "narrative": None,
+        "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None),
+        "intent": intent, "narrative": None,
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
-              "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones}
+              "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 
-def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None) -> str:
+def run_intent(conn, a: dict) -> dict | None:
+    """User-stated intent, else pre-filled from the day's plan (marked as such)."""
+    r = conn.execute("SELECT * FROM run_intent WHERE activity_source_id=?", (a["source_id"],)).fetchone()
+    if r:
+        return {"kind": r["kind"], "note": r["note"], "source": r["source"]}
+    p = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (a["local_date"],)).fetchone()
+    if p and p["kind"] != "rest":
+        return {"kind": "easy" if p["kind"] == "easy" else p["kind"], "note": None, "source": "plan"}
+    return None
+
+
+def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent: dict | None = None,
+               easy_ceiling: float | None = None) -> str:
     """One practical focus from this run, most specific first. No pace or HR prescriptions beyond the run's own numbers."""
     full = [s for s in (splits or []) if s.complete and s.pace_s_per_km]
     zones = [d.get("zone") for d in (details or []) if d.get("zone") is not None]
+    hard_share = (sum(1 for z in zones if z >= 4) / len(zones)) if zones else 0
+    if intent and intent["kind"] in ("easy", "recovery") and hard_share >= 0.5 and easy_ceiling:
+        return f"This was meant to be easy. Next time, keep heart rate below {round(easy_ceiling)} bpm, even if that means a slower pace."
+    if intent and intent["kind"] == "intervals":
+        return "Interval session: compare the repeated efforts with each other rather than with steady runs."
     cls = an["classification"]
-    structured = "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15
+    structured = "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15 or bool(intent and intent["kind"] == "intervals")
     if cls["kind"] == "variable" and structured:
         return "Interval-style session: drift analysis doesn't apply. Compare the repeated efforts with each other instead."
     if dc.get("eligible") and dc["decoupling_pct"] > 5:
@@ -549,9 +616,21 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
     prev_v = {i["id"]: i["verdict"] for i in json.loads(prev["body_json"])["insights"]} if prev else {}
     for i in items:
         i["confidence"] = None if i["verdict"] == "not_enough_data" else ("consistent" if prev_v.get(i["id"]) == i["verdict"] else "emerging")
+    # Novelty vs the most recent earlier snapshot, and the runner's own dismissals / "working on it"
+    last = conn.execute("SELECT body_json FROM report WHERE type='insights' AND local_date<? ORDER BY local_date DESC, revision DESC LIMIT 1",
+                        (today.isoformat(),)).fetchone()
+    last_i = {i["id"]: i for i in json.loads(last["body_json"])["insights"]} if last else {}
+    states = {r["insight_id"]: dict(r) for r in conn.execute("SELECT * FROM insight_state")}
+    for i in items:
+        p = last_i.get(i["id"])
+        i["novelty"] = ("new" if p is None or (p["verdict"] != "pattern" and i["verdict"] == "pattern") else
+                        "changed" if p["verdict"] != i["verdict"] or p["headline"] != i["headline"] else "continuing")
+        st = states.get(i["id"])
+        # A dismissal lapses when the verdict changes, so a new development is never hidden
+        i["user_state"] = st["state"] if st and st["verdict_at_dismissal"] == i["verdict"] else None
     body = {"type": "insights", "local_date": today.isoformat(), "synthetic": synthetic, "insights": items, "narrative": None,
             "window": [since, today.isoformat()]}
-    inputs = {"items": [{k: i.get(k) for k in ("id", "verdict", "effect", "sample_size", "confidence")} for i in items], "v": ALGORITHMS,
+    inputs = {"items": [{k: i.get(k) for k in ("id", "verdict", "effect", "sample_size", "confidence", "novelty", "user_state")} for i in items], "v": ALGORITHMS,
               "iv": ins.INSIGHTS_VERSION}
     return save_report(conn, "insights", today.isoformat(), today.isoformat(), body, input_hash(inputs), data_cutoff(conn, source))
 

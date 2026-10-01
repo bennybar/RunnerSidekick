@@ -136,12 +136,13 @@ fun InsightsScreen(
                 val patterns = items.filter { it.verdict == "pattern" }
                 val nulls = items.filter { it.verdict == "no_clear_pattern" }
                 val waiting = items.filter { it.verdict == "not_enough_data" }
-                patterns.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = true) { method = i } } }
+                patterns.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i },
+                    onState = { st -> vm.setInsightState(i.id, st) }) } }
                 if (nulls.isNotEmpty()) item {
                     Text("Checked, nothing notable", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp, top = 12.dp))
                 }
-                nulls.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = false) { method = i } } }
+                nulls.forEach { i -> item(key = i.id) { InsightCard(i, emphasised = false, onMethod = { method = i }) } }
                 if (waiting.isNotEmpty()) item {
                     Group(title = "Still collecting data") {
                         waiting.forEach { i ->
@@ -182,7 +183,7 @@ fun WeeklyCard(w: com.bennybar.runnersidekick.data.remote.WeeklyReport, onOpen: 
 }
 
 @Composable
-fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit) {
+fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit, onState: ((String?) -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
     val container = if (emphasised) cs.surfaceContainerHigh else cs.surfaceContainer
     val (icon, shape) = categoryStyle(i.category)
@@ -193,6 +194,12 @@ fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit) {
                     container = if (emphasised) cs.primary else cs.secondaryContainer, content = if (emphasised) cs.onPrimary else cs.onSecondaryContainer)
                 Spacer(Modifier.width(12.dp))
                 Text(i.question, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+                if (i.verdict == "pattern" && i.novelty in setOf("new", "changed")) {
+                    Surface(shape = MaterialTheme.shapes.small, color = cs.tertiaryContainer) {
+                        Text(if (i.novelty == "new") "New" else "Changed", style = MaterialTheme.typography.labelMedium,
+                            color = cs.onTertiaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                }
             }
             Text(i.headline, style = if (emphasised) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge)
             Text(i.detail, style = MaterialTheme.typography.bodyMedium)
@@ -207,6 +214,16 @@ fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit) {
                     when (i.confidence) { "consistent" -> "held on newer data"; "emerging" -> "emerging, not yet re-checked"; else -> null })
                     .joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
                 TextButton(onClick = onMethod) { Text("How it's worked out") }
+            }
+            if (onState != null && i.verdict == "pattern") Row {
+                if (i.userState == null) {
+                    TextButton(onClick = { onState("working_on") }) { Text("I'm working on it") }
+                    TextButton(onClick = { onState("dismissed") }) { Text("Dismiss") }
+                } else {
+                    Text(if (i.userState == "working_on") "You're working on this" else "Dismissed", style = MaterialTheme.typography.labelLarge,
+                        color = cs.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically).padding(start = 12.dp))
+                    TextButton(onClick = { onState(null) }) { Text("Undo") }
+                }
             }
         }
     }

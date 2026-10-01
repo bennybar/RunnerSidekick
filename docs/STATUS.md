@@ -49,6 +49,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   PRs; run story; more specific next focus; easy pace (measured / unknown / estimated); Garmin fitness card (VO₂ max,
   race predictions, training status, load vs Garmin range, load balance, heat acclimation) with an agreement note.
 
+## The loop (2026-10-01, v0.4.0)
+- Today's plan (rest/easy/long/tempo/intervals/race plus minutes): the suggestion speaks to the planned session.
+- Run intent ("what was this run meant to be?", pre-filled from the plan; private note never sent to AI). An easy
+  intent that was mostly zone 3+ is flagged, and next focus says so.
+- Weekly focus: three suggestions from the data, ordered by goal type; measured on that week's runs (fade, easy share,
+  volume band, planned days, hard runs) with perceived effort; reported again in the weekly review.
+- Insights: New/Changed/Continuing; "working on it"/dismiss (lapses when the verdict changes); Today prefers new or
+  changed insights.
+- Goal type (consistency / go longer / get faster / health); usual time shapes the suggestion.
+- Fixed (from an external review): no "readings look typical" without overnight data or ranges (R1c/R1d/R1e);
+  suggestion text respects suppressed intensity; local check-ins scoped per account (Room v2).
+- New running icon (runner above a heart-rate line).
+
 ## Blockers
 - None blocking. Live Garmin sync demonstrated 2026-10-01: 90-day backfill, 31 runs, 53 days of wellness data (audit in docs/data-audit.md, generated locally and not committed).
 

@@ -67,6 +67,11 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 
     val insights = repo.insights.state(null)
     val fitness = repo.fitness.state(null)
+    val focus = repo.focus.state(null)
+
+    fun setPlan(date: String, kind: String?, minutes: Int?) = launchIo { repo.setPlan(date, kind, minutes) }
+    fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
+    fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 
     init { refresh() }
 
@@ -101,6 +106,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     init { refresh() }
     fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); repo.refreshTrends(_days.value) }
     fun setDays(d: Int) { _days.value = d; launchIo { repo.refreshTrends(d) } }
+    fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 }
 
 class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
@@ -118,6 +124,7 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     init { refresh() }
     fun refresh() = launchIo { repo.refreshActivity(id) }
     fun setEffort(rpe: Int) = launchIo { repo.setEffort(id, rpe) }
+    fun setIntent(kind: String, note: String?) = launchIo { repo.setIntent(id, kind, note) }
 }
 
 class JournalVm(repo: Repository) : BaseVm(repo) {

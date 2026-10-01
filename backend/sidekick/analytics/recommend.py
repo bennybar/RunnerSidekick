@@ -12,7 +12,7 @@ here, because they already incorporate sleep/HRV and would double count.
 
 from __future__ import annotations
 
-RULES_VERSION = "rules-1.2"  # 1.2: no reassurance without overnight data/baselines; R1c/R1d
+RULES_VERSION = "rules-1.3"  # 1.2: no reassurance without overnight data/baselines (R1c/R1d); 1.3: R1e
 
 STATES = ("usual_plan", "consider_easier", "check_in_needed", "insufficient_data")
 
@@ -40,6 +40,12 @@ def recommend(signals: dict[str, list[str]], checkin: dict | None, has_overnight
                       ["checkin"], suppress=True, uncertainty="Watch data may still be syncing.")
         return _r("insufficient_data", "R1", "No overnight data or check-in for today yet.", [], suppress=True,
                   uncertainty="Watch data may still be syncing.")
+    if not any_baseline and groups:
+        # Something stands out, but there are no personal ranges to say the rest is typical: stay cautious
+        what = "Your recent running is well above your usual" if "load" in groups else f"One signal stands out ({_label(groups[0])})"
+        return _r("usual_plan" if checkin else "check_in_needed", "R1e",
+                  f"{what}, and your personal ranges are still being learned.", evidence + (["checkin"] if checkin else []),
+                  suppress=True, uncertainty="Without personal ranges, overnight readings can't be called typical yet.")
     if not any_baseline and not groups:
         if checkin:
             return _r("insufficient_data", "R1d", "Still learning your personal ranges. Your check-in looks fine.", ["checkin"],

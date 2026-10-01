@@ -207,6 +207,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
             }
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
+                item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
                 if (r.story.isNotEmpty()) item {
                     Group(title = "How the run went") {
                         custom {

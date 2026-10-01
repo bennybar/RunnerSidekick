@@ -225,21 +225,29 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     var goal by remember(r) { mutableStateOf(r.goal ?: "") }
                     var minutes by remember(r) { mutableStateOf(r.availableMinutes?.toString() ?: "") }
                     var zones by remember(r) { mutableStateOf(r.hrZoneSource) }
+                    var goalType by remember(r) { mutableStateOf(r.goalType) }
                     var start by remember(r) { mutableStateOf(r.morningWindowStart) }
                     var end by remember(r) { mutableStateOf(r.morningWindowEnd) }
                     var aiOn by remember(r) { mutableStateOf(r.aiEnabled) }
                     var model by remember(r) { mutableStateOf(r.aiModel) }
                     val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank()
-                    val dirty = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, aiOn, model.trim(),
+                    val dirty = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
                         r.aiAvailable, start, end) != r
                     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Group(title = "Training profile") {
                             custom {
+                                Text("Main goal", style = MaterialTheme.typography.titleMedium)
+                                Text("Orders the weekly focus suggestions.", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)) {
+                                    listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
+                                        .forEach { (k, l) -> FilterChip(goalType == k, { goalType = if (goalType == k) null else k }, { Text(l) }) }
+                                }
                                 Text("Running days", style = MaterialTheme.typography.titleMedium)
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
                                     DAYS.forEachIndexed { i, d -> FilterChip(i in days, { days = if (i in days) days - i else days + i }, { Text(d) }) }
                                 }
-                                OutlinedTextField(goal, { goal = it }, label = { Text("Goal (e.g. half marathon in spring)") },
+                                OutlinedTextField(goal, { goal = it }, label = { Text("Goal in your words (optional)") },
                                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
                                 OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit) }, label = { Text("Usual time per run (min)") }, singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
@@ -289,7 +297,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         Button(
                             enabled = !busy && valid && dirty, modifier = Modifier.fillMaxWidth(),
                             onClick = { vm.saveRemote(SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones,
-                                aiOn, model.trim(), r.aiAvailable, start, end)) },
+                                goalType, aiOn, model.trim(), r.aiAvailable, start, end)) },
                         ) { Text(if (dirty) "Save changes" else "Saved") }
                     }
                 }

@@ -114,6 +114,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val checkin by vm.todayCheckin.collectAsStateWithLifecycle()
     val insights by vm.insights.collectAsStateWithLifecycle()
     val fitness by vm.fitness.collectAsStateWithLifecycle()
+    val focus by vm.focus.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val offline by vm.offline.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -160,8 +161,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 item { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") item { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 item { Hero(report, onWhy = { sheet = "why" }) }
+                item { PlanCard(report.recommendation.plan) { kind, minutes -> vm.setPlan(report.localDate, kind, minutes) } }
+                focus?.value?.let { f -> item { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
-                insights?.value?.insights?.firstOrNull { it.verdict == "pattern" }?.let { top ->
+                // Prefer what's new or changed; skip what the runner dismissed or is already working on
+                insights?.value?.insights?.filter { it.verdict == "pattern" && it.userState == null }
+                    ?.sortedBy { if (it.novelty == "continuing") 1 else 0 }?.firstOrNull()?.let { top ->
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Something we noticed", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
@@ -279,6 +284,7 @@ private fun styleFor(state: String) = when (state) {
     else -> StateStyle("Not enough data", Icons.Outlined.Info, MaterialShapes.Clover8Leaf)
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun Hero(r: MorningReport, onWhy: () -> Unit) {
     val rec = r.recommendation
@@ -288,7 +294,9 @@ private fun Hero(r: MorningReport, onWhy: () -> Unit) {
     val on = if (easier) cs.onTertiaryContainer else cs.onPrimaryContainer
     val accent = if (easier) cs.tertiary else cs.primary
     val onAccent = if (easier) cs.onTertiary else cs.onPrimary
-    val style = styleFor(rec.state)
+    // "Usual plan" while intensity is held back would contradict the advice underneath
+    val style = if (rec.state == "usual_plan" && rec.suppressIntensity) StateStyle("Go by feel", Icons.Outlined.SelfImprovement, MaterialShapes.Cookie9Sided)
+    else styleFor(rec.state)
     Surface(shape = MaterialTheme.shapes.extraLarge, color = container, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Runner Sidekick icon: soft mint ground -->
+<!-- Runner Sidekick icon: soft teal ground -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#E6F7EF" />
+    <solid android:color="#E3F6F4" />
 </shape>

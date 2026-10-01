@@ -102,6 +102,40 @@ data class Recommendation(
     @SerialName("suppress_intensity") val suppressIntensity: Boolean,
     val uncertainty: String? = null,
     @SerialName("rules_version") val rulesVersion: String,
+    val plan: DayPlan? = null,
+)
+
+@Serializable
+data class DayPlan(val kind: String, val minutes: Int? = null)
+
+@Serializable
+data class DayPlanIn(val kind: String, val minutes: Int?, @SerialName("client_updated_at") val clientUpdatedAt: String)
+
+@Serializable
+data class RunIntent(val kind: String, val note: String? = null, val source: String = "user")
+
+@Serializable
+data class RunIntentIn(val kind: String, val note: String?, @SerialName("client_updated_at") val clientUpdatedAt: String)
+
+@Serializable
+data class FocusRun(val date: String, @SerialName("source_id") val sourceId: String? = null, val value: Double? = null, val met: Boolean = false)
+
+@Serializable
+data class FocusEval(
+    val kind: String, val title: String, @SerialName("week_start") val weekStart: String, val complete: Boolean = false,
+    val target: String? = null, val summary: String? = null, val status: String? = null, val felt: String? = null,
+    val runs: List<FocusRun> = emptyList(),
+)
+
+@Serializable
+data class FocusOption(val kind: String, val title: String, val reason: String)
+
+@Serializable
+data class FocusState(
+    @SerialName("week_start") val weekStart: String,
+    val current: FocusEval? = null,
+    @SerialName("last_week") val lastWeek: FocusEval? = null,
+    val options: List<FocusOption> = emptyList(),
 )
 
 @Serializable
@@ -263,6 +297,7 @@ data class PostRunReport(
     val narrative: Narrative? = null,
     val story: List<String> = emptyList(),
     @SerialName("best_efforts") val bestEfforts: Map<String, BestEffort> = emptyMap(),
+    val intent: RunIntent? = null,
 )
 
 @Serializable
@@ -311,6 +346,7 @@ data class SettingsDto(
     val goal: String? = null,
     @SerialName("available_minutes") val availableMinutes: Int? = null,
     @SerialName("hr_zone_source") val hrZoneSource: String = "garmin",
+    @SerialName("goal_type") val goalType: String? = null,
     @SerialName("ai_enabled") val aiEnabled: Boolean = false,
     @SerialName("ai_model") val aiModel: String = "gpt-6.1-sol",
     @SerialName("ai_available") val aiAvailable: Boolean = false,
@@ -337,6 +373,8 @@ data class Insight(
     val chart: kotlinx.serialization.json.JsonObject? = null,
     val evidence: Evidence = Evidence(),
     @SerialName("algorithm_version") val algorithmVersion: String,
+    val novelty: String? = null,              // new | changed | continuing
+    @SerialName("user_state") val userState: String? = null, // dismissed | working_on
 )
 
 @Serializable

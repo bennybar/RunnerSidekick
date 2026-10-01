@@ -64,6 +64,13 @@ double counting.
 | R3 | 1 group, no check-in | check_in_needed | yes |
 | R4 | 1 group, check-in without concerns | usual_plan | no |
 | R5 | no groups | usual_plan | only if overnight data missing |
+| R1c | check-in but no overnight data | insufficient_data | yes |
+| R1d | overnight data and check-in, no personal ranges, no signal | insufficient_data | yes |
+| R1e | a signal (e.g. load) but no personal ranges | usual_plan (with check-in) / check_in_needed | yes |
+
+"Readings look typical" is only said when overnight data and personal ranges exist (rules-1.3). With a day plan,
+the suggestion names the planned session: swap it (consider_easier), keep its hard parts optional (suppressed
+intensity), or go ahead.
 
 A single low HRV never cancels a run by itself (R3/R4). A good score never overrides reported pain (R0).
 There are no numeric pace or HR prescriptions in v1.
@@ -148,3 +155,16 @@ acclimation are shown under Garmin's names, as supplied. Garmin's acute:chronic 
 used. When Garmin's status (Overreaching/Strained/Unproductive) or low-aerobic shortage coincides with our "mostly
 hard" insight, the app says they agree. It also notes they come from the same runs, so the agreement isn't
 independent confirmation.
+
+## Weekly focus — `focus.py` (`focus-1.0`)
+
+| Focus | Measured as | Target |
+|---|---|---|
+| even_pacing | second-half minus first-half pace on complete splits | ≤ 5 s/km on each run |
+| easy_runs | share of moving time below the zone-3 floor | ≥ 1 run with ≥ 70 % |
+| steady_volume | weekly moving time vs the previous week | within ±15 % |
+| consistency | runs on the configured running days | all planned days |
+| recovery | runs with ≥ 50 % of moving time in zones 4–5 | none |
+
+Suggestions come from the latest insights (pacing, intensity), last week's volume jump (> 1.5× the prior 4-week mean)
+and Garmin's training status. They're ordered by goal type. A week in progress is never scored as missed.

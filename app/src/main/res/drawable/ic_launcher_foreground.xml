@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Runner Sidekick icon (concept A): a violet "journal" card tilted behind a green card carrying a heart-rate pulse.
+<!-- Runner Sidekick icon (concept E): a runner above a heart-rate line on a teal card, a violet card tilted behind.
      Scaled to 90% around the centre to stay inside the adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
@@ -8,28 +8,35 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
-        <group android:pivotX="56" android:pivotY="50" android:rotation="-10">
+        <group android:pivotX="60" android:pivotY="46" android:rotation="12">
             <path
                 android:fillColor="#8B6CFF"
-                android:pathData="M46,27h22a11,11 0,0 1,11 11v18a11,11 0,0 1,-11 11h-22a11,11 0,0 1,-11 -11v-18a11,11 0,0 1,11 -11z" />
-            <path
-                android:fillColor="#FFFFFF"
-                android:pathData="M43,35a3,3 0,1 0,6 0a3,3 0,1 0,-6 0zM65,35a3,3 0,1 0,6 0a3,3 0,1 0,-6 0z" />
+                android:pathData="M48,22h24a13,13 0,0 1,13 13v20a13,13 0,0 1,-13 13h-24a13,13 0,0 1,-13 -13v-20a13,13 0,0 1,13 -13z" />
         </group>
-        <path android:pathData="M38,45h32a12,12 0,0 1,12 12v10a12,12 0,0 1,-12 12h-32a12,12 0,0 1,-12 -12v-10a12,12 0,0 1,12 -12z">
+        <path android:pathData="M42,34h20a16,16 0,0 1,16 16v20a16,16 0,0 1,-16 16h-20a16,16 0,0 1,-16 -16v-20a16,16 0,0 1,16 -16z">
             <aapt:attr name="android:fillColor">
                 <gradient
                     android:type="linear"
-                    android:startX="26" android:startY="45"
-                    android:endX="82" android:endY="79"
-                    android:startColor="#3DDC97"
-                    android:endColor="#0E9F6E" />
+                    android:startX="26" android:startY="34"
+                    android:endX="78" android:endY="86"
+                    android:startColor="#2ED3C6"
+                    android:endColor="#0B8F8A" />
             </aapt:attr>
         </path>
+        <!-- heart-rate line -->
         <path
             android:fillColor="#00000000"
-            android:pathData="M31,66L42,66L47,55L54,74L60,61L77,61"
-            android:strokeWidth="5"
+            android:pathData="M33,74L43,74L47,65L54,82L59,70L70,70"
+            android:strokeWidth="4.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- runner: head, then body and limbs -->
+        <path android:fillColor="#FFFFFF" android:pathData="M54.8,43a4.2,4.2 0,1 0,8.4 0a4.2,4.2 0,1 0,-8.4 0z" />
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M57,49L52,58L45,59M52,58L56,64M55,52L62,55L66,51"
+            android:strokeWidth="3.6"
             android:strokeColor="#FFFFFF"
             android:strokeLineCap="round"
             android:strokeLineJoin="round" />

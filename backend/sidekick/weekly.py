@@ -131,9 +131,19 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
                            n=len(cis), status="outside" if flagged_days else "within"))
 
     focus = next_week_focus(flagged_days, ratio, hard, zones, len(week))
+    from . import focus as fc
+    chosen = conn.execute("SELECT kind FROM weekly_focus WHERE week_start=?", (wid,)).fetchone()
+    focus_result = fc.evaluate(conn, source, ws, chosen["kind"], we + timedelta(days=1)) if chosen else None
+    if focus_result:
+        findings.insert(0, _f(f"w:{wid}:focus", "focus", "weekly_focus", f"Your focus: {focus_result['title']}",
+                              focus_result["summary"] + (" " + focus_result["felt"] if focus_result.get("felt") else ""),
+                              status={"achieved": "within", "partly": "info"}.get(focus_result["status"], "outside"),
+                              n=len(focus_result["runs"]), evidence=[r["source_id"] for r in focus_result["runs"] if r.get("source_id")],
+                              date_range=[wid, we.isoformat()], limitations=[focus_result.get("target", "")]))
     body = {"type": "weekly", "local_date": we.isoformat(), "week_start": wid, "week_end": we.isoformat(), "synthetic": synthetic,
-            "headline": weekly_headline(len(week), ratio, hard), "findings": findings, "next_week_focus": focus, "narrative": None}
-    inputs = {"f": [{k: f.get(k) for k in ("id", "observed", "comparison", "status")} for f in findings], "focus": focus,
+            "headline": weekly_headline(len(week), ratio, hard), "findings": findings, "next_week_focus": focus,
+            "focus_result": focus_result, "narrative": None}
+    inputs = {"f": [{k: f.get(k) for k in ("id", "observed", "comparison", "status", "statement")} for f in findings], "focus": focus,
               "v": rp.ALGORITHMS, "w": WEEKLY_VERSION}
     return rp.save_report(conn, "weekly", wid, we.isoformat(), body, rp.input_hash(inputs), rp.data_cutoff(conn, source))
 

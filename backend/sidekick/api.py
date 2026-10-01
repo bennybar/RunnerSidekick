@@ -51,12 +51,33 @@ class EffortIn(BaseModel):
     client_updated_at: str
 
 
+class PlanIn(BaseModel):
+    kind: Literal["rest", "easy", "long", "tempo", "intervals", "race", "other"]
+    minutes: int | None = Field(default=None, ge=5, le=600)
+    client_updated_at: str
+
+
+class IntentIn(BaseModel):
+    kind: Literal["easy", "long", "tempo", "intervals", "race", "recovery", "other"]
+    note: str | None = Field(default=None, max_length=500)
+    client_updated_at: str
+
+
+class FocusIn(BaseModel):
+    kind: Literal["even_pacing", "easy_runs", "steady_volume", "consistency", "recovery"]
+
+
+class InsightStateIn(BaseModel):
+    state: Literal["dismissed", "working_on"] | None
+
+
 class SettingsIn(BaseModel):
     timezone: str | None = None
     running_days: list[int] | None = Field(default=None, max_length=7)
     goal: str | None = Field(default=None, max_length=200)
     available_minutes: int | None = Field(default=None, ge=0, le=600)
     hr_zone_source: Literal["garmin", "none"] | None = None
+    goal_type: Literal["consistency", "distance", "performance", "health"] | None = None
     ai_enabled: bool | None = None
     ai_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._:\-]{1,64}$")
     morning_window_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -275,6 +296,69 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 for r in conn.execute("SELECT id, revision, generated_at, data_cutoff, algorithm_version FROM report"
                                       " WHERE type=? AND subject_key=? ORDER BY revision DESC", (rtype, key))]
 
+    # ---------------------------------------------------------------- the intent → outcome loop
+
+    @api.get("/v1/plan/{day}")
+    def get_plan(day: str, conn=Depends(db)):
+        r = conn.execute("SELECT * FROM day_plan WHERE local_date=?", (day,)).fetchone()
+        return dict(r) if r else None
+
+    @api.put("/v1/plan/{day}")
+    def put_plan(day: str, body: PlanIn, conn=Depends(db)):
+        date.fromisoformat(day)
+        with conn:
+            conn.execute("INSERT INTO day_plan VALUES (?,?,?,?) ON CONFLICT (local_date) DO UPDATE SET kind=excluded.kind,"
+                         " minutes=excluded.minutes, client_updated_at=excluded.client_updated_at"
+                         " WHERE excluded.client_updated_at > day_plan.client_updated_at",
+                         (day, body.kind, body.minutes, body.client_updated_at))
+        with lock_reports:
+            return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
+
+    @api.delete("/v1/plan/{day}")
+    def delete_plan(day: str, conn=Depends(db)):
+        with conn:
+            conn.execute("DELETE FROM day_plan WHERE local_date=?", (day,))
+        with lock_reports:
+            return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
+
+    @api.put("/v1/activities/{sid}/intent")
+    def put_intent(sid: str, body: IntentIn, conn=Depends(db)):
+        if not rp.activity_by_source_id(conn, cfg.source, sid):
+            raise HTTPException(404)
+        with conn:
+            conn.execute("INSERT INTO run_intent VALUES (?,?,?,?,?) ON CONFLICT (activity_source_id) DO UPDATE SET kind=excluded.kind,"
+                         " note=excluded.note, source='user', client_updated_at=excluded.client_updated_at"
+                         " WHERE excluded.client_updated_at > run_intent.client_updated_at",
+                         (sid, body.kind, body.note, "user", body.client_updated_at))
+        with lock_reports:
+            return rp.build_post_run(conn, cfg.source, sid, synthetic)
+
+    @api.get("/v1/focus")
+    def get_focus(conn=Depends(db)):
+        from . import focus as fc
+        return fc.current(conn, cfg.source, today(conn))
+
+    @api.put("/v1/focus")
+    def put_focus(body: FocusIn, conn=Depends(db)):
+        from . import focus as fc
+        d = today(conn)
+        fc.choose(conn, fc.week_start(d), body.kind)
+        return fc.current(conn, cfg.source, d)
+
+    @api.put("/v1/insights/{insight_id}/state")
+    def put_insight_state(insight_id: str, body: InsightStateIn, conn=Depends(db)):
+        with conn:
+            if body.state is None:
+                conn.execute("DELETE FROM insight_state WHERE insight_id=?", (insight_id,))
+            else:
+                cur = conn.execute("SELECT body_json FROM report WHERE type='insights' ORDER BY local_date DESC, revision DESC LIMIT 1").fetchone()
+                verdict = next((i["verdict"] for i in json.loads(cur["body_json"])["insights"] if i["id"] == insight_id), None) if cur else None
+                conn.execute("INSERT INTO insight_state VALUES (?,?,?,?) ON CONFLICT (insight_id) DO UPDATE SET state=excluded.state,"
+                             " verdict_at_dismissal=excluded.verdict_at_dismissal, updated_at=excluded.updated_at",
+                             (insight_id, body.state, verdict, utc_now()))
+        with lock_reports:
+            return rp.build_insights(conn, cfg.source, today(conn), synthetic)
+
     @api.get("/v1/fitness")
     def fitness(conn=Depends(db)):
         """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace."""
@@ -400,6 +484,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"timezone": str(tz(conn)), "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5]),
                 "goal": rp.get_setting(conn, "goal", None), "available_minutes": rp.get_setting(conn, "available_minutes", None),
                 "hr_zone_source": rp.get_setting(conn, "hr_zone_source", "garmin"),
+                "goal_type": rp.get_setting(conn, "goal_type", None),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
                 "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
@@ -426,7 +511,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative"],
-                  "all": ["raw_payload", "report", "narrative", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["raw_payload", "report", "narrative", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
         with conn:
             for t in tables:
@@ -437,7 +522,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.get("/v1/export")
     def export(conn=Depends(db)):
         out = {}
-        for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings"):
+        for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings",
+                  "day_plan", "run_intent", "weekly_focus", "insight_state"):
             out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
         out["reports"] = [json.loads(r["body_json"]) for r in conn.execute("SELECT body_json FROM report")]
         return {"mode": cfg.source, "synthetic": synthetic, "exported_at": utc_now(), "data": out}

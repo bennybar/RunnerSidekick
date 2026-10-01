@@ -155,7 +155,7 @@ fun ReportScreen(
         LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ins?.let { r ->
                 item { Text("Insights as they stood on ${Format.shortDate(r.localDate)}", style = MaterialTheme.typography.titleMedium) }
-                items(r.insights, key = { it.id }) { i -> InsightCard(i, emphasised = i.verdict == "pattern") {} }
+                items(r.insights, key = { it.id }) { i -> InsightCard(i, emphasised = i.verdict == "pattern", onMethod = {}) }
             }
             wk?.let { w ->
                 item {

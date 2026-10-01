@@ -11,7 +11,10 @@ import com.bennybar.runnersidekick.data.remote.ApiClient
 import com.bennybar.runnersidekick.data.remote.CheckinDto
 import com.bennybar.runnersidekick.data.remote.EffortIn
 import com.bennybar.runnersidekick.data.remote.AuthResult
+import com.bennybar.runnersidekick.data.remote.DayPlanIn
 import com.bennybar.runnersidekick.data.remote.Fitness
+import com.bennybar.runnersidekick.data.remote.FocusState
+import com.bennybar.runnersidekick.data.remote.RunIntentIn
 import com.bennybar.runnersidekick.data.remote.GoogleSignInBody
 import com.bennybar.runnersidekick.data.remote.InsightsReport
 import com.bennybar.runnersidekick.data.remote.Me
@@ -65,6 +68,29 @@ class Repository(
     val me: Flow<Cached<Me>?> = observe("me") { json.decodeFromString<Me>(it) }
 
     suspend fun refreshFitness() = put("fitness", api.getRaw("/v1/fitness"))
+
+    val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
+
+    suspend fun refreshFocus() = put("focus", api.getRaw("/v1/focus"))
+
+    suspend fun chooseFocus(kind: String) = put("focus", api.putRaw("/v1/focus", """{"kind":"$kind"}"""))
+
+    /** Today's intended session; the backend answers with the revised briefing. */
+    suspend fun setPlan(date: String, kind: String?, minutes: Int?) {
+        val body = if (kind == null) api.delete("/v1/plan/$date", emptyMap())
+        else api.putRaw("/v1/plan/$date", json.encodeToString(DayPlanIn(kind, minutes, Instant.now().toString())))
+        put("today", body)
+    }
+
+    suspend fun setIntent(activityId: String, kind: String, note: String?) {
+        api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(kind, note?.takeIf { it.isNotBlank() }, Instant.now().toString())))
+        refreshActivity(activityId)
+        refreshFocus()
+    }
+
+    suspend fun setInsightState(id: String, state: String?) {
+        put("insights", api.putRaw("/v1/insights/$id/state", if (state == null) """{"state":null}""" else """{"state":"$state"}"""))
+    }
 
     /** Exchanges a Google ID token for an app token; stores it. Returns an error message, or null on success. */
     suspend fun signInWithGoogle(idToken: String, backendUrl: String): String? {
@@ -181,6 +207,7 @@ class Repository(
         put("insights", api.getRaw("/v1/insights"))
         refreshWeekly()
         refreshFitness()
+        refreshFocus()
         refreshJournal()
     }
 
