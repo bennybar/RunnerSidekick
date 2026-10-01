@@ -517,6 +517,9 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                 "limitations": ["Garmin zones; wrist heart rate can read high early in a run."],
                 "algorithm_version": rn.RUNNING_VERSION, "derived": True,
             })
+    vo2_series = series(conn, source, "garmin_vo2max_running", a["local_date"])
+    recent_vo2 = [k for k in vo2_series if k >= (d - timedelta(days=7)).isoformat()]
+    vo2_day = {"value": vo2_series[max(recent_vo2)], "date": max(recent_vo2)} if recent_vo2 else None
     week_begin = week_start(d, first_weekday(conn))
     week_acts = activities(conn, source, week_begin.isoformat(), a["local_date"])
     rpe = one(conn.activity_effort, {"activity_source_id": sid})
@@ -531,6 +534,9 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                                         "elevation_loss_m", "avg_cadence_spm")},
         "pace_moving_s_per_km": pace, "pace_basis": "moving",
         "garmin_metrics": a["garmin_metrics"],
+        # Garmin's headline (smoothed, one decimal) VO2 max as of the run's day; the run's own vO2MaxValue is a separate,
+        # whole-number per-run estimate and often differs by a point
+        "garmin_vo2max_day": vo2_day,
         "splits": [{**rn.as_dict(s), **{k: v for k, v in dt.items() if k != "idx"}}
                    for s, dt in zip(splits, details or [{}] * len(splits))],
         "story": story, "best_efforts": best_efforts,
@@ -542,7 +548,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
-              "week_first": first_weekday(conn)}
+              "week_first": first_weekday(conn), "vo2_day": vo2_day}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 

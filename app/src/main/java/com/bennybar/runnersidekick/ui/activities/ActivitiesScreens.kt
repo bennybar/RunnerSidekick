@@ -85,7 +85,6 @@ private val GARMIN_LABELS = mapOf(
     "anaerobicTrainingEffect" to "Anaerobic training effect",
     "trainingEffectLabel" to "Training effect",
     "activityTrainingLoad" to "Training load",
-    "vO2MaxValue" to "VO₂ max",
     "calories" to "Calories (kcal)",
 )
 
@@ -342,7 +341,11 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                         }
                     }
                 }
-                val garmin = r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to v.toString().trim('"') } }
+                // Garmin's headline VO2 max for that day (one decimal, as in Garmin and Fitness); the run's own whole-number
+                // estimate only when the day's value is missing, labelled as such
+                val vo2 = r.garminVo2maxDay?.let { listOf("VO₂ max" to "%.1f".format(it.value)) }
+                    ?: r.garminMetrics["vO2MaxValue"]?.let { listOf("VO₂ max (this run's estimate)" to it.toString().trim('"')) }.orEmpty()
+                val garmin = vo2 + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to v.toString().trim('"') } }
                 if (garmin.isNotEmpty()) item {
                     Group(title = "From Garmin · shown as supplied") { garmin.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) } }
                 }

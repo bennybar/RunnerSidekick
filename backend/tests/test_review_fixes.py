@@ -71,3 +71,11 @@ def test_zone_change_revises_the_morning_target(tmp_path):
 def test_low_recovery_without_readings_is_not_called_typical():
     rec = {"state": "consider_easier", "rule_id": "R4s", "reason": "You reported feeling less recovered."}
     assert "typical" not in rp.headline(rec, [], {"recovery": 2})
+
+
+def test_run_report_carries_garmins_daily_vo2max(tmp_path):
+    conn = synced(tmp_path)
+    conn.daily_observation.update_one({"source": "fixture", "metric": "garmin_vo2max_running", "local_date": "2026-09-28"},
+                                      {"$set": {"value": 46.2, "state": "measured", "unit": "ml/kg/min"}}, upsert=True)
+    r = rp.build_post_run(conn, "fixture", "fx-run-2026-09-28", True)
+    assert r["garmin_vo2max_day"] == {"value": 46.2, "date": "2026-09-28"}

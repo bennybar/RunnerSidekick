@@ -314,6 +314,7 @@ data class PostRunReport(
     val activity: RunActivity,
     @SerialName("pace_moving_s_per_km") val paceMovingSPerKm: Double? = null,
     @SerialName("garmin_metrics") val garminMetrics: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
+    @SerialName("garmin_vo2max_day") val garminVo2maxDay: Point? = null,
     val splits: List<Split> = emptyList(),
     val classification: Classification,
     val decoupling: Decoupling,
