@@ -76,7 +76,15 @@ class Repository(
     val compare: Flow<Cached<com.bennybar.runnersidekick.data.remote.CompareReport>?> =
         observe("compare") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(it) }
 
-    suspend fun refreshCompare() = put("compare", api.getRaw("/v1/compare"))
+    /** The runner's own OpenAI key, sent only with requests that may call the AI (coach, screen summaries). */
+    private suspend fun aiHeaders() = settings.ownAiKey()?.let { mapOf("X-OpenAI-Key" to it) } ?: emptyMap()
+
+    /** Returns true while the screen's AI summary is still being written. */
+    suspend fun refreshCompare(): Boolean {
+        val body = api.getRaw("/v1/compare", headers = aiHeaders())
+        put("compare", body)
+        return json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body).aiSummary?.status == "pending"
+    }
 
     /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
     suspend fun pollCoach() {
@@ -89,7 +97,7 @@ class Repository(
     /** A "pending" answer carries the previous analysis, which the UI shows marked as updating. */
     suspend fun refreshCoach(): String {
         // The runner's own key goes only with this request, never with any other call
-        val body = api.getRaw("/v1/coach", headers = settings.ownAiKey()?.let { mapOf("X-OpenAI-Key" to it) } ?: emptyMap())
+        val body = api.getRaw("/v1/coach", headers = aiHeaders())
         put("coach", body)
         return json.decodeFromString<CoachView>(body).status
     }
@@ -153,7 +161,11 @@ class Repository(
     fun trends(days: Int): Flow<Cached<Trends>?> = observe("trends:$days") { json.decodeFromString<Trends>(it) }
     fun day(date: String): Flow<Cached<MorningReport>?> = observe("day:$date") { json.decodeFromString<MorningReport>(it) }
 
-    suspend fun refreshTrends(days: Int) = put("trends:$days", api.getRaw("/v1/trends", mapOf("days" to "$days")))
+    suspend fun refreshTrends(days: Int): Boolean {
+        val body = api.getRaw("/v1/trends", mapOf("days" to "$days"), aiHeaders())
+        put("trends:$days", body)
+        return json.decodeFromString<Trends>(body).aiSummary?.status == "pending"
+    }
     suspend fun refreshDay(date: String) = put("day:$date", api.getRaw("/v1/today", mapOf("date" to date)))
     suspend fun refreshWeekly() {
         val body = runCatching { api.getRaw("/v1/weekly/latest") }.getOrElse { if (it is com.bennybar.runnersidekick.data.remote.ApiException.Http && it.code == 404) return else throw it }

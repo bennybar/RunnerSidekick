@@ -41,6 +41,7 @@ USER_INDEXES = {
     "insight_state": [(("insight_id",), U)],
     "coach_analysis": [(("id",), U), (("input_hash",), N)],
     "ai_call": [(("id",), U), (("created_at",), N)],
+    "section_summary": [(("id",), U), (("kind", "local_date", "input_hash"), N)],
 }
 APP_INDEXES = {
     "users": [(("id",), U)],

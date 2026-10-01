@@ -89,6 +89,11 @@ fun categoryStyle(category: String): Pair<ImageVector, RoundedPolygon> = when (c
     else -> Icons.Outlined.Insights to MaterialShapes.Circle
 }
 
+/** Set by links elsewhere (e.g. Today) to open a specific Insights tab: 0 Insights, 1 Compare, 2 Trends. */
+object InsightsTab {
+    val requested = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InsightsScreen(
@@ -108,6 +113,8 @@ fun InsightsScreen(
     val compare by vm.compare.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
     LaunchedEffect(tab) { if (tab == 1) vm.loadCompare() }
+    val requestedTab by InsightsTab.requested.collectAsStateWithLifecycle()
+    LaunchedEffect(requestedTab) { requestedTab?.let { tab = it; InsightsTab.requested.value = null } }
     var method by remember { mutableStateOf<Insight?>(null) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(

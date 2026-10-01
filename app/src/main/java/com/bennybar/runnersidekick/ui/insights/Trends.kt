@@ -65,6 +65,7 @@ fun TrendsSection(t: Trends?, days: Int, units: Units, loading: Boolean, onDays:
             Text(if (loading) "Loading trends…" else "Couldn't load trends. Pull down to try again.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             return@Column
         }
+        ScreenSummaryCard(t.aiSummary)
         if (t.deviceChanges.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Watch, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

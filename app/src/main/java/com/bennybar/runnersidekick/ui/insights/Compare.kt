@@ -86,6 +86,7 @@ fun CompareSection(r: CompareReport?, onOpenSettings: () -> Unit, onOpenRun: (St
             }
             return
         }
+        ScreenSummaryCard(r.aiSummary)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Compared with ${if (p.sex == "female") "women" else "men"} of your age (${p.age})" +
                 if (p.source == "settings") " · your settings" else " · from Garmin",

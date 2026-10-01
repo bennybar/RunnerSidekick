@@ -89,6 +89,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Compare tab: VO₂ max percentile, fitness age, resting HR percentile and age-graded times against published references
   for your sex and age, each with a chart and caveats. No HRV position: there's no comparable reference.
 
+## Daily summaries and a sharper Today (2026-10-01, v0.7.0)
+- Compare and Trends start with a daily AI summary (same checks as the coach). Verified live on real data.
+- Today: a new "Stands out today" section (Garmin status, load, bests, VO₂ max movement, focus, comparisons, run intent)
+  directly under the day's call, then readings; a single AI voice instead of two.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

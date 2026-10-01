@@ -187,6 +187,7 @@ data class MorningReport(
     @SerialName("algorithm_version") val algorithmVersion: Map<String, String> = emptyMap(),
     val narrative: Narrative? = null,
     @SerialName("checkin_prompt") val checkinPrompt: CheckinPrompt? = null,
+    val highlights: List<Highlight> = emptyList(),
 )
 
 @Serializable
@@ -449,6 +450,7 @@ data class Trends(
     val metrics: List<TrendMetric>,
     @SerialName("weekly_running") val weeklyRunning: List<WeekVolume>,
     @SerialName("pace_at_hr") val paceAtHr: PaceAtHr,
+    @SerialName("ai_summary") val aiSummary: ScreenSummary? = null,
 )
 
 @Serializable
@@ -589,4 +591,34 @@ data class CompareReport(
     val profile: CompareProfile = CompareProfile(),
     val missing: List<String> = emptyList(),
     val items: List<CompareItem> = emptyList(),
+    @SerialName("ai_summary") val aiSummary: ScreenSummary? = null,
+)
+
+@Serializable
+data class SummarySentence(val text: String, @SerialName("evidence_ids") val evidenceIds: List<String> = emptyList())
+
+/** A daily AI summary of one screen: ok | pending (with the previous one) | disabled | not_configured | rejected | failed | budget_exceeded. */
+@Serializable
+data class ScreenSummary(
+    val status: String,
+    val model: String? = null,
+    @SerialName("generated_at") val generatedAt: String? = null,
+    @SerialName("local_date") val localDate: String? = null,
+    val sentences: List<SummarySentence> = emptyList(),
+    val previous: ScreenSummary? = null,
+)
+
+@Serializable
+data class HighlightTarget(val type: String, val id: String? = null)   // run | insights | compare | focus
+
+/** Something that stands out today; tone is attention | positive | info. */
+@Serializable
+data class Highlight(
+    val id: String,
+    val tone: String,
+    val kind: String,
+    val title: String,
+    val text: String = "",
+    val target: HighlightTarget? = null,
+    val source: String? = null,
 )

@@ -211,3 +211,29 @@ never extrapolated (outside the table: "below the 40th" or "above the 95th").
 | Resting HR | NHANES 1999–2008, CDC NHSR 41, Tables 2–3 (2.5th–97.5th) | Seated clinic pulse reads higher than Garmin's resting HR, so the comparison flatters; this is stated on the card |
 | Age grade | USATF/Alan Jones 2025 road standards (5K, 10K, half, marathon; single ages 5–100) | grade = standard ÷ time; 60/70/80/90% = local/regional/national/world class; bests are segments, not races |
 | HRV | none | Published norms (e.g. Fitbit, 5-min windows at 6–7 am) aren't comparable with Garmin's whole-night average, so no position is shown |
+
+## Daily AI summaries of Compare and Trends — `summaries.py` (`summary-1.3`)
+
+Two to four sentences at the top of each screen (Trends: per 7/28/90-day window), written from that screen's
+deterministic results only. The coach's checks apply: every sentence cites evidence, numbers are fact placeholders
+rendered by the server, no medical, causal, certainty or spelled-out-number wording, and at most one caveat. One
+summary per screen per day, plus a new one within the day only if the screen's data changed. Calls count against the
+shared daily AI budget, and the user's own key works here too. While a new summary is being written, the previous one
+is shown and labelled with its date.
+
+## Stands out today — `highlights.py` (`highlights-1.0`)
+
+At most four items, attention first, each linked to its detail:
+
+| Item | Rule |
+|---|---|
+| Garmin training status | Overreaching, Strained, Unproductive, Detraining (attention); Productive, Peaking (positive) |
+| Load | Garmin acute load above Garmin's chronic range maximum |
+| New best | any best effort (1 km, 5 km, 10 km, half) set in the last 7 days |
+| VO₂ max movement | change of 0.5 or more versus the reading at least 28 days earlier, current watch only |
+| Weekly focus | off track (attention) or done (positive) |
+| Comparison | fitness age at least 2 years below actual age, or else VO₂ max at or above the 75th percentile |
+| Run intent | the latest run (within 2 days) was planned easy but mostly zone 3 or above |
+
+Today's order is: the day's call, what stands out, the readings, the focus, then one AI voice (the coach summary,
+or the report summary when there isn't one) and one insight.

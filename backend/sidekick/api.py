@@ -134,7 +134,7 @@ def verify_google_id_token(token: str) -> dict:
 
 
 def create_app(cfg: Config, connector=None, narrative_provider=None, google_verifier=verify_google_id_token,
-               coach_provider=None) -> FastAPI:
+               coach_provider=None, summary_provider=None) -> FastAPI:
     accounts.app_db()  # creates the accounts database's indexes
     synthetic = cfg.source == SOURCE_FIXTURE
     sync_locks: dict[int, threading.Lock] = {}
@@ -261,14 +261,22 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         d = date.fromisoformat(day) if day else today(conn)
         with lock_reports:
             body = rp.build_morning(conn, cfg.source, d, synthetic)
-        return with_narrative(conn, body)
+        body = with_narrative(conn, body)
+        if body is not None and d == today(conn):
+            from . import compare, highlights
+            from . import focus as fc
+            body["highlights"] = highlights.build(conn, cfg.source, d, compare.build(conn, cfg.source, d), fc.current(conn, cfg.source, d))
+        return body
 
     @api.get("/v1/trends")
-    def get_trends(days: int = 28, conn=Depends(db)):
+    def get_trends(days: int = 28, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
+        from . import summaries as sm
         from .trends import build_trends
         if days not in (7, 28, 90):
             raise HTTPException(422, "days must be 7, 28 or 90")
-        return build_trends(conn, cfg.source, today(conn), days, synthetic)
+        out = build_trends(conn, cfg.source, today(conn), days, synthetic)
+        out["ai_summary"] = ai_summary(conn, f"trends:{days}", sm.trends_bundle(out), x_openai_key)
+        return out
 
     @api.get("/v1/weekly/latest")
     def latest_weekly(conn=Depends(db)):
@@ -394,11 +402,48 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2, "records": rp.records(conn, cfg.source),
                 "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
+    summary_inflight: set[tuple] = set()
+
+    def summary_bg(db_name: str, kind: str, b, model: str, key: str, budget: int) -> None:
+        from . import summaries as sm
+        c = connect(db_name)
+        try:
+            sm.generate(c, kind, b, today(c), model, key, budget, provider=summary_provider)
+        except Exception:
+            log.exception("summary generation failed")
+        finally:
+            summary_inflight.discard((db_name, kind))
+
+    def ai_summary(conn, kind: str, b, x_openai_key: str | None) -> dict:
+        """Today's AI summary of a screen. Written in the background; meanwhile the newest earlier one is attached."""
+        from . import summaries as sm
+        ai = ai_config(conn)
+        if not ai.enabled:
+            return {"status": "disabled"}
+        key = (x_openai_key or "").strip() or ai.api_key
+        if not key and summary_provider is None:
+            return {"status": "not_configured"}
+        d = today(conn)
+        hit = sm.cached(conn, kind, d, sm.input_hash(b, ai.model))
+        recent_failure = hit and hit["status"] != "ok" and \
+            (datetime.now(timezone.utc) - datetime.fromisoformat(hit["created_at"].replace("Z", "+00:00"))).total_seconds() < 1800
+        if hit and (hit["status"] == "ok" or recent_failure):
+            return sm.view(hit)
+        if (conn.name, kind) not in summary_inflight:
+            summary_inflight.add((conn.name, kind))
+            threading.Thread(target=summary_bg, args=(conn.name, kind, b, ai.model, key, ai.max_calls_per_day), daemon=True).start()
+        prev = one(conn.section_summary, {"kind": kind, "status": "ok"}, sort=[("id", -1)])
+        return {"status": "pending", "previous": sm.view(prev) if prev else None}
+
     @api.get("/v1/compare")
-    def get_compare(conn=Depends(db)):
+    def get_compare(conn=Depends(db), x_openai_key: str | None = Header(default=None)):
         """You against people of your sex and age: VO2 max, fitness age, resting heart rate, HRV and age-graded times."""
         from . import compare
-        return compare.build(conn, cfg.source, today(conn))
+        from . import summaries as sm
+        out = compare.build(conn, cfg.source, today(conn))
+        if not out["missing"]:
+            out["ai_summary"] = ai_summary(conn, "compare", sm.compare_bundle(out), x_openai_key)
+        return out
 
     @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
@@ -526,8 +571,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def delete_data(scope: Literal["raw", "reports", "all"], conn=Depends(db)):
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
-        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis"],
-                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+        tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary"],
+                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
         for t in tables:
             conn[t].delete_many({})
@@ -537,7 +582,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def export(conn=Depends(db)):
         out = {}
         for t in ("daily_observation", "sleep_session", "activity", "activity_lap", "checkin", "activity_effort", "user_settings",
-                  "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis"):
+                  "day_plan", "run_intent", "weekly_focus", "insight_state", "narrative", "coach_analysis", "section_summary"):
             out[t] = many(conn[t])
         out["activity_samples"] = many(conn.activity_samples)
         out["reports"] = [r["body"] for r in many(conn.report)]

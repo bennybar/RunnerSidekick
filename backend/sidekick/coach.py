@@ -222,6 +222,39 @@ class CoachError(Exception):
     pass
 
 
+def check_text(s, b: Bundle, field: str, limit: int) -> str:
+    """Prose from the model: evidence ids echoed into it are removed, numbers must be fact placeholders (rendered here
+    from the app's own values), and medical, causal, certainty and spelled-out-number wording is rejected."""
+    if not isinstance(s, str) or not s.strip() or len(s) > limit:
+        raise CoachError(f"{field}: empty or too long")
+    # Only structured ids (with ":") are stripped from prose, so ordinary words are never touched
+    for k in sorted((k for k in b.items if ":" in k), key=len, reverse=True):
+        s = re.sub(r"\s*[\(\[]?\s*" + re.escape(k) + r"\s*[;,]?\s*[\)\]]?", " ", s)
+    s = re.sub(r"\s{2,}", " ", s).replace(" .", ".").replace(" ,", ",")
+    for fid in FACT.findall(s):
+        if fid not in b.facts:
+            raise CoachError(f"{field}: unknown fact {fid}")
+    bare = FACT.sub("", s)
+    if re.search(r"\d", bare):
+        raise CoachError(f"{field}: numbers outside fact placeholders")
+    if "{" in bare or "}" in bare:
+        raise CoachError(f"{field}: malformed placeholder")
+    if m := BANNED.search(bare):
+        raise CoachError(f"{field}: disallowed wording {m.group(0)!r}")
+    if m := NUMBER_WORDS.search(bare):
+        raise CoachError(f"{field}: number in words {m.group(0)!r}")
+    return FACT.sub(lambda m_: b.facts[m_.group(1)]["display"], s.strip())
+
+
+def check_ids(lst, b: Bundle, field: str) -> list[str]:
+    if not isinstance(lst, list) or not lst:
+        raise CoachError(f"{field}: needs at least one evidence id")
+    unknown = [x for x in lst if x not in b.items]
+    if unknown:
+        raise CoachError(f"{field}: unknown evidence {unknown}")
+    return lst
+
+
 def validate(raw: str, b: Bundle) -> dict:
     try:
         d = json.loads(raw)
@@ -232,53 +265,21 @@ def validate(raw: str, b: Bundle) -> dict:
     today = b.items.get("plan:today", {})
     held_back = bool(today.get("intensity_held_back")) or today.get("state") == "consider_easier"
 
-    # Only structured ids (with ":") are stripped from prose, so ordinary words are never touched
-    known_ids = sorted((k for k in b.items if ":" in k), key=len, reverse=True)
-
-    def text(s, field, limit):
-        if not isinstance(s, str) or not s.strip() or len(s) > limit:
-            raise CoachError(f"{field}: empty or too long")
-        # Evidence ids belong in evidence_ids; drop any echoed into prose (with the brackets/separators around them)
-        for k in known_ids:
-            s = re.sub(r"\s*[\(\[]?\s*" + re.escape(k) + r"\s*[;,]?\s*[\)\]]?", " ", s)
-        s = re.sub(r"\s{2,}", " ", s).replace(" .", ".").replace(" ,", ",")
-        for fid in FACT.findall(s):
-            if fid not in b.facts:
-                raise CoachError(f"{field}: unknown fact {fid}")
-        bare = FACT.sub("", s)
-        if re.search(r"\d", bare):
-            raise CoachError(f"{field}: numbers outside fact placeholders")
-        if "{" in bare or "}" in bare:
-            raise CoachError(f"{field}: malformed placeholder")
-        if m := BANNED.search(bare):
-            raise CoachError(f"{field}: disallowed wording {m.group(0)!r}")
-        if m := NUMBER_WORDS.search(bare):
-            raise CoachError(f"{field}: number in words {m.group(0)!r}")
-        return FACT.sub(lambda m_: b.facts[m_.group(1)]["display"], s.strip())
-
-    def ids(lst, field):
-        if not isinstance(lst, list) or not lst:
-            raise CoachError(f"{field}: needs at least one evidence id")
-        unknown = [x for x in lst if x not in b.items]
-        if unknown:
-            raise CoachError(f"{field}: unknown evidence {unknown}")
-        return lst
-
     def capped(conf, cited):
         """Confidence no higher than the strongest cited evidence supports."""
         allowed = max((LEVELS.index(EVIDENCE_CONFIDENCE.get(b.items[c].get("confidence"), "low")) if b.items[c].get("kind") == "insight"
                        else LEVELS.index("low") if c in ("profile:runner", "plan:today") else LEVELS.index("medium")) for c in cited)
         return LEVELS[min(LEVELS.index(conf), allowed)]
 
-    out = {"summary": text(d["summary"], "summary", 600), "summary_evidence_ids": ids(d["summary_evidence_ids"], "summary"),
+    out = {"summary": check_text(d["summary"], b, "summary", 600), "summary_evidence_ids": check_ids(d["summary_evidence_ids"], b, "summary"),
            "insights": [], "recommendations": []}
     if len(d["insights"]) > MAX_ITEMS or len(d["recommendations"]) > MAX_ITEMS:
         raise CoachError("too many items")
     for k, it in enumerate(d["insights"]):
         if it.get("confidence") not in ("low", "medium", "high"):
             raise CoachError("bad confidence")
-        cited = ids(it["evidence_ids"], f"insight {k}")
-        out["insights"].append({"title": text(it["title"], f"insight {k} title", 90), "text": text(it["text"], f"insight {k}", 500),
+        cited = check_ids(it["evidence_ids"], b, f"insight {k}")
+        out["insights"].append({"title": check_text(it["title"], b, f"insight {k} title", 90), "text": check_text(it["text"], b, f"insight {k}", 500),
                                 "evidence_ids": cited, "confidence": capped(it["confidence"], cited)})
     for k, it in enumerate(d["recommendations"]):
         if it.get("category") not in CATEGORIES:
@@ -287,9 +288,9 @@ def validate(raw: str, b: Bundle) -> dict:
             raise CoachError("bad direction")
         if held_back and it["direction"] == "harder":
             raise CoachError(f"rec {k}: harder while today's advice holds intensity back")
-        out["recommendations"].append({"title": text(it["title"], f"rec {k} title", 90), "text": text(it["text"], f"rec {k}", 400),
-                                       "why": text(it["why"], f"rec {k} why", 300),
-                                       "evidence_ids": ids(it["evidence_ids"], f"rec {k}"), "category": it["category"],
+        out["recommendations"].append({"title": check_text(it["title"], b, f"rec {k} title", 90), "text": check_text(it["text"], b, f"rec {k}", 400),
+                                       "why": check_text(it["why"], b, f"rec {k} why", 300),
+                                       "evidence_ids": check_ids(it["evidence_ids"], b, f"rec {k}"), "category": it["category"],
                                        "direction": it["direction"]})
     return out
 

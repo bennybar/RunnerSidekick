@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.TrendingFlat
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Info
@@ -154,23 +155,33 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") item { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
+                // Order: the day's call, what stands out, the readings, then commentary
                 item { Hero(report, onWhy = { sheet = "why" }) }
+                if (report.highlights.isNotEmpty()) item {
+                    StandsOut(report.highlights) { t ->
+                        when (t.type) {
+                            "run" -> t.id?.let(onOpenRun)
+                            "compare" -> { com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }
+                            "insights" -> onOpenInsights()
+                        }
+                    }
+                }
                 // The app asks only when an answer would change today's advice
                 if (checkin == null && report.checkinPrompt?.ask == true) item {
                     CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
                         onMore = { sheet = "checkin" })
                 }
-                coach?.value?.let { c ->
-                    val shown = if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" }
-                    shown?.summary?.let { s ->
-                        // Older advice is labelled as such, so it never reads as current next to a changed briefing
-                        val note = if (shown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")
-                            else "Updated ${Format.ago(runCatching { Instant.parse(shown.generatedAt) }.getOrNull())}"
-                        item { CoachTeaser(s, note, onOpenInsights) }
-                    }
-                }
+                item { Readings(report) { evidence = it } }
                 focus?.value?.let { f -> item { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
-                report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
+                // One AI voice: the coach's summary when there is one, otherwise the report summary
+                val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
+                coachShown?.summary?.let { s ->
+                    val c = coach!!.value
+                    // Older advice is labelled as such, so it never reads as current next to a changed briefing
+                    val note = if (coachShown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")
+                        else "Updated ${Format.ago(runCatching { Instant.parse(coachShown.generatedAt) }.getOrNull())}"
+                    item { CoachTeaser(s, note, onOpenInsights) }
+                } ?: report.narrative?.let { n -> item { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
                 // Prefer what's new or changed; skip what the runner dismissed or is already working on
                 insights?.value?.insights?.filter { it.verdict == "pattern" && it.userState == null }
                     ?.sortedBy { if (it.novelty == "continuing") 1 else 0 }?.firstOrNull()?.let { top ->
@@ -182,7 +193,6 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
-                item { Readings(report) { evidence = it } }
                 item {
                     Group(title = "More") {
                         fitness?.value?.garmin?.let { g ->
@@ -326,6 +336,31 @@ private fun Hero(r: MorningReport, onWhy: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                 OutlinedButton(onClick = onWhy) { Text("Why this suggestion?") }
             }
+        }
+    }
+}
+
+private val TONE_ACCENT = mapOf("attention" to "recovery", "positive" to "fitness", "info" to "sleep")
+
+/** What stands out today: Garmin's verdict, load, new bests, VO2 max movement, focus, comparisons. Attention first. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun StandsOut(items: List<com.bennybar.runnersidekick.data.remote.Highlight>,
+                      onOpen: (com.bennybar.runnersidekick.data.remote.HighlightTarget) -> Unit) {
+    Group(title = "Stands out today") {
+        items.forEach { h ->
+            val icon = when (h.tone) {
+                "attention" -> Icons.Outlined.WarningAmber
+                "positive" -> Icons.Outlined.EmojiEvents
+                else -> Icons.Outlined.Info
+            }
+            val shape = when (h.tone) {
+                "attention" -> MaterialShapes.SoftBurst
+                "positive" -> MaterialShapes.Sunny
+                else -> MaterialShapes.Cookie4Sided
+            }
+            row(h.title, supporting = h.text.ifBlank { null }, icon = icon, iconShape = shape, accent = TONE_ACCENT[h.tone],
+                onClick = h.target?.takeIf { it.type in setOf("run", "compare", "insights") }?.let { t -> { onOpen(t) } })
         }
     }
 }
