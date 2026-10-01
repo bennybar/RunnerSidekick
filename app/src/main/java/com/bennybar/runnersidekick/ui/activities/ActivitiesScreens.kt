@@ -126,10 +126,13 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
         topBar = {
             LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = {
                 if (acts?.value?.any { it.synthetic } == true) DemoBadge()
-                // Fetch a run you just finished without waiting for the hourly sync
-                if (busy) androidx.compose.material3.LoadingIndicator(Modifier.padding(horizontal = 12.dp).size(28.dp))
-                else androidx.compose.material3.IconButton(onClick = vm::syncNow) {
-                    androidx.compose.material3.Icon(Icons.Outlined.Sync, "Sync runs now")
+                // Fetch a run you just finished from Garmin without waiting for the hourly sync
+                androidx.compose.material3.FilledTonalButton(onClick = vm::syncNow, enabled = !busy,
+                    contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.padding(end = 8.dp)) {
+                    if (busy) androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
+                    else Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (busy) "Syncing…" else "Get new runs")
                 }
             })
         },
@@ -146,7 +149,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
                 }
             }
             val weeks = shown.groupBy { Format.weekStart(LocalDate.parse(it.localDate), firstDay) }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 weeks.entries.firstOrNull()?.let { (start, runs) -> item { WeekHero(start, runs, units, firstDay) } }
                 item {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -245,7 +248,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                     if (busy) "Fetching analysis…" else "Connect to the backend to load this run.") } }
                 return@PullToRefreshBox
             }
-            LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
                 // Shown at the top once asked for (or already written); the button lives in the top bar
                 if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
@@ -370,6 +373,10 @@ private fun RunHero(r: PostRunReport, units: Units) {
             Row {
                 BigStat(Format.pace(r.paceMovingSPerKm, units).substringBefore(" "), Format.pace(r.paceMovingSPerKm, units).substringAfter(" "), "moving pace", on, Modifier.weight(1f))
                 BigStat(a.avgHr?.roundToInt()?.toString() ?: "—", "bpm", "avg heart rate", on, Modifier.weight(1f))
+                // Garmin's VO2 max on the day of the run (as Garmin shows it); the run's own estimate as a fallback
+                (r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"'))?.let { v ->
+                    BigStat(v, null, if (r.garminVo2maxDay != null) "VO₂ max" else "VO₂ max (run)", on, Modifier.weight(0.8f))
+                }
             }
             Row {
                 BigStat(Format.duration(a.movingS), null, "moving", on, Modifier.weight(1f))

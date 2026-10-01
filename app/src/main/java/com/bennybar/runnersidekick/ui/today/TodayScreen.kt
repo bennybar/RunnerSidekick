@@ -140,7 +140,10 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 title = { Text(report?.localDate?.let { Format.longDate(it) } ?: "Today", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (status?.value?.synthetic == true) DemoBadge()
-                    IconButton(onClick = vm::syncNow, enabled = !busy) { Icon(Icons.Outlined.Sync, "Sync now") }
+                    androidx.compose.material3.TextButton(onClick = vm::syncNow, enabled = !busy) {
+                        Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
+                        Text(if (busy) "Syncing…" else "Sync Garmin")
+                    }
                 },
                 scrollBehavior = scroll,
             )
@@ -152,7 +155,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 NoReport(busy, settings?.hasToken == false, onOpenSettings)
                 return@PullToRefreshBox
             }
-            LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 112.dp),
+            LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 112.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
@@ -174,7 +177,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
                         onMore = { sheet = "checkin" })
                 }
-                animatedItem(key = "readings") { Readings(report) { evidence = it } }
+                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenInsights) { evidence = it } }
                 focus?.value?.let { f -> animatedItem(key = "focus") { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 // One AI voice: the coach's summary when there is one, otherwise the report summary
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
@@ -478,14 +481,34 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
 }
 
 @Composable
-private fun Readings(r: MorningReport, onTap: (Finding) -> Unit) {
-    val tiles = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } }
+private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
+                     onTap: (Finding) -> Unit) {
+    val vo2 = fitness?.garmin?.vo2max
+    // null marks the VO2 max tile's slot, right after the overnight readings
+    val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Readings", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         tiles.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { f ->
+                    if (f == null) {
+                        // Garmin's VO2 max (one decimal, as Garmin shows it), with the change over about four weeks
+                        val series = fitness!!.vo2maxSeries
+                        val old = series.lastOrNull { java.time.LocalDate.parse(it.date) <= java.time.LocalDate.parse(r.localDate).minusDays(28) }
+                        val ch = old?.let { vo2!!.value - it.value }
+                        MetricTile(label = "VO₂ max", value = "%.1f".format(vo2!!.value), unit = null,
+                            status = ch?.let { if (kotlin.math.abs(it) < 0.05) "Same as 4 weeks ago" else "%+.1f in 4 weeks".format(it) } ?: "Garmin",
+                            statusIcon = ch?.let { if (it > 0.05) Icons.AutoMirrored.Outlined.TrendingUp else if (it < -0.05) Icons.AutoMirrored.Outlined.TrendingDown
+                                else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false,
+                            modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, Garmin".format(vo2.value) },
+                            onClick = onOpenFitness,
+                            chart = if (series.size >= 2) {
+                                { Sparkline(series.takeLast(14).map { it.value }, Modifier.fillMaxWidth().height(32.dp),
+                                    color = MaterialTheme.colorScheme.primary, description = "VO2 max, recent Garmin readings") }
+                            } else null)
+                        return@forEach
+                    }
                     val (value, unit) = tileValue(f)
                     val flagged = f.status == "outside" || f.status == "sustained"
                     val d = f.delta?.abs

@@ -83,7 +83,7 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
         topBar = { LargeTopAppBar(title = { Text("Journal") }, scrollBehavior = scroll) },
     ) { padding ->
         PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf("Reports", "Check-ins").forEachIndexed { i, l ->
