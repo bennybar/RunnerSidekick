@@ -101,6 +101,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Material 3 motion: emphasized easing, fade-through between tabs, a horizontal shared axis for details; lists fade and
   reflow when tabs, ranges or cards change; expandable cards animate their height.
 
+## Polish (2026-10-01, v0.10.0)
+- Back from any page, including a tab back to Today, shrinks it away as a card: corners round and a shadow appears
+  in the first moments of the gesture.
+- VO₂ max history: labelled dots on a zoomed scale with gridlines (position encodes the value, so a narrow 46–47 range
+  isn't exaggerated as bar lengths would be); gaps break the line.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

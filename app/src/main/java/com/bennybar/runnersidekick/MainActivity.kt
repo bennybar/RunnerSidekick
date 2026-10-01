@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.animation.core.animateDp
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -98,11 +99,22 @@ private val popIn = androidx.compose.animation.slideInHorizontally(spec(400)) { 
 private val popOut = androidx.compose.animation.scaleOut(spec(400), targetScale = 0.9f) +
     androidx.compose.animation.slideOutHorizontally(spec(400)) { it / 4 } + androidx.compose.animation.fadeOut(spec(350))
 
-/** A detail destination: while it enters or leaves (including mid back gesture) its corners round like a card. */
+/**
+ * A detail destination. As soon as it starts to leave (the first moments of a back swipe) it becomes a card: rounded
+ * corners and a shadow, so the page shrinking away never shows as a hard-edged rectangle. Navigation seeks this
+ * transition with the gesture, so the keyframes front-load the change.
+ */
 @Composable
 private fun androidx.compose.animation.AnimatedContentScope.Detail(content: @Composable () -> Unit) {
-    val corner by transition.animateDp(label = "corner") { if (it == androidx.compose.animation.EnterExitState.Visible) 0.dp else 32.dp }
-    androidx.compose.foundation.layout.Box(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(corner))
+    val visible = androidx.compose.animation.EnterExitState.Visible
+    val corner by transition.animateDp(label = "corner", transitionSpec = {
+        androidx.compose.animation.core.keyframes { durationMillis = 400; 28.dp at 40; 32.dp at 400 }
+    }) { if (it == visible) 0.dp else 32.dp }
+    val lift by transition.animateDp(label = "lift", transitionSpec = {
+        androidx.compose.animation.core.keyframes { durationMillis = 400; 10.dp at 40; 10.dp at 400 }
+    }) { if (it == visible) 0.dp else 10.dp }
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(corner)
+    androidx.compose.foundation.layout.Box(Modifier.shadow(lift, shape).clip(shape)
         .background(androidx.compose.material3.MaterialTheme.colorScheme.surface)) { content() }
 }
 
@@ -162,20 +174,21 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
         NavHost(nav, startDestination = "today",
             enterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else pushIn },
             exitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else pushOut },
-            popEnterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else popIn },
-            popExitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else popOut },
+            // Every back (gesture or button), from a detail or from a tab to Today, shrinks the page away as a card
+            popEnterTransition = { popIn },
+            popExitTransition = { popOut },
             modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
             }
             composable("insights") {
-                InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
-                    onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") })
+                Detail { InsightsScreen(onOpenDay = { nav.navigate("day/$it") }, onOpenRun = { nav.navigate("activity/$it") },
+                    onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") }) }
             }
             composable("day/{date}") { Detail { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
-            composable("activities") { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) }
-            composable("journal") { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) }
-            composable("settings") { SettingsScreen() }
+            composable("activities") { Detail { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) } }
+            composable("journal") { Detail { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
+            composable("settings") { Detail { SettingsScreen() } }
             composable("activity/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 Detail { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
             }
