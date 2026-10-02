@@ -183,3 +183,18 @@ fun TrackVisible(vm: com.bennybar.runnersidekick.ui.BaseVm) {
         onDispose { owner.lifecycle.removeObserver(obs); vm.setVisible(false) }
     }
 }
+
+/** Pull-to-refresh without the spinner over the content: while data loads, a thin line along the top edge; the round
+ * indicator shows only while you're pulling. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier,
+               content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val state = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing, onRefresh, modifier, state = state, indicator = {
+        if (isRefreshing) androidx.compose.material3.LinearProgressIndicator(
+            Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))
+        else if (state.distanceFraction > 0f) androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator(
+            state = state, isRefreshing = false, modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter))
+    }, content = content)
+}

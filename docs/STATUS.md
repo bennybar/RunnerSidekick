@@ -253,6 +253,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   notifications.
 - With notifications on, the job stays hourly and the switch shows as already on. With both off, nothing is scheduled.
 
+## Quieter loading indicator (2026-10-02, v0.23.2)
+- Loading shows a thin progress line along the top edge of the content, not a spinner over the cards. The round
+  pull-to-refresh indicator appears only while you're pulling. Shared `RefreshBox` on Today, Insights, Activities,
+  run detail and Journal.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

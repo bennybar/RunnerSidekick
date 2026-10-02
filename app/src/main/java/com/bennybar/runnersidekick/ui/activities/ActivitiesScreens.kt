@@ -47,7 +47,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -144,7 +143,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
         },
         snackbarHost = { SnackbarHost(listSnackbar) },
     ) { padding ->
-        PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
+        com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val all = acts?.value.orEmpty().filter { it.sport != "other" }
             val shown = all.filter {
                 when (filter) {
@@ -252,11 +251,11 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
+        com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             if (r == null) {
                 LazyColumn { item { EmptyState(Icons.AutoMirrored.Outlined.DirectionsRun, if (busy) "Loading run" else "Run not cached",
                     if (busy) "Fetching analysis…" else "Connect to the backend to load this run.") } }
-                return@PullToRefreshBox
+                return@RefreshBox
             }
             LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
