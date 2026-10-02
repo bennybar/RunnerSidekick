@@ -300,7 +300,7 @@ The day's call shows when it was worked out and when the Garmin data is from, pl
 briefing: the call itself, core readings moving outside or back within your usual range, a plan being set and a
 check-in being included. This is computed when the briefing is read, so it never creates report revisions.
 
-## Health and fitness scores — `scores.py` (`scores-3.1`)
+## Health and fitness scores — `scores.py` (`scores-3.2`)
 
 Each score runs from 0 to 100, with fixed weights. Every counted part is tied to a published reference; the point
 curves are heuristics.
@@ -335,6 +335,13 @@ Rules added in 3.1:
   older than 90 days, there is none.
 - **Trends:** they use today's age for both readings, so a birthday never looks like a change. The Fitness trend
   also shows the VO₂ max values behind it.
+
+Rules added in 3.2:
+- **Newest VO₂ max:** taken from either the daily readings or Garmin's snapshot.
+- **Measurement day:** a daily VO₂ max is stored under the day Garmin measured it (`calendarDate`), so a value
+  carried forward isn't a new measurement.
+- **Completed days:** activity and steps count days through yesterday, so today's unfinished totals don't dilute the
+  average. Sleep includes last night.
 
 Left out:
 - **Garmin's fitness age:** built from VO₂ max and resting HR.

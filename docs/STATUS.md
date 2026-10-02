@@ -298,6 +298,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - The tiles say what each score covers. Each breakdown has "How it's calculated" (the rule and the share of the score
   for each part).
 
+## Scores 3.2, aligned tiles (2026-10-02, v0.26.2)
+- The newest VO₂ max from either source wins, and is stored under its measurement day.
+- Movement counts completed days only.
+- The Health and Fitness tiles are equal height with two-line subtitles, so the rings line up.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

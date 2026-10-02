@@ -123,3 +123,27 @@ def test_old_vo2_is_marked_stale_then_dropped():
     assert f["status"] == "ok" and f.get("stale") is True and "45 days ago" in f["components"][0]["say"]
     set_setting(conn, "garmin_fitness", {"vo2max": {"value": 46.0, "date": (ANCHOR - timedelta(days=120)).isoformat()}})
     assert scores.build(conn, "fixture", ANCHOR)["fitness"]["status"] == "unavailable"
+
+
+def test_newest_vo2_wins_and_movement_skips_the_unfinished_day():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    conn = synced()
+    conn.daily_observation.delete_many({"metric": "garmin_vo2max_running"})
+    conn.daily_observation.insert_one({"source": "fixture", "local_date": (ANCHOR - timedelta(days=60)).isoformat(),
+                                       "metric": "garmin_vo2max_running", "value": 40.0, "state": "measured"})
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 48.0, "date": ANCHOR.isoformat()}})
+    assert scores.vo2_on(conn, "fixture", ANCHOR, ANCHOR) == (48.0, ANCHOR)
+    before = {c["id"]: c for c in scores.build(conn, "fixture", ANCHOR)["health"]["components"]}["steps"]["points"]
+    conn.daily_observation.update_one({"metric": "steps", "local_date": ANCHOR.isoformat()}, {"$set": {"value": 0.0, "state": "measured"}},
+                                      upsert=True)
+    after = {c["id"]: c for c in scores.build(conn, "fixture", ANCHOR)["health"]["components"]}["steps"]["points"]
+    assert before == after  # a near-empty today doesn't pull the average down
+
+
+def test_carried_forward_vo2_is_stored_on_its_measurement_day():
+    from sidekick.connectors.garmin import normalise_max_metrics
+    obs = normalise_max_metrics("2026-10-02", [{"generic": {"vo2MaxPreciseValue": 46.2, "calendarDate": "2026-08-03"}}])
+    assert [(o.local_date, o.value) for o in obs] == [("2026-08-03", 46.2), ("2026-10-02", None)]
+    same = normalise_max_metrics("2026-10-02", [{"generic": {"vo2MaxPreciseValue": 46.2, "calendarDate": "2026-10-02"}}])
+    assert [(o.local_date, o.value) for o in same] == [("2026-10-02", 46.2)]

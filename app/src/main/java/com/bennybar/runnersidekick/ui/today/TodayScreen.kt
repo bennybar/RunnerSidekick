@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -458,7 +459,8 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
 @Composable
 private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    // Equal heights, and a fixed two-line subtitle, so both rings and labels line up
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
         ScoreTile("Health", s.scope["health"], s.health, cs.tertiary, Modifier.weight(1f)) { onOpen("health") }
         ScoreTile("Fitness", s.scope["fitness"], s.fitness, cs.primary, Modifier.weight(1f)) { onOpen("fitness") }
     }
@@ -469,12 +471,13 @@ private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnerside
                       modifier: Modifier, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val v = sc?.score
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier) {
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier.fillMaxHeight()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 // What the number covers, so Health isn't read as a medical verdict
-                scope?.let { Text(it.substringBefore(","), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 2) }
+                Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
+                    minLines = 2, maxLines = 2)
             }
             androidx.compose.foundation.layout.Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {

@@ -172,12 +172,17 @@ def normalise_readiness(d: str, p: dict | None) -> list[Observation]:
 
 def normalise_max_metrics(d: str, p: Any) -> list[Observation]:
     entries = p if isinstance(p, list) else [p] if isinstance(p, dict) else []
-    v = None
+    v, when = None, None
     for e in entries:
         g = (e or {}).get("generic") or {}
         v = non_negative(g.get("vo2MaxPreciseValue")) or non_negative(g.get("vo2MaxValue"))
         if v is not None:
+            when = g.get("calendarDate")
             break
+    # Stored under the day Garmin measured it: a value carried forward from an earlier day isn't a new measurement
+    if v is not None and isinstance(when, str) and len(when) == 10 and when < d:
+        return [obs(when, "garmin_vo2max_running", v, method="garmin_vo2max_generic"),
+                obs(d, "garmin_vo2max_running", None, method="garmin_vo2max_generic")]
     return [obs(d, "garmin_vo2max_running", v, method="garmin_vo2max_generic")]
 
 

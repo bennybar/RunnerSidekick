@@ -27,7 +27,7 @@ from . import compare
 from . import reports as rp
 from .analytics import norms as nm
 
-SCORES_VERSION = "scores-3.1"
+SCORES_VERSION = "scores-3.2"
 FITNESS_WEIGHTS = {"vo2max": 100}  # capacity only; performance and consistency are shown as context
 HEALTH_WEIGHTS = {"activity": 30, "steps": 25, "sleep_length": 25, "sleep_regularity": 20}
 VO2_STALE_DAYS = 30   # older than this, the fitness score is marked stale
@@ -92,15 +92,15 @@ def clock(sec: float) -> str:
 def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
     """Garmin's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today) Garmin's
     current value with its own date. Nothing older than VO2_MAX_AGE_DAYS."""
-    s = rp.series(conn, source, "garmin_vo2max_running", d.isoformat())
     oldest = (d - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()
-    recent = [(k, v) for k, v in sorted(s.items()) if k >= oldest]
-    if recent:
-        return recent[-1][1], date.fromisoformat(recent[-1][0])
+    found = [(k, v) for k, v in rp.series(conn, source, "garmin_vo2max_running", d.isoformat()).items() if k >= oldest]
     snap = (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}
-    if d == today and snap.get("value") and snap.get("date") and snap["date"] >= oldest:
-        return snap["value"], date.fromisoformat(snap["date"])
-    return None
+    if d == today and snap.get("value") and snap.get("date") and oldest <= snap["date"] <= d.isoformat():
+        found.append((snap["date"], snap["value"]))
+    if not found:
+        return None
+    k, v = max(found)  # the newest measurement from either source
+    return v, date.fromisoformat(k)
 
 
 def history_start(conn, source: str) -> date | None:
@@ -179,9 +179,11 @@ def context(p: dict) -> dict:
 def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     parts = []
     # Activity against the WHO guideline: moderate + 2 × vigorous minutes, weekly average over days with data (10+ of 28)
-    since = (d - timedelta(days=27)).isoformat()
-    mod = {k: v for k, v in rp.series(conn, source, "intensity_minutes_moderate", d.isoformat()).items() if k >= since}
-    vig = {k: v for k, v in rp.series(conn, source, "intensity_minutes_vigorous", d.isoformat()).items() if k >= since}
+    # Movement counts completed days only (through yesterday): today's totals are still growing
+    done = (d - timedelta(days=1)).isoformat()
+    since = (d - timedelta(days=28)).isoformat()
+    mod = {k: v for k, v in rp.series(conn, source, "intensity_minutes_moderate", done).items() if k >= since}
+    vig = {k: v for k, v in rp.series(conn, source, "intensity_minutes_vigorous", done).items() if k >= since}
     days = sorted(set(mod) | set(vig))
     if len(days) >= 10:
         m = 7 * sum(mod.get(x, 0) + 2 * vig.get(x, 0) for x in days) / len(days)
@@ -197,7 +199,7 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
                           "Garmin's intensity minutes, last 4 weeks"))
     # Daily steps against Paluch et al. 2022 (mortality falls up to about 8,000 under 60, about 6,000–8,000 from 60)
     target = 6000 if age is not None and age >= 60 else 8000
-    st = [v for k, v in rp.series(conn, source, "steps", d.isoformat()).items() if k >= (d - timedelta(days=13)).isoformat()]
+    st = [v for k, v in rp.series(conn, source, "steps", done).items() if k >= (d - timedelta(days=14)).isoformat()]
     if len(st) >= 7:
         avg = sum(st) / len(st)
         parts.append(part("steps", "Daily steps", 100 * (avg - 2000) / (target - 2000), f"{round(avg):,} a day · our reference target {target:,}",
