@@ -232,7 +232,7 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
                  val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
                  @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
-                 val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList())
+                 val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList(), val stale: Boolean = false)
 
 /** One calculated step that would lift a score, and roughly how many points it would add. */
 @Serializable
@@ -240,7 +240,7 @@ data class ScoreStep(val part: String, val text: String, val gain: Int, val hori
 
 /** How a score moved: the same calculation [days] ago. */
 @Serializable
-data class ScoreTrend(val delta: Int, val days: Int = 28)
+data class ScoreTrend(val delta: Int, val days: Int = 28, val detail: String? = null)
 
 /** The next run, calculated from readiness, recent runs and Garmin's zones. */
 @Serializable
@@ -253,6 +253,8 @@ data class NextRun(val date: String, @SerialName("day_label") val dayLabel: Stri
 
 @Serializable
 data class Scores(val status: String, val age: Int? = null, val fitness: Score? = null, val health: Score? = null, val basis: String? = null,
+                  /** What each score covers, in a few words */
+                  val scope: Map<String, String> = emptyMap(),
                   val missing: List<String> = emptyList())
 
 @Serializable

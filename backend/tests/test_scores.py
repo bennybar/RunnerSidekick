@@ -56,7 +56,7 @@ def test_vo2_outside_the_table_is_not_given_an_invented_percentile():
     conn = synced()
     from sidekick.db import set_setting
     conn.daily_observation.update_many({"metric": "garmin_vo2max_running"}, {"$set": {"value": 30.0}})
-    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 30.0}})
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 30.0, "date": ANCHOR.isoformat()}})
     v = {c["id"]: c for c in scores.build(conn, "fixture", ANCHOR)["fitness"]["components"]}["vo2max"]
     assert "below the 40th percentile" in v["say"] and "better than" not in v["say"]
 
@@ -92,3 +92,34 @@ def test_improvement_steps_are_calculated_ranked_and_capped():
         parts = {c["title"]: c for c in s[k]["components"]}
         for x in steps:  # each step belongs to a part that isn't at full points yet
             assert parts[x["part"]]["points"] < 100
+
+
+def test_missing_awake_time_is_unknown_not_perfect():
+    conn = synced()
+    conn.sleep_session.update_many({}, {"$set": {"awake_s": None}})
+    se = {c["id"]: c for c in scores.build(conn, "fixture", ANCHOR)["health"]["components"]}["sleep_efficiency"]
+    assert se["points"] is None and se.get("context")
+
+
+def test_a_birthday_is_not_a_fitness_trend():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    conn = synced()
+    # Turning 50 between the two readings, with VO2 max unchanged: the trend must stay flat
+    set_setting(conn, "profile_sex", "male")
+    set_setting(conn, "profile_birth_date", (ANCHOR - timedelta(days=50 * 365 + 13)).isoformat())
+    conn.daily_observation.update_many({"metric": "garmin_vo2max_running"}, {"$set": {"value": 42.4}})
+    f = scores.build(conn, "fixture", ANCHOR)["fitness"]
+    assert f.get("trend", {}).get("delta", 0) == 0
+
+
+def test_old_vo2_is_marked_stale_then_dropped():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    conn = synced()
+    conn.daily_observation.delete_many({"metric": "garmin_vo2max_running"})
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 46.0, "date": (ANCHOR - timedelta(days=45)).isoformat()}})
+    f = scores.build(conn, "fixture", ANCHOR)["fitness"]
+    assert f["status"] == "ok" and f.get("stale") is True and "45 days ago" in f["components"][0]["say"]
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 46.0, "date": (ANCHOR - timedelta(days=120)).isoformat()}})
+    assert scores.build(conn, "fixture", ANCHOR)["fitness"]["status"] == "unavailable"

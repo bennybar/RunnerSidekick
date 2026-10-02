@@ -179,7 +179,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     }
     when (sheet) {
         "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
-            ScoreSheet(if (sheet == "health") "Health" else "Fitness", it, sc.basis, onDismiss = { sheet = null }) } }
+            ScoreSheet(if (sheet == "health") "Health" else "Fitness", sc.scope[sheet!!], it, sc.basis, onDismiss = { sheet = null }) } }
         "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(it, r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
             SheetColumn(onDismiss = { sheet = null }) {
@@ -459,19 +459,23 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
 private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ScoreTile("Health", s.health, cs.tertiary, Modifier.weight(1f)) { onOpen("health") }
-        ScoreTile("Fitness", s.fitness, cs.primary, Modifier.weight(1f)) { onOpen("fitness") }
+        ScoreTile("Health", s.scope["health"], s.health, cs.tertiary, Modifier.weight(1f)) { onOpen("health") }
+        ScoreTile("Fitness", s.scope["fitness"], s.fitness, cs.primary, Modifier.weight(1f)) { onOpen("fitness") }
     }
 }
 
 @Composable
-private fun ScoreTile(title: String, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color, modifier: Modifier,
-                      onOpen: () -> Unit) {
+private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color,
+                      modifier: Modifier, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val v = sc?.score
     Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                // What the number covers, so Health isn't read as a medical verdict
+                scope?.let { Text(it.substringBefore(","), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, maxLines = 2) }
+            }
             androidx.compose.foundation.layout.Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
                 androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
                     val stroke = androidx.compose.ui.graphics.drawscope.Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
@@ -491,6 +495,7 @@ private fun ScoreTile(title: String, sc: com.bennybar.runnersidekick.data.remote
                     else -> null
                 },
                 if (sc?.status == "partial") "partial" else null,
+                if (sc?.stale == true) "stale" else null,
             ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
                 style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
@@ -519,16 +524,24 @@ private fun ScoreRing(title: String, sc: com.bennybar.runnersidekick.data.remote
 }
 
 @Composable
-private fun ScoreSheet(title: String, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onDismiss: () -> Unit) {
+private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onDismiss: () -> Unit) {
+    var how by remember { mutableStateOf(false) }
     SheetColumn(onDismiss) {
         Text("$title" + (sc.score?.let { " · $it" } ?: ""), style = MaterialTheme.typography.headlineSmall)
-        Text(listOfNotNull(sc.label, sc.trend?.let { t -> if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta) })
+        scope?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text(listOfNotNull(sc.label, sc.trend?.let { t -> (if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta)) +
+                (t.detail?.let { " ($it)" } ?: "") }, if (sc.stale) "based on an old VO₂ max" else null)
             .joinToString(" · "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         sc.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
         Group {
-            sc.components.filter { !it.context }.forEach { c -> row(c.title, supporting = c.say ?: c.value ?: c.note,
-                trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
+            sc.components.filter { !it.context }.forEach { c ->
+                // "How it's calculated" adds each part's rule and its share of the score under its reading
+                row(c.title, supporting = (c.say ?: c.value ?: c.note ?: "") +
+                    if (how) "\n" + listOfNotNull(c.note, if (c.weightPct > 0) "${c.weightPct}% of the score" else null).joinToString(" · ") else "",
+                    trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) })
+            }
         }
+        TextButton(onClick = { how = !how }) { Text(if (how) "Hide how it's calculated" else "How it's calculated") }
         sc.components.filter { it.context }.takeIf { it.isNotEmpty() }?.let { ctx ->
             Group(title = "Context · not counted") {
                 ctx.forEach { c -> row(c.title, supporting = c.say ?: c.note, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }

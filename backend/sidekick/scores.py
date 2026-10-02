@@ -1,5 +1,6 @@
 """Two headline numbers for Today, each 0–100, with fixed weights and every part tied to a published reference.
-Nothing is counted twice; a missing part is listed and the score marked partial; a score needs its required parts
+Fitness age and HRV are left out so they aren't counted twice; steps and intensity minutes overlap on purpose (movement
+is 55% of Health). A missing part is listed and the score marked partial; a score needs its required parts
 (Fitness: VO2 max; Health: some movement and some sleep). Each score says how it moved over 4 weeks when the same
 parts existed then. Deterministic; not a medical score.
 
@@ -7,10 +8,12 @@ Fitness is capacity: Garmin's VO2 max for your age and sex (Cooper/ACSM table; o
 40th" or "above the 95th percentile" rather than inventing one). Recent age-graded running and training consistency
 are shown with it as context, not counted, because they mix capacity with habits.
 Health: weekly activity against the WHO guideline (150–300 moderate-equivalent minutes; vigorous counts double), daily
-steps (Paluch et al. 2022: benefit levels off around 8,000–10,000 under 60, 6,000–8,000 from 60), sleep length scored
-night by night (7 h or more; long nights aren't penalised), sleep regularity (how much mid-sleep moves) and sleep
-efficiency (time asleep out of time in bed; 85% is the usual clinical line). Resting heart rate is shown as context
-with its own 4-week change: Garmin's lowest-30-minute value isn't comparable to the seated population references.
+steps against our reference target (8,000 under 60, 6,000 from 60, within the ranges where Paluch et al. 2022 saw the
+mortality association level off; the 2,000-to-target line is ours), sleep length scored night by night (7 h or more;
+long nights aren't penalised) and sleep regularity (how much mid-sleep moves). Context, not counted: sleep efficiency
+(a watch's sleep window isn't the full time in bed) and resting heart rate as its own 4-week change (Garmin's
+lowest-30-minute value isn't comparable to the seated population references).
+Trends compare against the same reference group (today's age), so a birthday never looks like a change in you.
 Left out: Garmin's fitness age (built from VO2 max and resting HR), HRV (readiness uses it), Garmin's sedentary time
 (includes standing, so it isn't comparable to sitting-time research), sleep stages and stress (no solid reference
 ranges for consumer watches)."""
@@ -24,9 +27,11 @@ from . import compare
 from . import reports as rp
 from .analytics import norms as nm
 
-SCORES_VERSION = "scores-3.0"
+SCORES_VERSION = "scores-3.1"
 FITNESS_WEIGHTS = {"vo2max": 100}  # capacity only; performance and consistency are shown as context
-HEALTH_WEIGHTS = {"activity": 30, "steps": 25, "sleep_length": 20, "sleep_regularity": 15, "sleep_efficiency": 10}
+HEALTH_WEIGHTS = {"activity": 30, "steps": 25, "sleep_length": 25, "sleep_regularity": 20}
+VO2_STALE_DAYS = 30   # older than this, the fitness score is marked stale
+VO2_MAX_AGE_DAYS = 90 # older than this, there's no fitness score
 # A score needs one part from each group: Fitness a VO2 max; Health some movement and some sleep
 FITNESS_REQUIRED = [{"vo2max"}]
 HEALTH_REQUIRED = [{"activity", "steps"}, {"sleep_length"}]
@@ -84,13 +89,18 @@ def clock(sec: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
-def vo2_on(conn, source: str, d: date, today: date) -> float | None:
-    """Garmin's VO2 max as of d: the latest daily reading up to then (today also falls back to Garmin's current value)."""
+def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
+    """Garmin's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today) Garmin's
+    current value with its own date. Nothing older than VO2_MAX_AGE_DAYS."""
     s = rp.series(conn, source, "garmin_vo2max_running", d.isoformat())
-    recent = [v for k, v in sorted(s.items()) if k >= (d - timedelta(days=60)).isoformat()]
+    oldest = (d - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()
+    recent = [(k, v) for k, v in sorted(s.items()) if k >= oldest]
     if recent:
-        return recent[-1]
-    return ((rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}).get("value") if d == today else None
+        return recent[-1][1], date.fromisoformat(recent[-1][0])
+    snap = (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}
+    if d == today and snap.get("value") and snap.get("date") and snap["date"] >= oldest:
+        return snap["value"], date.fromisoformat(snap["date"])
+    return None
 
 
 def history_start(conn, source: str) -> date | None:
@@ -99,10 +109,13 @@ def history_start(conn, source: str) -> date | None:
     return date.fromisoformat(a["local_date"]) if a else None
 
 
-def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str, hold_back: bool = False) -> list[dict]:
-    age = compare.age_on(birth, d)
+def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str, hold_back: bool = False,
+                  ref_age: int | None = None) -> list[dict]:
+    """ref_age: the age whose reference group is used (today's age for the trend, so a birthday isn't a change)."""
+    age = ref_age if ref_age is not None else compare.age_on(birth, d)
     parts = []
-    v = vo2_on(conn, source, d, today)
+    vd = vo2_on(conn, source, d, today)
+    v, measured = vd if vd else (None, None)
     if v:
         i, _ = nm.band_index(nm.VO2_BANDS, age)
         lo, hi = nm.VO2_BANDS[i]
@@ -117,8 +130,12 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str,
                else "mostly easy running with one harder session a week is the usual way up")
         imp = (f"Reaching VO₂ max {nxt[0]:.1f} (+{nxt[0] - v:.1f}) would put you above {nxt[1]}% of {grp}: {how}", vo2_points(sex, age, nxt[0]),
                "over months") if nxt else None
-        parts.append(part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · {rank} of {grp}",
-                          "Garmin's VO₂ max against the Cooper/ACSM table for your age and sex", imp))
+        ago = (d - measured).days
+        when = "today" if ago == 0 else "yesterday" if ago == 1 else f"{ago} days ago"
+        vo2 = part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · {rank} of {grp} · measured {when}",
+                   "Garmin's VO₂ max against the Cooper/ACSM table for your age and sex", imp)
+        vo2["vo2"], vo2["stale"] = v, ago > VO2_STALE_DAYS
+        parts.append(vo2)
     else:
         parts.append(part("vo2max", "VO₂ max for your age", None, "No VO₂ max from Garmin yet", "Needs a recent VO₂ max from Garmin"))
     # Context: recent age-graded running (the best graded effort of the last 90 days)
@@ -183,8 +200,9 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     st = [v for k, v in rp.series(conn, source, "steps", d.isoformat()).items() if k >= (d - timedelta(days=13)).isoformat()]
     if len(st) >= 7:
         avg = sum(st) / len(st)
-        parts.append(part("steps", "Daily steps", 100 * (avg - 2000) / (target - 2000), f"{round(avg):,} a day · benefit levels off near {target:,}",
-                          f"Average of the last 2 weeks ({len(st)} days); 2,000 scores 0, {target:,} scores 100 (Paluch et al. 2022)",
+        parts.append(part("steps", "Daily steps", 100 * (avg - 2000) / (target - 2000), f"{round(avg):,} a day · our reference target {target:,}",
+                          f"Average of the last 2 weeks ({len(st)} days); 2,000 scores 0, {target:,} scores 100. The target sits where Paluch "
+                          "et al. 2022 saw the mortality association level off; the line between is ours",
                           (f"About {round(target - avg):,} more steps a day would reach {target:,}", 100, "over 2 weeks")))
     else:
         parts.append(part("steps", "Daily steps", None, "Needs 7 days of steps", "Average of the last 2 weeks"))
@@ -221,13 +239,16 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     else:
         parts.append(part("sleep_regularity", "Sleep regularity", None, "Needs 5 nights in two weeks", "Spread of mid-sleep"))
     # Efficiency: time asleep out of time in bed (asleep + awake)
-    eff = [s["duration_s"] / (s["duration_s"] + (s.get("awake_s") or 0)) for s in sessions if s.get("duration_s")]
+    # Context: efficiency from nights with a measured awake time only (missing awake time is unknown, not zero)
+    eff = [s["duration_s"] / (s["duration_s"] + s["awake_s"]) for s in sessions
+           if s.get("duration_s") and isinstance(s.get("awake_s"), (int, float)) and s["awake_s"] >= 0]
     if len(eff) >= 5:
         e = sum(eff) / len(eff)
-        parts.append(part("sleep_efficiency", "Sleep efficiency", (100 * e - 75) * 100 / 15, f"{100 * e:.0f}% of time in bed asleep",
-                          "Average over two weeks; 90% or more scores 100, 75% scores 0 (85% is the usual clinical line)"))
+        se = part("sleep_efficiency", "Sleep efficiency", (100 * e - 75) * 100 / 15, f"{100 * e:.0f}% of the night asleep ({len(eff)} nights)",
+                  "Time asleep out of the watch's sleep window, which isn't always the full time in bed; shown for context")
     else:
-        parts.append(part("sleep_efficiency", "Sleep efficiency", None, "Needs 5 nights in two weeks", "Time asleep out of time in bed"))
+        se = part("sleep_efficiency", "Sleep efficiency", None, "Needs 5 nights with awake time measured", "Time asleep out of the sleep window")
+    parts.append(context(se))
     # Context: resting heart rate as your own 4-week change (not a population rank: different measurement)
     def med(end: date) -> float | None:
         v = [x for k, x in rp.series(conn, source, "resting_hr", end.isoformat()).items() if k >= (end - timedelta(days=27)).isoformat()]
@@ -274,8 +295,12 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
     old_health = score(health_parts(conn, source, today - timedelta(days=TREND_DAYS), age), HEALTH_WEIGHTS, HEALTH_REQUIRED)
     if prof["sex"] and prof["birth_date"]:
         fitness = score(fitness_parts(conn, source, today, today, prof["sex"], prof["birth_date"], hold_back), FITNESS_WEIGHTS, FITNESS_REQUIRED)
-        old_fit = score(fitness_parts(conn, source, today - timedelta(days=TREND_DAYS), today, prof["sex"], prof["birth_date"]),
+        # Same reference group as today's, so the trend is a change in VO2 max, never a birthday
+        old_fit = score(fitness_parts(conn, source, today - timedelta(days=TREND_DAYS), today, prof["sex"], prof["birth_date"], ref_age=age),
                         FITNESS_WEIGHTS, FITNESS_REQUIRED)
+        vo2 = next((p for p in fitness["components"] if p["id"] == "vo2max" and p["points"] is not None), None)
+        if vo2 and vo2.get("stale"):
+            fitness["stale"] = True
     else:
         fitness = {"status": "unavailable", "components": [], "missing": [], "detail": "Needs your sex and birth date (from Garmin or Settings)."}
         old_fit = fitness
@@ -285,7 +310,13 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
                {p["id"] for p in old["components"] if p["points"] is not None and not p.get("context")}
         if cur.get("score") is not None and old.get("score") is not None and same:
             cur["trend"] = {"delta": cur["score"] - old["score"], "days": TREND_DAYS}
+    # The measurement behind the fitness trend, so the change reads as VO2 max, not just points
+    now_v = next((p.get("vo2") for p in fitness.get("components", []) if p["id"] == "vo2max"), None)
+    old_v = next((p.get("vo2") for p in old_fit.get("components", []) if p["id"] == "vo2max"), None)
+    if fitness.get("trend") and now_v and old_v:
+        fitness["trend"]["detail"] = f"VO₂ max {old_v:.1f} → {now_v:.1f}"
     return {"status": "ok", "age": age, "sex": prof["sex"], "fitness": fitness, "health": health,
-            "basis": "Fixed weights; every counted part is tied to a published reference. Missing parts are listed, never guessed. "
-                     "Context lines aren't counted. A summary of the readings, not a medical score.",
+            "scope": {"fitness": "Aerobic fitness for your age, from Garmin's VO₂ max", "health": "Activity and sleep habits, from your watch"},
+            "basis": "Fixed weights; each counted part is anchored to a published reference, the point curves are ours. Missing parts "
+                     "are listed, never guessed. Context lines aren't counted. Trends use today's reference group. Not a medical score.",
             "algorithm_version": SCORES_VERSION}

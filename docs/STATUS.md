@@ -289,6 +289,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   - An all-rest recovery week no longer yields a steady run.
   - Manual sync reports a real failure or "still syncing" instead of success; its polls back off (2–8 s).
 
+## Scores 3.1 (2026-10-02, v0.26.1)
+- Sleep efficiency is context only, and only from nights with a measured awake time (missing awake time no longer
+  counts as perfect).
+- Trends use today's reference group (no birthday jumps). The Fitness trend shows the VO₂ max change.
+- VO₂ max freshness: shown with the date measured; stale after 30 days, no score after 90.
+- Steps are worded as "our reference target"; the movement overlap is stated.
+- The tiles say what each score covers. Each breakdown has "How it's calculated" (the rule and the share of the score
+  for each part).
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

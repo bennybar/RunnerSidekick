@@ -300,7 +300,7 @@ The day's call shows when it was worked out and when the Garmin data is from, pl
 briefing: the call itself, core readings moving outside or back within your usual range, a plan being set and a
 check-in being included. This is computed when the briefing is read, so it never creates report revisions.
 
-## Health and fitness scores — `scores.py` (`scores-3.0`)
+## Health and fitness scores — `scores.py` (`scores-3.1`)
 
 Each score runs from 0 to 100, with fixed weights. Every counted part is tied to a published reference; the point
 curves are heuristics.
@@ -313,17 +313,28 @@ curves are heuristics.
 |---|---|---|
 | Fitness | VO₂ max for age and sex (100) | Cooper/ACSM percentile; outside the table the text says "below the 40th / above the 95th percentile" (the internal curve extends) |
 | Health | Weekly activity (30) | moderate + 2 × vigorous intensity minutes, weekly average over days with data (10+ of 28). WHO guideline 150–300: 150 scores 70, 300+ scores 100 |
-| Health | Daily steps (25) | 2-week average; 2,000 scores 0, 8,000 (6,000 from age 60) scores 100 (Paluch et al. 2022) |
-| Health | Sleep length (20) | night by night: 7 h+ scores 100, −40 per hour short; the average of nights, and the count of short nights is shown. Long nights aren't penalised |
-| Health | Sleep regularity (15) | standard deviation of mid-sleep over 14 nights: ±30 min scores 100, ±105 scores 0 |
-| Health | Sleep efficiency (10) | time asleep ÷ (asleep + awake), 2-week average: 90%+ scores 100, 75% scores 0 (85% is the usual clinical line) |
+| Health | Daily steps (25) | 2-week average against our reference target: 8,000 (6,000 from age 60), within the range where Paluch et al. 2022 saw the mortality association level off. 2,000 scores 0; the line between is ours |
+| Health | Sleep length (25) | night by night: 7 h+ scores 100, −40 per hour short; the average of nights, and the count of short nights is shown. Long nights aren't penalised |
+| Health | Sleep regularity (20) | standard deviation of mid-sleep over 14 nights: ±30 min scores 100, ±105 scores 0 |
 
 Context lines, shown but not counted:
 - **Fitness:** recent age-graded running (the fastest stretch of any run, not necessarily a hard effort). Also training
   consistency: weeks with 2+ runs totalling 40+ min, or 75+ min. Only weeks with synced history count, and 4 are
   needed.
-- **Health:** resting heart rate as your own 4-week change. Garmin's lowest-30-minute value isn't comparable to seated
-  population references.
+- **Health:**
+  - Sleep efficiency: time asleep out of the watch's sleep window, from nights with a measured awake time only. That
+    window isn't the full time in bed.
+  - Resting heart rate as your own 4-week change. Garmin's lowest-30-minute value isn't comparable to seated
+    population references.
+
+Rules added in 3.1:
+- **Scope labels:** Fitness is "aerobic fitness for your age, from Garmin's VO₂ max"; Health is "activity and sleep
+  habits, from your watch".
+- **Overlap:** steps and intensity minutes overlap on purpose, so movement is 55% of Health.
+- **Freshness:** the VO₂ max reading shows how old it is. Older than 30 days, the Fitness score is marked stale;
+  older than 90 days, there is none.
+- **Trends:** they use today's age for both readings, so a birthday never looks like a change. The Fitness trend
+  also shows the VO₂ max values behind it.
 
 Left out:
 - **Garmin's fitness age:** built from VO₂ max and resting HR.
