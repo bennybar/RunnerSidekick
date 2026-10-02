@@ -75,6 +75,8 @@ data class Point(val date: String, val value: Double)
 
 @Serializable
 data class Finding(
+    /** For a reading not in yet today: the most recent measured value (last 3 days). */
+    val last: Point? = null,
     val id: String,
     val category: String,
     val metric: String,
@@ -191,7 +193,20 @@ data class MorningReport(
     val highlights: List<Highlight> = emptyList(),
     val changes: List<String> = emptyList(),
     val race: RaceStatus? = null,
+    val scores: Scores? = null,
 )
+
+@Serializable
+data class ScoreComponent(val id: String, val title: String, val value: String? = null, val points: Int? = null,
+                          @SerialName("weight_pct") val weightPct: Int = 0, val note: String? = null)
+
+@Serializable
+data class Score(val status: String, val score: Int? = null, val label: String? = null, val used: Int? = null, val of: Int? = null,
+                 val components: List<ScoreComponent> = emptyList(), val detail: String? = null)
+
+@Serializable
+data class Scores(val status: String, val age: Int? = null, val fitness: Score? = null, val health: Score? = null, val basis: String? = null,
+                  val missing: List<String> = emptyList())
 
 @Serializable
 data class RaceSession(

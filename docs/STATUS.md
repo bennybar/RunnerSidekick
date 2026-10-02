@@ -129,6 +129,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   focus history), an offline queue for plans and intent (low value for one user), official Garmin import (needs Garmin's
   developer approval).
 
+## Refocus: data first, simple home (2026-10-02, v0.15.0)
+- Goal: make Garmin's data more accessible, analyse it deterministically, and add AI on top. No manual inputs required.
+- Today: Health and Fitness scores (0–100, age- and sex-based, with a breakdown), the day's call, the coach's TL;DR, up
+  to 3 things that stand out, readings (with VO₂ max) and the latest run. Plan, check-in and focus are off Today; the
+  focus and race week are now on Insights. The app no longer asks for check-ins.
+- Fixed: a sync where Garmin left out VO₂ max (or another part of the fitness snapshot) wiped the stored value. It is
+  now merged. Readings that aren't in yet show the last value with its date instead of "Not recorded".
+- Transitions: one 120 ms crossfade everywhere, as in kitzi.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

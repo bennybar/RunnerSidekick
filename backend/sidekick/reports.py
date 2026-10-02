@@ -151,7 +151,11 @@ def metric_finding(conn, source: str, metric: str, d: date, obs_row) -> dict | N
     ds = d.isoformat()
     fid = f"m:{ds}:{metric}"
     if obs_row is None or obs_row["state"] != "measured":
-        return {"id": fid, "category": CATEGORY[metric], "metric": metric, "title": METRIC_TITLES[metric], "status": "missing",
+        # Today's value isn't in yet: point to the most recent measured one (last 3 days) so it doesn't look lost
+        prior = {k: v for k, v in series(conn, source, metric, (d - timedelta(days=1)).isoformat()).items()
+                 if k >= (d - timedelta(days=3)).isoformat()}
+        last = {"date": max(prior), "value": prior[max(prior)]} if prior else None
+        return {"id": fid, "last": last, "category": CATEGORY[metric], "metric": metric, "title": METRIC_TITLES[metric], "status": "missing",
                 "statement": f"No {METRIC_TITLES[metric].lower()} recorded for {ds}" + (" (not yet synced)." if obs_row is None else "."),
                 "observed": None, "comparison": None, "delta": None, "priority": 9,
                 "evidence": {"record_ids": [], "date_range": [ds, ds]}, "sample_size": 0, "coverage": None,
@@ -276,14 +280,8 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     if recent:
         a = recent[-1]
         recent_run = {k: a[k] for k in ("source_id", "local_date", "name", "distance_m", "moving_s", "avg_hr", "start_utc")}
-    # App-initiated check-in: only ask when how the runner feels would change the advice
-    ask = checkin is None and (rec["rule_id"] in ("R3", "R1e", "R1", "R1b") or bool(signals) and rec["state"] != "consider_easier")
-    checkin_prompt = {"ask": ask, "reason": (
-        "One reading is outside your usual range. How you feel decides whether today stays easy." if rec["rule_id"] == "R3" else
-        "Your recent running is well above usual. How do you feel today?" if rec["rule_id"] == "R1e" else
-        "No overnight data yet. A quick answer tailors today's advice." if rec["rule_id"] == "R1" else
-        "Your personal ranges are still being learned. How you feel helps meanwhile." if rec["rule_id"] == "R1b" else
-        "A quick answer helps tailor today's advice.") if ask else None}
+    # The app no longer asks how you feel: Garmin's data drives the advice (a check-in, if one exists, still counts)
+    checkin_prompt = {"ask": False, "reason": None}
     body = {
         "type": "morning", "local_date": ds, "synthetic": synthetic, "checkin_prompt": checkin_prompt,
         "provisional": completeness["sleep_duration"] != "measured",
@@ -291,7 +289,7 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
         "top_finding_ids": [f["id"] for f in top], "findings": findings, "garmin_context": garmin_ctx,
         "completeness": completeness, "checkin": checkin, "recent_run": recent_run, "narrative": None,
     }
-    inputs = {"findings": [{k: f.get(k) for k in ("id", "observed", "comparison", "status")} for f in findings],
+    inputs = {"findings": [{k: f.get(k) for k in ("id", "observed", "comparison", "status", "last")} for f in findings],
               "checkin": checkin, "running_days": running_days, "garmin": garmin_ctx, "recent": recent_run, "v": ALGORITHMS,
               "plan": plan, "available": get_setting(conn, "available_minutes", None), "zones": zones,
               # everything displayed, so no input that changes the text can leave an old revision in place

@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -62,20 +61,11 @@ open class BaseVm(val repo: Repository) : ViewModel() {
 class TodayVm(repo: Repository) : BaseVm(repo) {
     val status = repo.status.state(null)
     val today = repo.today.state(null)
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val todayCheckin = repo.status.flatMapLatest { s -> s?.let { repo.checkinFor(it.value.today) } ?: flowOf(null) }.state(null)
-
-    val insights = repo.insights.state(null)
     val fitness = repo.fitness.state(null)
-    val focus = repo.focus.state(null)
     val coach = repo.coach.state(null)
 
-    // A plan or check-in changes the evidence, so the coach is asked again rather than left showing older advice
+    // New data changes the evidence, so the coach is asked again rather than left showing older advice
     private fun updateCoach() = viewModelScope.launch { repo.pollCoach() }
-
-    fun setPlan(date: String, kind: String?, minutes: Int?) = launchIo { repo.setPlan(date, kind, minutes); updateCoach() }
-    fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
-    fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 
     init { refresh() }
 
@@ -91,12 +81,6 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     }
     fun syncNow() = launchIo { repo.syncNow() }
 
-    fun saveCheckin(date: String, energy: Int?, soreness: Int?, recovery: Int?, pain: Boolean, illness: Boolean, notes: String?) =
-        launchIo {
-            repo.saveCheckin(date, energy, soreness, recovery, pain, illness, notes, emptyList())
-            repo.refreshAll() // pushes the check-in and fetches the revised briefing; offline it stays pending
-            updateCoach()
-        }
 }
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {
@@ -116,6 +100,9 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val weekly = repo.weekly.state(null)
     val fitness = repo.fitness.state(null)
     val compare = repo.compare.state(null)
+    val today = repo.today.state(null)
+    val focus = repo.focus.state(null)
+    fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     fun loadCompare() = launchIo { if (repo.refreshCompare()) pollQuietly { repo.refreshCompare() } }
 

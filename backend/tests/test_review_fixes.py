@@ -79,3 +79,10 @@ def test_run_report_carries_garmins_daily_vo2max(tmp_path):
                                       {"$set": {"value": 46.2, "state": "measured", "unit": "ml/kg/min"}}, upsert=True)
     r = rp.build_post_run(conn, "fixture", "fx-run-2026-09-28", True)
     assert r["garmin_vo2max_day"] == {"value": 46.2, "date": "2026-09-28"}
+
+
+def test_a_reading_not_in_yet_points_to_the_last_value(tmp_path):
+    conn = synced(tmp_path)
+    conn.daily_observation.delete_many({"local_date": ANCHOR.isoformat(), "metric": "resting_hr"})
+    f = next(x for x in rp.build_morning(conn, "fixture", ANCHOR, True)["findings"] if x["metric"] == "resting_hr")
+    assert f["status"] == "missing" and f["last"]["date"] == "2026-09-29" and f["last"]["value"]

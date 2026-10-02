@@ -299,3 +299,20 @@ already met, the plan says so. Durations only, never paces.
 The day's call shows when it was worked out and when the Garmin data is from, plus what changed against yesterday's
 briefing: the call itself, core readings moving outside or back within your usual range, a plan being set and a
 check-in being included. This is computed when the briefing is read, so it never creates report revisions.
+
+## Health and fitness scores — `scores.py` (`scores-1.0`)
+
+Each score runs from 0 to 100. Every part shows its value, points and weight. Missing parts are dropped and the
+remaining weights rescaled, and at least two parts are needed. Labels: 85+ excellent, 70+ very good, 55+ good, 40+ fair.
+
+| Score | Part (weight) | Points |
+|---|---|---|
+| Fitness | VO₂ max for age and sex (50) | the Cooper percentile; below the 40th, falls to 0 at 10 mL/kg/min under it; above the 95th, +1 per unit |
+| Fitness | Age-graded running (25) | 40% scores 0, 90% scores 100 |
+| Fitness | Consistency (25) | weeks with a run out of the last 8 complete weeks |
+| Health | Resting HR for age and sex (30) | the share of the reference group with a higher resting HR |
+| Health | Fitness age vs your age (25) | 50 + 10 per year younger (Garmin's fitness age) |
+| Health | Sleep (25) | 7–9 h median over 14 nights scores 100; −50 per hour outside |
+| Health | HRV vs your usual (20) | within your range scores 100, above 90, below scales down; only once the range exists |
+
+These are deterministic summaries of the readings, not medical scores. No language model is involved in any number.

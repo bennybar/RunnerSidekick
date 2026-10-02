@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.ui.today
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -18,45 +20,33 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
-import androidx.compose.material.icons.automirrored.outlined.ListAlt
 import androidx.compose.material.icons.automirrored.outlined.TrendingDown
 import androidx.compose.material.icons.automirrored.outlined.TrendingFlat
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LinkOff
-import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material.icons.outlined.Watch
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -67,11 +57,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,11 +71,9 @@ import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.bennybar.runnersidekick.data.local.CheckinEntity
 import com.bennybar.runnersidekick.data.local.Units
 import com.bennybar.runnersidekick.data.remote.Finding
 import com.bennybar.runnersidekick.data.remote.MorningReport
-import com.bennybar.runnersidekick.data.remote.Narrative
 import com.bennybar.runnersidekick.data.remote.Status
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.TodayVm
@@ -101,7 +87,6 @@ import com.bennybar.runnersidekick.ui.components.OfflineBanner
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.components.Sparkline
 import com.bennybar.runnersidekick.ui.factory
-import com.bennybar.runnersidekick.ui.insights.InsightCard
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -114,10 +99,7 @@ private val TILE_METRICS = listOf("sleep_duration", "resting_hr", "hrv_overnight
 fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenInsights: () -> Unit, vm: TodayVm = viewModel(factory = factory(::TodayVm))) {
     val status by vm.status.collectAsStateWithLifecycle()
     val today by vm.today.collectAsStateWithLifecycle()
-    val checkin by vm.todayCheckin.collectAsStateWithLifecycle()
-    val insights by vm.insights.collectAsStateWithLifecycle()
     val fitness by vm.fitness.collectAsStateWithLifecycle()
-    val focus by vm.focus.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val offline by vm.offline.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -159,27 +141,9 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
-                // Order: the day's call, what stands out, the readings, then commentary
+                // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
+                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { sheet = "scores" } } }
                 animatedItem(key = "hero") { Hero(report, onWhy = { sheet = "why" }) }
-                if (report.highlights.isNotEmpty()) animatedItem(key = "highlights") {
-                    StandsOut(report.highlights) { t ->
-                        when (t.type) {
-                            "run" -> t.id?.let(onOpenRun)
-                            "compare" -> { com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }
-                            "insights" -> onOpenInsights()
-                            "race" -> onOpenSettings()
-                        }
-                    }
-                }
-                report.race?.week?.let { w -> animatedItem(key = "raceweek") { RaceWeekCard(report.race, w, onOpenRun) } }
-                // The app asks only when an answer would change today's advice
-                if (checkin == null && report.checkinPrompt?.ask == true) animatedItem(key = "checkin") {
-                    CheckinPromptCard(report.checkinPrompt.reason, onQuick = { rec -> vm.saveCheckin(report.localDate, null, null, rec, false, false, null) },
-                        onMore = { sheet = "checkin" })
-                }
-                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenInsights) { evidence = it } }
-                focus?.value?.let { f -> animatedItem(key = "focus") { FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
-                // One AI voice: the coach's summary when there is one, otherwise the report summary
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
@@ -187,62 +151,35 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     val note = if (coachShown !== c) (if (c.status == "pending") "Updating for today's changes…" else "From an earlier analysis")
                         else "Updated ${Format.ago(runCatching { Instant.parse(coachShown.generatedAt) }.getOrNull())}"
                     animatedItem(key = "coach") { CoachTeaser(s, note, onOpenInsights) }
-                } ?: report.narrative?.let { n -> animatedItem(key = "narrative") { NarrativeCard(n, report) { id -> evidence = report.findings.firstOrNull { it.id == id } } } }
-                // Prefer what's new or changed; skip what the runner dismissed or is already working on
-                insights?.value?.insights?.filter { it.verdict == "pattern" && it.userState == null }
-                    ?.sortedBy { if (it.novelty == "continuing") 1 else 0 }?.firstOrNull()?.let { top ->
-                    animatedItem(key = "noticed") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Something we noticed", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-                            InsightCard(top, emphasised = true, onMethod = onOpenInsights)
+                }
+                if (report.highlights.isNotEmpty()) animatedItem(key = "highlights") {
+                    StandsOut(report.highlights.take(3)) { t ->
+                        when (t.type) {
+                            "run" -> t.id?.let(onOpenRun)
+                            "compare" -> { com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }
+                            else -> onOpenInsights()
                         }
                     }
                 }
-                animatedItem(key = "more") {
-                    Group(title = "More") {
-                        fitness?.value?.garmin?.let { g ->
-                            val parts = listOfNotNull(g.vo2max?.let { "VO₂ max %.1f".format(it.value) },
-                                com.bennybar.runnersidekick.ui.insights.trainingStatusLabel(g.trainingStatus?.phrase),
-                                g.racePredictions?.k5?.let { "5K ${(it / 60).toInt()}:${"%02d".format(it.toInt() % 60)}" })
-                            if (parts.isNotEmpty()) row("Your fitness", supporting = parts.joinToString(" · ") + " (Garmin)",
-                                icon = Icons.Outlined.MonitorHeart, iconShape = MaterialShapes.Cookie9Sided, onClick = onOpenInsights,
-                                accent = "fitness")
-                        }
-                        val plan = report.recommendation.plan
-                        row("Today's plan", supporting = plan?.let { p -> (PLAN_KINDS.firstOrNull { it.first == p.kind }?.second ?: p.kind) +
-                            (p.minutes?.let { " · $it min" } ?: "") } ?: "Optional · the suggestion adapts to it",
-                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie4Sided, onClick = { sheet = "plan" },
-                            accent = "habits")
-                        row(if (checkin == null) "Check in" else "Your check-in", supporting = checkin?.let(::checkinSummary) ?: "Optional",
-                            icon = Icons.Outlined.TaskAlt, iconShape = MaterialShapes.Cookie4Sided, onClick = { sheet = "checkin" },
-                            accent = "recovery")
-                        report.recentRun?.let { run ->
-                            row(run.name ?: "Run", overline = "Latest run · ${Format.shortDate(run.localDate)}",
-                                supporting = "${Format.distance(run.distanceM, units)} · ${Format.duration(run.movingS)} moving · " +
-                                    Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units),
+                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenInsights) { evidence = it } }
+                report.recentRun?.let { run ->
+                    animatedItem(key = "lastrun") {
+                        Group(title = "Latest run") {
+                            row(Format.shortDate(run.localDate) + " · " + Format.distance(run.distanceM, units),
+                                supporting = "${Format.duration(run.movingS)} moving · " +
+                                    Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units) +
+                                    (run.avgHr?.let { " · ${it.roundToInt()} bpm" } ?: ""),
                                 icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(run.sourceId) },
                                 accent = "running")
                         }
-                        row("Full briefing", supporting = "All findings, Garmin scores and report details", icon = Icons.AutoMirrored.Outlined.ListAlt,
-                            iconShape = MaterialShapes.Clover4Leaf, onClick = { sheet = "briefing" })
                     }
                 }
             }
         }
     }
     when (sheet) {
-        "checkin" -> report?.let { r ->
-            CheckinSheet(r.localDate, checkin, onDismiss = { sheet = null }) { e, s, rec, p, i, n ->
-                vm.saveCheckin(r.localDate, e, s, rec, p, i, n); sheet = null
-            }
-        }
-        "plan" -> report?.let { r ->
-            SheetColumn(onDismiss = { sheet = null }) {
-                PlanCard(r.recommendation.plan) { kind, minutes -> vm.setPlan(r.localDate, kind, minutes) }
-            }
-        }
-        "why" -> report?.let { WhySheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
+        "scores" -> report?.scores?.let { ScoresSheet(it, onDismiss = { sheet = null }) }
+        "why" -> report?.let { WhySheet(it, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) { f -> sheet = null; evidence = f } }
         "briefing" -> report?.let { BriefingSheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
     }
     evidence?.let { EvidenceSheet(it) { evidence = null } }
@@ -344,14 +281,8 @@ private fun Hero(r: MorningReport, onWhy: () -> Unit) {
             Text(listOfNotNull(made?.let { "Worked out ${Format.ago(it)}" }, r.dataCutoff?.let { c ->
                 runCatching { Instant.parse(c) }.getOrNull()?.let { "Garmin data from ${Format.ago(it)}" } }).joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium, color = on.copy(alpha = 0.75f))
-            if (r.changes.isNotEmpty()) Surface(shape = MaterialTheme.shapes.medium, color = cs.surface.copy(alpha = 0.6f)) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Since yesterday", style = MaterialTheme.typography.labelLarge, color = on)
-                    r.changes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = on) }
-                }
-            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-                OutlinedButton(onClick = onWhy) { Text("Why this suggestion?") }
+                OutlinedButton(onClick = onWhy) { Text(if (r.changes.isNotEmpty()) "Why · what changed" else "Why this suggestion?") }
             }
         }
     }
@@ -382,32 +313,6 @@ private fun StandsOut(items: List<com.bennybar.runnersidekick.data.remote.Highli
     }
 }
 
-private val QUICK = listOf(4 to "Fresh", 3 to "Okay", 2 to "Tired")
-
-/** Shown only when the backend says an answer matters today; one tap answers "how recovered do you feel?". */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun CheckinPromptCard(reason: String?, onQuick: (Int) -> Unit, onMore: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(Icons.Outlined.TaskAlt, MaterialShapes.Sunny, Modifier.size(36.dp), container = cs.tertiaryContainer, content = cs.onTertiaryContainer)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("How recovered do you feel?", style = MaterialTheme.typography.titleMedium)
-                    reason?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                QUICK.forEach { (v, l) -> FilledTonalButton(onClick = { onQuick(v) }) { Text(l) } }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onMore) { Text("More") }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CoachTeaser(summary: String, note: String, onOpen: () -> Unit) {
@@ -416,47 +321,8 @@ private fun CoachTeaser(summary: String, note: String, onOpen: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun NarrativeCard(n: Narrative, r: MorningReport, onFinding: (String) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    when (n.status) {
-        "ok" -> Surface(shape = MaterialTheme.shapes.large, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ShapeBadge(Icons.Outlined.AutoAwesome, MaterialShapes.Flower, Modifier.size(36.dp), container = cs.secondary, content = cs.onSecondary)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("Summary", style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer)
-                        Text("Written by AI (${n.model ?: n.provider}) from the findings below. Numbers come from the report.",
-                            style = MaterialTheme.typography.labelSmall, color = cs.onSecondaryContainer.copy(alpha = 0.75f))
-                    }
-                }
-                Text(n.sentences.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge, color = cs.onSecondaryContainer)
-                n.focus?.let { Text("Focus: ${it.text}", style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer) }
-                val refs = (n.sentences.flatMap { it.findingIds } + n.focus?.findingIds.orEmpty()).distinct()
-                    .mapNotNull { id -> r.findings.firstOrNull { it.id == id } }
-                if (refs.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    refs.forEach { f -> AssistChip(onClick = { onFinding(f.id) }, label = { Text(f.title) }) }
-                }
-            }
-        }
-        "pending" -> Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            LoadingIndicator(Modifier.size(32.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Writing an AI summary…", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-        }
-        "rejected", "failed", "budget_exceeded", "not_configured" -> Text(
-            "AI summary unavailable for this report" +
-                (if (n.status == "not_configured") " (no API key on the backend)." else ". The standard briefing is complete."),
-            style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        else -> Unit // disabled: nothing shown
-    }
-}
-
 private fun tileValue(f: Finding): Pair<String, String?> {
-    val v = f.observed?.value ?: return "—" to null
+    val v = f.observed?.value ?: f.last?.value ?: return "—" to null
     return when (f.metric) {
         "sleep_duration", "running_moving_time_7d" -> { val m = (v / 60).roundToInt(); "${m / 60}h ${"%02d".format(m % 60)}m" to null }
         "resting_hr" -> "${v.roundToInt()}" to "bpm"
@@ -467,7 +333,7 @@ private fun tileValue(f: Finding): Pair<String, String?> {
 private fun tileStatus(f: Finding): String = when {
     f.metric == "running_moving_time_7d" -> if (f.status == "outside") "Well above recent weeks" else "Similar to recent weeks"
     f.status == "learning" -> "Learning · ${f.sampleSize ?: 0}/14 days"
-    f.status == "missing" -> "Not recorded"
+    f.status == "missing" -> f.last?.let { "From ${Format.shortDate(it.date)} · today's not in yet" } ?: "Not recorded"
     f.status == "sustained" -> "Unusual 3 days running"
     f.status == "outside" -> if ((f.delta?.abs ?: 0.0) > 0) "Above your usual" else "Below your usual"
     f.comparison?.median != null -> "Usual · ${Format.signedDelta(f.metric, f.delta?.abs)}"
@@ -537,12 +403,6 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
     }
 }
 
-private fun checkinSummary(c: CheckinEntity) =
-    "Energy ${c.energy ?: "–"} · Soreness ${c.soreness ?: "–"} · Recovery ${c.recovery ?: "–"}" +
-        (if (c.pain) " · Pain" else "") + (if (c.illness) " · Unwell" else "") + (if (c.pendingSync) " · not uploaded yet" else "")
-
-// ---------------------------------------------------------------- sheets
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SheetColumn(onDismiss: () -> Unit, content: @Composable () -> Unit) {
@@ -552,62 +412,12 @@ private fun SheetColumn(onDismiss: () -> Unit, content: @Composable () -> Unit) 
     }
 }
 
-private val SCALE = listOf(1, 2, 3, 4, 5)
-
 @Composable
-private fun ScaleRow(label: String, low: String, high: String, value: Int?, onChange: (Int) -> Unit) {
-    Column {
-        Text(label, style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.height(6.dp))
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SCALE.forEachIndexed { i, v ->
-                SegmentedButton(selected = value == v, onClick = { onChange(v) }, shape = SegmentedButtonDefaults.itemShape(i, SCALE.size),
-                    icon = {}, modifier = Modifier.semantics { contentDescription = "$label $v of 5" }) { Text("$v") }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-            Text(low, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.weight(1f))
-            Text(high, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun CheckinSheet(
-    date: String, existing: CheckinEntity?, onDismiss: () -> Unit,
-    onSave: (Int?, Int?, Int?, Boolean, Boolean, String?) -> Unit,
-) {
-    var energy by rememberSaveable { mutableStateOf(existing?.energy) }
-    var soreness by rememberSaveable { mutableStateOf(existing?.soreness) }
-    var recovery by rememberSaveable { mutableStateOf(existing?.recovery) }
-    var pain by rememberSaveable { mutableStateOf(existing?.pain ?: false) }
-    var illness by rememberSaveable { mutableStateOf(existing?.illness ?: false) }
-    var notes by rememberSaveable { mutableStateOf(existing?.notes ?: "") }
-    SheetColumn(onDismiss) {
-        Text("How do you feel?", style = MaterialTheme.typography.headlineSmall)
-        Text(Format.longDate(date), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        ScaleRow("Energy", "Drained", "Great", energy) { energy = it }
-        ScaleRow("Soreness", "None", "Very sore", soreness) { soreness = it }
-        ScaleRow("Recovery", "Not recovered", "Fully", recovery) { recovery = it }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = pain, onClick = { pain = !pain }, label = { Text("Pain or injury") })
-            FilterChip(selected = illness, onClick = { illness = !illness }, label = { Text("Feeling unwell") })
-        }
-        OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional, never sent to AI)") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
-        Button(
-            onClick = { onSave(energy, soreness, recovery, pain, illness, notes) },
-            enabled = energy != null || soreness != null || recovery != null || pain || illness,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-        ) { Text("Save check-in") }
-    }
-}
-
-@Composable
-private fun WhySheet(r: MorningReport, onDismiss: () -> Unit, onFinding: (Finding) -> Unit) {
+private fun WhySheet(r: MorningReport, onDismiss: () -> Unit, onBriefing: () -> Unit, onFinding: (Finding) -> Unit) {
     val rec = r.recommendation
     SheetColumn(onDismiss) {
         Text("Why this suggestion", style = MaterialTheme.typography.headlineSmall)
+        if (r.changes.isNotEmpty()) Group(title = "Since yesterday") { r.changes.forEach { c -> row(c) } }
         Text(rec.reason, style = MaterialTheme.typography.bodyLarge)
         rec.uncertainty?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val evidence = rec.evidenceIds.mapNotNull { id -> r.findings.firstOrNull { it.id == id } }
@@ -619,6 +429,7 @@ private fun WhySheet(r: MorningReport, onDismiss: () -> Unit, onFinding: (Findin
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Rule ${rec.ruleId} · ${rec.rulesVersion}. Guidance only, not medical advice.", style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onBriefing) { Text("Full briefing: all findings and Garmin scores") }
     }
 }
 
@@ -658,7 +469,7 @@ private val SESSION_NAMES = mapOf("easy" to "Easy run", "long" to "Long run", "t
 /** The week toward the race: each day's session, ticked off as runs come in. Recomputed daily from what was run. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
+fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
                          onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Group(title = "This week toward ${race.headline.substringBefore(" in ").substringBefore(" today")} · ${race.phase.replace('_', ' ')}") {
@@ -694,5 +505,63 @@ private fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatu
                 onClick = s.sourceId?.let { id -> { onOpenRun(id) } })
         }
         custom { w.basis?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) } }
+    }
+}
+
+
+/** Health and fitness out of 100, judged against your age and sex where a reference exists. Tap for the breakdown. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ScoreRing("Health", s.health, cs.tertiary, Modifier.weight(1f))
+                ScoreRing("Fitness", s.fitness, cs.primary, Modifier.weight(1f))
+            }
+            Text("For your age (${s.age}) · tap for what's behind each score", style = MaterialTheme.typography.labelMedium,
+                color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ScoreRing(title: String, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val v = sc?.score
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.layout.Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawArc(cs.surfaceContainerHighest, -90f, 360f, false, style = stroke)
+                if (v != null) drawArc(color, -90f, 360f * v / 100f, false, style = stroke)
+            }
+            Text(v?.toString() ?: "–", style = MaterialTheme.typography.headlineMedium)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
+        }
+    }
+}
+
+@Composable
+private fun ScoresSheet(s: com.bennybar.runnersidekick.data.remote.Scores, onDismiss: () -> Unit) {
+    SheetColumn(onDismiss) {
+        Text("Health and fitness scores", style = MaterialTheme.typography.headlineSmall)
+        listOf("Health" to s.health, "Fitness" to s.fitness).forEach { (t, sc) ->
+            if (sc == null) return@forEach
+            Group(title = "$t ${sc.score?.let { "$it / 100 · ${sc.label}" } ?: "· not enough data"}" +
+                (if (sc.used != null && sc.of != null && sc.used < sc.of) " · based on ${sc.used} of ${sc.of}" else "")) {
+                sc.components.forEach { c ->
+                    row(c.title + (c.value?.let { ": $it" } ?: ""), supporting = c.note,
+                        trailing = { Text(c.points?.let { "$it pts · ${c.weightPct}%" } ?: "—", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant) })
+                }
+            }
+        }
+        s.basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

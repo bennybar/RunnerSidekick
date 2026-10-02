@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from .connectors.base import AuthRequired, Capability, Connector, ConnectionState, RateLimited, SourceUnavailable
 from pymongo.database import Database
 
-from .db import next_id, one, set_setting, utc_now
+from .db import get_setting, next_id, one, set_setting, utc_now
 from .store import activity_hash, purge_raw, save_activity, save_day
 
 REFETCH_EVERY_H = 6  # recent activities (within refetch_days) are re-read at most this often, for late samples/laps
@@ -103,8 +103,12 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
         if hasattr(connector, "fitness_snapshot"):
             snap = connector.fitness_snapshot(today)
             if snap:
-                snap["fetched_at"] = utc_now()
-                set_setting(conn, "garmin_fitness", snap)
+                # Garmin sometimes leaves a part out (e.g. no VO2 max early in the day, or one call failing): keep the last
+                # known value of anything not returned this time instead of wiping it
+                prev = get_setting(conn, "garmin_fitness", None) or {}
+                merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
+                merged["fetched_at"] = utc_now()
+                set_setting(conn, "garmin_fitness", merged)
         if hasattr(connector, "hr_zones"):
             zones = connector.hr_zones()
             if zones:

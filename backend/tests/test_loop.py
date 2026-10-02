@@ -122,12 +122,10 @@ def test_load_signal_without_baselines_is_cautious_not_typical():
     assert "optional" in rp.suggestion_text(r, {"kind": "intervals", "minutes": 45}, 132)
 
 
-def test_checkin_is_asked_only_when_it_matters(tmp_path):
+def test_the_app_never_asks_for_a_checkin(tmp_path):
     conn = synced(tmp_path)
-    calm = rp.build_morning(conn, "fixture", ANCHOR, True)            # typical day in the fixture
-    episode = rp.build_morning(conn, "fixture", date(2026, 9, 21), True)  # synthetic recovery dip
-    assert calm["checkin_prompt"]["ask"] is False
-    assert episode["recommendation"]["state"] == "consider_easier" or episode["checkin_prompt"]["ask"]
+    for d in (ANCHOR, date(2026, 9, 21)):  # a typical day and the synthetic recovery dip
+        assert rp.build_morning(conn, "fixture", d, True)["checkin_prompt"]["ask"] is False
 
 
 def test_focus_is_picked_automatically_and_can_be_changed(tmp_path):

@@ -1,7 +1,8 @@
 package com.bennybar.runnersidekick
 
-import android.os.Bundle
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
+import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -28,7 +29,6 @@ import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,34 +78,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Material 3 motion: emphasized easing; fade-through between tabs, a horizontal shared axis into and out of details.
-// Navigation drives the pop transitions with the predictive back gesture, so the screen follows the finger.
-private val Emphasized = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
-private val EmphasizedDecelerate = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-private val EmphasizedAccelerate = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
-private val TAB_ROUTES = setOf("today", "insights", "activities", "journal", "settings")
-
-private fun isTab(route: String?) = route in TAB_ROUTES
-
-private fun <T> spec(ms: Int, easing: androidx.compose.animation.core.Easing = Emphasized, delay: Int = 0) =
-    androidx.compose.animation.core.tween<T>(ms, delay, easing)
-
-private val fadeThroughIn = androidx.compose.animation.fadeIn(spec(210, EmphasizedDecelerate, 90)) +
-    androidx.compose.animation.scaleIn(spec(210, EmphasizedDecelerate, 90), initialScale = 0.96f)
-private val fadeThroughOut = androidx.compose.animation.fadeOut(spec(90, EmphasizedAccelerate))
-
-// iOS-style horizontal navigation, as in FairEmail: no scaling, no fades on the moving pages.
-// Forward: the new page slides in from 48 dp to the right while the old one shifts 48 dp left and fades quickly.
-// Back (button or swipe): the page slides off to the right, dragged by the finger; the page below slides in from 48 dp left.
-private const val SHIFT_DP = 48
-private fun shift(density: Float) = (SHIFT_DP * density).toInt()
-private val slide = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-
-private fun pushIn(d: Float) = androidx.compose.animation.slideInHorizontally(slide) { shift(d) }
-private fun pushOut(d: Float) = androidx.compose.animation.slideOutHorizontally(slide) { -shift(d) } +
-    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(90, easing = androidx.compose.animation.core.FastOutLinearInEasing))
-private fun popIn(d: Float) = androidx.compose.animation.slideInHorizontally(slide) { -shift(d) }
-private val popOut = androidx.compose.animation.slideOutHorizontally(slide) { it }
+// As in kitzi: every screen change (tabs, details, back button or back swipe) is one quick crossfade.
+private val quickIn = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(120))
+private val quickOut = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120))
 
 /** A page that can be left with back: opaque, so the page below only shows where this one has slid away. */
 @Composable
@@ -138,7 +113,6 @@ private fun App(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
 @Composable
 private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
     val nav = rememberNavController()
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
     val pendingRun by openRun.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(pendingRun) {
         pendingRun?.let { nav.navigate(it); openRun.value = null }
@@ -168,12 +142,12 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
         },
     ) { padding ->
         NavHost(nav, startDestination = "today",
-            enterTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughIn else pushIn(density) },
-            exitTransition = { if (isTab(initialState.destination.route) && isTab(targetState.destination.route)) fadeThroughOut else pushOut(density) },
-            popEnterTransition = { popIn(density) },
-            popExitTransition = { popOut },
-            predictivePopEnterTransition = { _ -> popIn(density) },
-            predictivePopExitTransition = { _ -> popOut },
+            enterTransition = { quickIn },
+            exitTransition = { quickOut },
+            popEnterTransition = { quickIn },
+            popExitTransition = { quickOut },
+            predictivePopEnterTransition = { _ -> quickIn },
+            predictivePopExitTransition = { _ -> quickOut },
             modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })

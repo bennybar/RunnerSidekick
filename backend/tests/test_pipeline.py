@@ -141,7 +141,7 @@ def test_every_top_finding_has_evidence(conn):
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
     r = rp.build_morning(conn, "fixture", date(2026, 9, 21), True)  # inside the synthetic recovery episode
     assert r["recommendation"]["state"] in ("consider_easier", "usual_plan")
-    assert r["recommendation"]["state"] == "consider_easier" or r["checkin_prompt"]["ask"]  # app asks when unsure
+    assert r["checkin_prompt"]["ask"] is False  # Garmin's data drives the advice; the app doesn't ask
     assert r["recommendation"]["evidence_ids"]
     ids = {f["id"] for f in r["findings"]}
     assert set(r["recommendation"]["evidence_ids"]) - {"checkin"} <= ids
@@ -223,3 +223,19 @@ def test_defaults_need_no_environment(monkeypatch):
     monkeypatch.delenv("RSK_DATA_DIR", raising=False)
     cfg = config.load_config()
     assert cfg.source == "garmin" and cfg.data_dir == config.REPO_DIR / "data"
+
+
+class PartialFitness(FixtureConnector):
+    """Garmin answering without VO2 max (as it sometimes does early in the day)."""
+    def fitness_snapshot(self, day):
+        snap = super().fitness_snapshot(day)
+        snap.pop("vo2max")
+        return snap
+
+
+def test_a_sync_missing_vo2max_keeps_the_last_known_value(conn):
+    run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 10, 3)
+    first = conn.user_settings.find_one({"key": "garmin_fitness"})["value"]["vo2max"]
+    run_sync(conn, PartialFitness(ANCHOR), ANCHOR, 10, 3, force=True)
+    g = conn.user_settings.find_one({"key": "garmin_fitness"})["value"]
+    assert g["vo2max"] == first and "race_predictions" in g

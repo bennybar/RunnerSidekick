@@ -113,6 +113,8 @@ fun InsightsScreen(
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
     val compare by vm.compare.collectAsStateWithLifecycle()
     val firstDay by vm.weekStart.collectAsStateWithLifecycle()
+    val todayReport by vm.today.collectAsStateWithLifecycle()
+    val focus by vm.focus.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
     LaunchedEffect(tab) { if (tab == 1) vm.loadCompare() }
     val requestedTab by InsightsTab.requested.collectAsStateWithLifecycle()
@@ -145,6 +147,11 @@ fun InsightsScreen(
                     return@LazyColumn
                 }
                 coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
+                // Your week: the race week (with a race goal) and the weekly focus, moved here from Today
+                todayReport?.value?.race?.let { r -> r.week?.let { w -> animatedItem(key = "raceweek") {
+                    com.bennybar.runnersidekick.ui.today.RaceWeekCard(r, w, onOpenRun) } } }
+                focus?.value?.let { f -> animatedItem(key = "focus") {
+                    com.bennybar.runnersidekick.ui.today.FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 fitness?.value?.let { f ->
                     animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun, firstDay = firstDay) }
                 }
