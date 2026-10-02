@@ -331,3 +331,39 @@ One verdict and one meaning per Today reading, worded deterministically from the
 Per-week distance, time and climb, run count, average pace, average HR, longest run and the share of time in zones
 4–5. Each covers the 28 days to today against the 28 days before, as a % change. Which direction is good is marked
 per item: lower pace, HR and hard share are good. Calculated, never written by AI.
+
+## Training readiness — `readiness.py` (`readiness-1.0`)
+
+Calculated with the same rescaling as the scores (at least two parts). The weakest part caps the total at 50 points
+above it. Labels: 75+ high, 50+ moderate, otherwise low. Garmin's training readiness is not used.
+
+| Part (weight) | Points |
+|---|---|
+| HRV vs usual (25) | 100 down to 5% below usual, then −4 per % |
+| Resting HR vs usual (20) | 100 up to +1 bpm, then −12 per bpm |
+| Sleep last night (25) | 100 from 7 h, −30 per hour short |
+| Running, last 7 days (15) | 100 up to 120% of the prior 4-week weekly mean, 0 at 180% |
+| Last run (15) | hard (≥30% in zones 4–5): 40 today, 60 yesterday, 85 two days ago; easy: 75, 90, 100 |
+
+"Usual" is the personal range median. While that is still being learned, it is the median of at least 4 earlier days
+in the last two weeks, marked provisional. When today's value isn't in yet, yesterday's is used and labelled.
+
+## Next run
+
+Next run day: today if it is a running day and you haven't run yet, otherwise the next running day.
+
+The kind is chosen by the first rule that applies:
+1. Rest, if readiness today is below 40.
+2. Easy today, when the day's call holds intensity back or readiness is below 60.
+3. Long or easy, when that's the race week plan's session for the day.
+4. Easy, after a hard run in the last 2 days.
+5. Easy, when more than 30% of the last 4 weeks was in zones 4–5.
+6. Long, on the last running day of the week.
+7. Otherwise steady (zone 3).
+
+Distance comes from the runs of the last 4 weeks:
+- easy: 90% of the typical (median) run, or 70% when readiness is below 60;
+- steady: the typical run;
+- long: at least the longest run, up to 10% more.
+
+The heart-rate cap is the top of zone 2, or zone 3 for steady runs. Pace and time come from the measured easy pace.

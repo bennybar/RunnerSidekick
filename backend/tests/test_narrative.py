@@ -133,10 +133,13 @@ def test_api_attaches_narrative_without_blocking(tmp_path):
         time.sleep(0.1)
     assert client.get("/v1/today", headers=h).json()["narrative"]["status"] == "disabled"
     client.put("/v1/settings", json={"ai_enabled": True}, headers=h)
-    first = client.get("/v1/today", headers=h).json()["narrative"]["status"]
+    # Today shows the coach's TL;DR, so no morning narrative is generated (or paid for)
+    assert client.get("/v1/today", headers=h).json()["narrative"] is None
+    sid = client.get("/v1/activities", headers=h).json()[0]["source_id"]
+    first = client.get(f"/v1/activities/{sid}", headers=h).json()["report"]["narrative"]["status"]
     assert first in ("pending", "ok")
     for _ in range(50):
-        n = client.get("/v1/today", headers=h).json()["narrative"]
+        n = client.get(f"/v1/activities/{sid}", headers=h).json()["report"]["narrative"]
         if n["status"] != "pending":
             break
         time.sleep(0.05)

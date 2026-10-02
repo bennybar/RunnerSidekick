@@ -146,6 +146,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   TL;DR and the point titles, with the full analysis one tap away. Pattern cards are compact and keep their text
   under "Details". Patterns where nothing notable turned up are a short list.
 
+## Training readiness, next run, leaner AI (2026-10-02, v0.17.0)
+- Readings start with our own training readiness (0–100, calculated) and, below it, the next run in numbers: kind,
+  distance, a heart-rate cap from Garmin's zones, easy pace and time when known, plus the reason in one line.
+- AI efficiency: the morning narrative is no longer generated (Today shows the coach's TL;DR, so it was paid for and
+  never read; it was about half of all calls). All calls use low reasoning effort (a real coach call went from 31 s
+  to 18 s with fewer output tokens, same validated output). Each call's token use is now logged in `ai_call.usage`.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

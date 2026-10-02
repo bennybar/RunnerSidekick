@@ -221,6 +221,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if not ai.enabled:
             body["narrative"] = {"status": "disabled"}
             return body
+        if body["type"] == "morning":
+            # Today shows the coach's TL;DR instead; a morning narrative would be paid for and never read
+            body["narrative"] = None
+            return body
         hit = nv.cached(conn, body, ai.model)
         if hit:
             body["narrative"] = nv.view(hit)
@@ -279,6 +283,9 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body["changes"] = changes.since_yesterday(conn, body, d)
             from . import scores
             body["scores"] = scores.build(conn, cfg.source, d)
+            from . import readiness
+            body["readiness"] = readiness.build(conn, cfg.source, d, body)
+            body["next_run"] = readiness.next_run(conn, cfg.source, d, body, body["readiness"], body["race"])
             from . import readings
             cmp = compare.build(conn, cfg.source, d)
             body["highlights"] = highlights.build(conn, cfg.source, d, cmp, fc.current(conn, cfg.source, d), body["race"])

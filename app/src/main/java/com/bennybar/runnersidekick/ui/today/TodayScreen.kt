@@ -161,7 +161,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
-                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }) { evidence = it } }
+                animatedItem(key = "readings") {
+                    Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }, top = {
+                        report.readiness?.let { ReadinessCard(it) { sheet = "readiness" } }
+                        report.nextRun?.let { NextRunCard(it, units) }
+                    }) { evidence = it }
+                }
                 report.recentRun?.let { run ->
                     animatedItem(key = "lastrun") {
                         Group(title = "Latest run") {
@@ -179,6 +184,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     }
     when (sheet) {
         "scores" -> report?.scores?.let { ScoresSheet(it, onDismiss = { sheet = null }) }
+        "readiness" -> report?.readiness?.let { ReadinessSheet(it, onDismiss = { sheet = null }) }
         "vo2" -> report?.let { r ->
             SheetColumn(onDismiss = { sheet = null }) {
                 Text("VO₂ max", style = MaterialTheme.typography.headlineSmall)
@@ -357,13 +363,14 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
 
 @Composable
 private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
-                     onTap: (Finding) -> Unit) {
+                     top: @Composable () -> Unit = {}, onTap: (Finding) -> Unit) {
     val vo2 = fitness?.garmin?.vo2max
     // null marks the VO2 max tile's slot, right after the overnight readings
     val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Readings", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        top()
         tiles.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { f ->
@@ -572,5 +579,60 @@ private fun ScoresSheet(s: com.bennybar.runnersidekick.data.remote.Scores, onDis
             }
         }
         s.basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** Our own training readiness out of 100, with the part that holds it back most. Tap for the breakdown. */
+@Composable
+private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val v = s.score ?: 0
+    val lowest = s.components.filter { it.points != null }.minByOrNull { it.points!! }
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ScoreRing("Training readiness", s, if (v >= 75) cs.primary else if (v >= 50) cs.secondary else cs.tertiary, Modifier.fillMaxWidth())
+            Text((lowest?.takeIf { (it.points ?: 100) < 100 }?.let { "Lowest: ${it.title.lowercase()}" + (it.value?.let { x -> " ($x)" } ?: "") + " · " } ?: "") +
+                "tap for the breakdown", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, onDismiss: () -> Unit) {
+    SheetColumn(onDismiss) {
+        Text("Training readiness", style = MaterialTheme.typography.headlineSmall)
+        Group(title = s.score?.let { "$it / 100 · ${s.label}" } ?: "Not enough data yet") {
+            s.components.forEach { c ->
+                row(c.title + (c.value?.let { ": $it" } ?: ""), supporting = c.note,
+                    trailing = { Text(c.points?.let { "$it pts · ${c.weightPct}%" } ?: "—", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant) })
+            }
+        }
+        s.basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** The next run in numbers: kind, distance, heart-rate cap, pace and time, with the reason in one line. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, units: Units) {
+    val cs = MaterialTheme.colorScheme
+    val dist = n.distanceKm?.let { if (units == Units.IMPERIAL) "%.1f mi".format(it / 1.609344) else "%.1f km".format(it) }
+    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Next run · ${n.dayLabel}", style = MaterialTheme.typography.labelLarge, color = cs.onSecondaryContainer)
+            Text(n.title, style = MaterialTheme.typography.titleLarge, color = cs.onSecondaryContainer)
+            val chips = listOfNotNull(dist, n.hr?.text, n.pace, n.minutes?.let { "about $it min" })
+            if (chips.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                chips.forEach { c ->
+                    Surface(shape = MaterialTheme.shapes.large, color = cs.surface.copy(alpha = 0.7f)) {
+                        Text(c, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    }
+                }
+            }
+            if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                color = cs.onSecondaryContainer.copy(alpha = 0.8f))
+        }
     }
 }

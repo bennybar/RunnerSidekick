@@ -9,7 +9,7 @@ from . import reports as rp
 from .analytics import running as rn
 
 
-def _block(conn, source: str, start: date, end: date, zones: dict | None) -> dict:
+def block(conn, source: str, start: date, end: date, zones: dict | None) -> dict:
     acts = rp.activities(conn, source, start.isoformat(), end.isoformat())
     dist = sum(a["distance_m"] or 0 for a in acts)
     moving = sum(a["moving_s"] or 0 for a in acts)
@@ -29,8 +29,8 @@ def _block(conn, source: str, start: date, end: date, zones: dict | None) -> dic
 
 def four_weeks(conn, source: str, today: date) -> dict:
     zones = rp.hr_zones(conn)
-    cur = _block(conn, source, today - timedelta(days=27), today, zones)
-    prev = _block(conn, source, today - timedelta(days=55), today - timedelta(days=28), zones)
+    cur = block(conn, source, today - timedelta(days=27), today, zones)
+    prev = block(conn, source, today - timedelta(days=55), today - timedelta(days=28), zones)
 
     def item(key, label, fmt, higher_is="neutral"):
         v, p = cur[key], prev[key]

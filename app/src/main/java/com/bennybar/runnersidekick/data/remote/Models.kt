@@ -194,6 +194,8 @@ data class MorningReport(
     val changes: List<String> = emptyList(),
     val race: RaceStatus? = null,
     val scores: Scores? = null,
+    val readiness: Score? = null,
+    @SerialName("next_run") val nextRun: NextRun? = null,
     @SerialName("reading_notes") val readingNotes: Map<String, ReadingNote> = emptyMap(),
 )
 
@@ -214,7 +216,17 @@ data class ScoreComponent(val id: String, val title: String, val value: String? 
 
 @Serializable
 data class Score(val status: String, val score: Int? = null, val label: String? = null, val used: Int? = null, val of: Int? = null,
-                 val components: List<ScoreComponent> = emptyList(), val detail: String? = null)
+                 val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
+                 @SerialName("capped_by") val cappedBy: String? = null)
+
+/** The next run, calculated from readiness, recent runs and Garmin's zones. */
+@Serializable
+data class NextRunHr(val min: Int? = null, val max: Int? = null, val text: String)
+
+@Serializable
+data class NextRun(val date: String, @SerialName("day_label") val dayLabel: String, val kind: String, val title: String,
+                   @SerialName("distance_km") val distanceKm: Double? = null, val minutes: Int? = null, val hr: NextRunHr? = null,
+                   val pace: String? = null, val why: List<String> = emptyList(), val basis: String? = null)
 
 @Serializable
 data class Scores(val status: String, val age: Int? = null, val fitness: Score? = null, val health: Score? = null, val basis: String? = null,

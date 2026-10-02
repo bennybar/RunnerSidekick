@@ -194,7 +194,7 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
             status, detail = "failed", type(e).__name__
-        finish_call(conn, call, status)
+        finish_call(conn, call, status, provider)
     log.info("run ai %s %s: %s", sid, status, detail or "")
     conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": h, "model": model, "prompt_version": PROMPT_VERSION,
                             "status": status, "detail": detail, "output": plain(out) if out else None, "key_source": key_source,

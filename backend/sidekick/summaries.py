@@ -173,7 +173,7 @@ def generate(conn, kind: str, b: ch.Bundle, day: date, model: str, api_key: str,
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
             status, detail = "failed", type(e).__name__
-        finish_call(conn, call, status)
+        finish_call(conn, call, status, provider)
     log.info("summary %s %s: %s", kind, status, detail or "")
     conn.section_summary.insert_one({"id": next_id(conn, "section_summary"), "kind": kind, "local_date": day.isoformat(),
                                      "input_hash": h, "model": model, "prompt_version": PROMPT_VERSION, "status": status,

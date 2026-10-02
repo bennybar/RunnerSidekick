@@ -353,7 +353,7 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
             status, detail = "failed", type(e).__name__
-        finish_call(conn, call, status)
+        finish_call(conn, call, status, provider)
     log.info("coach %s: %s", status, detail or "")
     # Where each evidence id leads in the app (run ids map back to activities internally, never sent to the model)
     acts = list(reversed(rp.activities(conn, source, (today - timedelta(days=42)).isoformat(), today.isoformat())))[:10]
