@@ -1,5 +1,6 @@
 package com.bennybar.runnersidekick.ui.components
 
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -38,6 +41,12 @@ fun Sparkline(
     description: String,
 ) {
     val bandColor = LocalDataColors.current.band
+    val ring = MaterialTheme.colorScheme.surface
+    // Draws itself left to right once, when it first appears
+    var shown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
+    val reveal by androidx.compose.animation.core.animateFloatAsState(if (shown) 1f else 0f,
+        androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "spark")
     Canvas(modifier.semantics { contentDescription = description }) {
         val present = values.filterNotNull()
         if (present.size < 2) return@Canvas
@@ -45,19 +54,44 @@ fun Sparkline(
         var hi = present.max()
         band?.let { lo = minOf(lo, it.first); hi = maxOf(hi, it.second) }
         if (hi == lo) { hi += 1; lo -= 1 }
-        fun y(v: Double) = (size.height * (1 - (v - lo) / (hi - lo))).toFloat()
-        val step = size.width / (values.size - 1).coerceAtLeast(1)
-        band?.let { drawRect(bandColor, Offset(0f, y(it.second)), androidx.compose.ui.geometry.Size(size.width, y(it.first) - y(it.second))) }
-        val path = Path()
-        var pen = false
-        values.forEachIndexed { i, v ->
-            if (v == null) { pen = false; return@forEachIndexed }
-            val p = Offset(i * step, y(v))
-            if (pen) path.lineTo(p.x, p.y) else path.moveTo(p.x, p.y)
-            pen = true
+        val pad = 5.dp.toPx()  // room for the end dot's halo
+        val h = size.height - 2 * pad
+        fun y(v: Double) = (pad + h * (1 - (v - lo) / (hi - lo))).toFloat()
+        val step = (size.width - pad) / (values.size - 1).coerceAtLeast(1)
+        band?.let {
+            drawRoundRect(bandColor, Offset(0f, y(it.second)), androidx.compose.ui.geometry.Size(size.width, y(it.first) - y(it.second)),
+                androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
         }
-        drawPath(path, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        values.lastOrNull()?.let { drawCircle(color, 3.5.dp.toPx(), Offset((values.size - 1) * step, y(it))) }
+        // Each unbroken run of values: a smooth curve (midpoint quadratic segments) with a soft fill underneath
+        val runs = mutableListOf<MutableList<Offset>>()
+        values.forEachIndexed { i, v ->
+            if (v == null) { runs.add(mutableListOf()); return@forEachIndexed }
+            if (runs.isEmpty()) runs.add(mutableListOf())
+            runs.last().add(Offset(i * step, y(v)))
+        }
+        clipRect(right = size.width * reveal) {
+            runs.filter { it.size >= 2 }.forEach { pts ->
+                val line = Path().apply {
+                    moveTo(pts[0].x, pts[0].y)
+                    for (k in 1 until pts.size) {
+                        val m = Offset((pts[k - 1].x + pts[k].x) / 2, (pts[k - 1].y + pts[k].y) / 2)
+                        quadraticTo(pts[k - 1].x, pts[k - 1].y, m.x, m.y)
+                    }
+                    lineTo(pts.last().x, pts.last().y)
+                }
+                val area = Path().apply { addPath(line); lineTo(pts.last().x, size.height); lineTo(pts[0].x, size.height); close() }
+                drawPath(area, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(color.copy(alpha = 0.36f), color.copy(alpha = 0f))))
+                drawPath(line, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+        }
+        // Today's value: a dot with a soft halo, once the line has reached it
+        values.lastOrNull()?.let {
+            val c = Offset((values.size - 1) * step, y(it))
+            val a = ((reveal - 0.85f) / 0.15f).coerceIn(0f, 1f)
+            drawCircle(color.copy(alpha = 0.22f * a), 7.dp.toPx(), c)
+            drawCircle(ring.copy(alpha = a), 4.5.dp.toPx(), c)
+            drawCircle(color.copy(alpha = a), 3.dp.toPx(), c)
+        }
     }
 }
 

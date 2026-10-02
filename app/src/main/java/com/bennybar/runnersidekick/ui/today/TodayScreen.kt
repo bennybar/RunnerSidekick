@@ -2,6 +2,7 @@ package com.bennybar.runnersidekick.ui.today
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -472,21 +473,16 @@ private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnerside
     val cs = MaterialTheme.colorScheme
     val v = sc?.score
     Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier.fillMaxHeight()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // A soft wash of the score's colour from the top, fading into the card
+        Column(Modifier.fillMaxHeight().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(color.copy(alpha = 0.16f), cs.surfaceContainerHigh))).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 // What the number covers, so Health isn't read as a medical verdict
                 Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
                     minLines = 2, maxLines = 2)
             }
-            androidx.compose.foundation.layout.Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
-                androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
-                    val stroke = androidx.compose.ui.graphics.drawscope.Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    drawArc(cs.surfaceContainerHighest, -90f, 360f, false, style = stroke)
-                    if (v != null) drawArc(color, -90f, 360f * v / 100f, false, style = stroke)
-                }
-                Text(v?.toString() ?: "–", style = MaterialTheme.typography.headlineMedium)
-            }
+            com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(96.dp), description = "$title score ${v ?: "not available"} out of 100")
             Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
             val t = sc?.trend
             // Completeness is shown on its own, never hidden behind the trend
@@ -513,14 +509,7 @@ private fun ScoreRing(title: String, sc: com.bennybar.runnersidekick.data.remote
     val cs = MaterialTheme.colorScheme
     val v = sc?.score
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.foundation.layout.Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
-            androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
-                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                drawArc(cs.surfaceContainerHighest, -90f, 360f, false, style = stroke)
-                if (v != null) drawArc(color, -90f, 360f * v / 100f, false, style = stroke)
-            }
-            Text(v?.toString() ?: "–", style = MaterialTheme.typography.headlineMedium)
-        }
+        com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(84.dp), description = "$title score ${v ?: "not available"} out of 100")
         Spacer(Modifier.width(12.dp))
         Column {
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -585,9 +574,11 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
 private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val v = s.score ?: 0
+    val tone = if (v >= 75) cs.primary else if (v >= 50) cs.secondary else cs.tertiary
     Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ScoreRing("Training readiness", s.copy(label = s.headline ?: s.label), if (v >= 75) cs.primary else if (v >= 50) cs.secondary else cs.tertiary,
+        Column(Modifier.background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(tone.copy(alpha = 0.14f), cs.surfaceContainerHigh)))
+            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ScoreRing("Training readiness", s.copy(label = s.headline ?: s.label), tone,
                 Modifier.fillMaxWidth())
             Text((s.heldBackBy?.let { "Held back by: ${it.lowercase()} · " } ?: "") + "tap for details",
                 style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
@@ -611,26 +602,34 @@ private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, cha
 }
 
 /** The next run in numbers: kind, distance, heart-rate cap, pace and time, with the reason in one line. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, units: Units) {
     val cs = MaterialTheme.colorScheme
     val dist = n.distanceKm?.let { if (units == Units.IMPERIAL) "%.1f mi".format(it / 1.609344) else "%.1f km".format(it) }
     Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Next run · ${n.dayLabel}", style = MaterialTheme.typography.labelLarge, color = cs.onSecondaryContainer)
-            Text(n.title, style = MaterialTheme.typography.titleLarge, color = cs.onSecondaryContainer)
+        Column(Modifier.background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(cs.primaryContainer, cs.secondaryContainer, cs.tertiaryContainer.copy(alpha = 0.8f))))
+            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                com.bennybar.runnersidekick.ui.components.ShapeBadge(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided,
+                    Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Next run · ${n.dayLabel}", style = MaterialTheme.typography.labelLarge, color = cs.onPrimaryContainer.copy(alpha = 0.8f))
+                    Text(n.title, style = MaterialTheme.typography.headlineSmall, color = cs.onPrimaryContainer)
+                }
+            }
             val chips = listOfNotNull(dist, n.hr?.text, n.pace, n.minutes?.let { "about $it min" })
             if (chips.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 chips.forEach { c ->
-                    Surface(shape = MaterialTheme.shapes.large, color = cs.surface.copy(alpha = 0.7f)) {
-                        Text(c, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    Surface(shape = MaterialTheme.shapes.large, color = cs.surface.copy(alpha = 0.78f)) {
+                        Text(c, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
                     }
                 }
             }
             if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
-                color = cs.onSecondaryContainer.copy(alpha = 0.8f))
+                color = cs.onPrimaryContainer.copy(alpha = 0.8f))
         }
     }
 }

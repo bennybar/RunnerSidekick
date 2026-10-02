@@ -308,6 +308,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   from three separate signals: VO₂ max over 4 weeks, pace at the same heart rate, and heart-rate drift on steady runs.
   Each signal has its evidence and a confidence level. Shown on the tile and at the top of the Fitness breakdown.
 
+## Home polish (2026-10-02, v0.27.1)
+- Score rings (`ScoreGauge`): fill and count up when they appear, with a gradient sweep and a soft blurred glow.
+- The score, readiness and next-run cards get tonal gradient washes; the next-run card gets a run badge and a larger
+  title.
+- Sparklines are smooth curves with a gradient fill, drawn left to right, with a haloed dot on today's value.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

@@ -1,5 +1,9 @@
 package com.bennybar.runnersidekick.ui.components
 
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +29,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.fillMaxSize
+import kotlin.math.roundToInt
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -173,3 +182,45 @@ fun androidx.compose.foundation.lazy.LazyListScope.animatedItem(key: Any, conten
         Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, 60),
             fadeOutSpec = androidx.compose.animation.core.tween(90))) { content() }
     }
+
+
+/** A score ring that fills from empty and counts up when it first appears, with a gradient sweep and a soft glow. */
+@Composable
+fun ScoreGauge(value: Int?, color: Color, modifier: Modifier = Modifier, stroke: androidx.compose.ui.unit.Dp = 10.dp,
+               description: String) {
+    val track = MaterialTheme.colorScheme.surfaceContainerHighest
+    var shown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
+    val frac by androidx.compose.animation.core.animateFloatAsState(if (shown && value != null) value / 100f else 0f,
+        androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing), label = "gauge")
+    Box(modifier.semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val w = stroke.toPx()
+            val inset = w / 2 + 3.dp.toPx()
+            val arc = androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset)
+            val tl = androidx.compose.ui.geometry.Offset(inset, inset)
+            drawArc(track, -90f, 360f, false, tl, arc, style = androidx.compose.ui.graphics.drawscope.Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+            if (frac > 0f) {
+                rotate(-90f) {
+                    val brush = androidx.compose.ui.graphics.Brush.sweepGradient(
+                        0f to color.copy(alpha = 0.72f), frac.coerceAtLeast(0.01f) to color, 1f to color.copy(alpha = 0.72f))
+                    // A real (blurred) glow under the arc, then the arc itself
+                    drawIntoCanvas { c ->
+                        val glow = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                            style = android.graphics.Paint.Style.STROKE
+                            strokeWidth = w
+                            strokeCap = android.graphics.Paint.Cap.ROUND
+                            this.color = color.copy(alpha = 0.45f).toArgb()
+                            maskFilter = android.graphics.BlurMaskFilter(7.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
+                        }
+                        c.nativeCanvas.drawArc(tl.x, tl.y, tl.x + arc.width, tl.y + arc.height, 0f, 360f * frac, false, glow)
+                    }
+                    drawArc(brush, 0f, 360f * frac, false, tl, arc,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                }
+            }
+        }
+        Text(if (value == null) "–" else "${(frac * 100).roundToInt().coerceAtMost(value)}", style = MaterialTheme.typography.headlineMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+    }
+}
