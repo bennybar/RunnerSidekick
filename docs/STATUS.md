@@ -303,6 +303,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Movement counts completed days only.
 - The Health and Fitness tiles are equal height with two-line subtitles, so the rings line up.
 
+## Fitness progress (2026-10-02, v0.27.0)
+- Fitness keeps its VO₂ max number and adds Progress: improving, stable, declining or not enough evidence. It's built
+  from three separate signals: VO₂ max over 4 weeks, pace at the same heart rate, and heart-rate drift on steady runs.
+  Each signal has its evidence and a confidence level. Shown on the tile and at the top of the Fitness breakdown.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

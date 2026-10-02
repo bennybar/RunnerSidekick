@@ -501,6 +501,9 @@ private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnerside
                 if (sc?.stale == true) "stale" else null,
             ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
                 style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
+                Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = color)
+            }
         }
     }
 }
@@ -545,6 +548,17 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
             }
         }
         TextButton(onClick = { how = !how }) { Text(if (how) "Hide how it's calculated" else "How it's calculated") }
+        sc.progress?.let { p ->
+            // Is it improving? Separate signals from different data, with how much they agree
+            Group(title = "Progress · " + when (p.verdict) { "insufficient" -> "not enough evidence yet"; else -> p.verdict } +
+                    (p.confidence?.let { " · $it confidence" } ?: "")) {
+                p.summary?.let { custom { Text(it, style = MaterialTheme.typography.bodyMedium) } }
+                p.signals.forEach { g -> row(g.title, supporting = g.say + if (how) "\n" + (g.note ?: "") else "", trailing = {
+                    com.bennybar.runnersidekick.ui.components.VerdictChip(when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
+                        label = when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; else -> null })
+                }) }
+            }
+        }
         sc.components.filter { it.context }.takeIf { it.isNotEmpty() }?.let { ctx ->
             Group(title = "Context · not counted") {
                 ctx.forEach { c -> row(c.title, supporting = c.say ?: c.note, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }

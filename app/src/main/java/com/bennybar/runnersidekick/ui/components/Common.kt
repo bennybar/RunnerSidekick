@@ -158,7 +158,7 @@ fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
 
 /** Good / OK / Low (or Info) next to a plain-language check. */
 @Composable
-fun VerdictChip(verdict: String?) {
+fun VerdictChip(verdict: String?, label: String? = null) {
     val cs = MaterialTheme.colorScheme
     val (text, bg, fg) = when (verdict) {
         "good" -> Triple("Good", cs.primaryContainer, cs.onPrimaryContainer)
@@ -168,7 +168,7 @@ fun VerdictChip(verdict: String?) {
         else -> Triple("—", cs.surfaceContainerHighest, cs.onSurfaceVariant)
     }
     Surface(shape = MaterialTheme.shapes.large, color = bg) {
-        Text(text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        Text(label ?: text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
 

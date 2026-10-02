@@ -232,7 +232,16 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
                  val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
                  @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
-                 val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList(), val stale: Boolean = false)
+                 val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList(), val stale: Boolean = false,
+                 val progress: FitnessProgress? = null)
+
+/** Is fitness improving? Three separate signals (aerobic estimate, efficiency, durability), not averaged into the score. */
+@Serializable
+data class FitnessProgress(val verdict: String, val confidence: String? = null, val summary: String? = null,
+                           val signals: List<ProgressSignal> = emptyList(), val basis: String? = null)
+
+@Serializable
+data class ProgressSignal(val id: String, val title: String, val direction: String? = null, val say: String, val note: String? = null)
 
 /** One calculated step that would lift a score, and roughly how many points it would add. */
 @Serializable

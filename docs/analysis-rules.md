@@ -455,3 +455,19 @@ Intensity is held back when any of these is true:
 The race week plan gets that "held" flag. The next run turns it into an easy run, and turns pain or very low readiness
 into rest. hold_back also covers a next run today that is easy or rest. The AI coach and the AI input on runs receive
 hold_back and may not suggest anything harder.
+
+## Fitness progress — `progress.py` (`progress-1.0`)
+
+Is aerobic fitness improving? There are three separate signals from different data, and they're not averaged into the
+Fitness number (they don't share a scale).
+
+| Signal | Data | Direction |
+|---|---|---|
+| Aerobic estimate | Garmin's VO₂ max now vs 4 weeks ago | ±0.5 or more is improving or declining, otherwise stable |
+| Efficiency | pace in your most common 10-bpm band, per watch (the efficiency insight's newest era: 6+ runs, ending within 6 weeks) | 3+ s/km a month faster is improving, slower is declining |
+| Durability | heart-rate drift (pace:HR decoupling) on steady runs, median of the last 6 weeks vs the 6 before (3+ runs each; latest report revision per run) | 1+ point lower is improving, higher is declining |
+
+The verdict needs two signals with a direction, otherwise it's "not enough evidence yet". It's improving or declining
+when more signals point that way, otherwise stable. Confidence is high when 3 agree, medium with 2, low otherwise. The
+summary leads with the verdict and names any signal that disagrees. Terrain, heat and watch changes affect efficiency
+and drift.
