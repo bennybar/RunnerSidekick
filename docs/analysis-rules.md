@@ -316,3 +316,18 @@ remaining weights rescaled, and at least two parts are needed. Labels: 85+ excel
 | Health | HRV vs your usual (20) | within your range scores 100, above 90, below scales down; only once the range exists |
 
 These are deterministic summaries of the readings, not medical scores. No language model is involved in any number.
+
+## Reading notes — `readings.py`
+
+One verdict and one meaning per Today reading, worded deterministically from the numbers:
+- sleep against 7–9 h;
+- resting HR as the share of the age and sex group with a higher value, plus your usual range ("Very good" from the 75th percentile);
+- HRV against your own range only;
+- running time against the 4 weeks before;
+- VO₂ max as the Cooper rating and percentile for the group.
+
+## Last 4 weeks — `stats.py`
+
+Per-week distance, time and climb, run count, average pace, average HR, longest run and the share of time in zones
+4–5. Each covers the 28 days to today against the 28 days before, as a % change. Which direction is good is marked
+per item: lower pace, HR and hard share are good. Calculated, never written by AI.

@@ -26,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,8 +76,16 @@ fun CoachCard(view: CoachView, loading: Boolean, insights: List<Insight>, onOpen
                     if (view.status == "pending" || loading) LoadingIndicator(Modifier.size(28.dp))
                 }
                 shown.tldr?.let { Tldr(it) }
-                shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
-                if (shown.insights.isNotEmpty()) {
+                // Compact by default: the one line plus point titles; the full analysis on request
+                var full by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+                if (!full) {
+                    (shown.insights.map { it.title } + shown.recommendations.map { "Try: ${it.title}" }).forEach { t ->
+                        Text("• $t", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    androidx.compose.material3.TextButton(onClick = { full = true }) { Text("Show full analysis") }
+                }
+                if (full) shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                if (full && shown.insights.isNotEmpty()) {
                     HorizontalDivider()
                     Text("What stands out", style = MaterialTheme.typography.titleSmall, color = cs.primary)
                     shown.insights.forEach { i ->
@@ -88,7 +98,7 @@ fun CoachCard(view: CoachView, loading: Boolean, insights: List<Insight>, onOpen
                         }
                     }
                 }
-                if (shown.recommendations.isNotEmpty()) {
+                if (full && shown.recommendations.isNotEmpty()) {
                     HorizontalDivider()
                     Text("Try this", style = MaterialTheme.typography.titleSmall, color = cs.primary)
                     shown.recommendations.forEach { r ->

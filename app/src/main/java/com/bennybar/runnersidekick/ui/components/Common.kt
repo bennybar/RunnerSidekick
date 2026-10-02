@@ -22,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -91,11 +92,12 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
 /** "Show why": the evidence behind a finding — value, personal range, sample size, dates, limitations, version. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EvidenceSheet(finding: Finding, onDismiss: () -> Unit) {
+fun EvidenceSheet(finding: Finding, note: com.bennybar.runnersidekick.data.remote.ReadingNote? = null, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(finding.title, style = MaterialTheme.typography.headlineSmall)
+            note?.let { NoteBlock(it) }
             Text(finding.statement, style = MaterialTheme.typography.bodyLarge)
             finding.interpretation?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             HorizontalDivider()
@@ -137,4 +139,17 @@ class EvidenceRowsScope(private val col: ColumnScope) {
 @Composable
 fun EvidenceRows(content: @Composable EvidenceRowsScope.() -> Unit) {
     Column { EvidenceRowsScope(this).content() }
+}
+
+
+/** The plain verdict for a reading (how good it is) and what it means. */
+@Composable
+fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = MaterialTheme.shapes.large, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(n.verdict, style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer)
+            Text(n.meaning, style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer)
+        }
+    }
 }

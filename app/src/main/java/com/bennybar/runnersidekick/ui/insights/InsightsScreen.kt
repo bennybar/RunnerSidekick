@@ -146,6 +146,7 @@ fun InsightsScreen(
                     }
                     return@LazyColumn
                 }
+                data?.value?.stats?.let { st -> if (st.items.isNotEmpty()) animatedItem(key = "stats") { StatsGrid(st) } }
                 coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
                 // Your week: the race week (with a race goal) and the weekly focus, moved here from Today
                 todayReport?.value?.race?.let { r -> r.week?.let { w -> animatedItem(key = "raceweek") {
@@ -156,34 +157,26 @@ fun InsightsScreen(
                     animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun, firstDay = firstDay) }
                 }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
-                animatedItem(key = "intro") {
-                    Text("A fixed set of questions answered from your own data. Every answer is shown, including \"no clear pattern\".",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
                 if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
                 val patterns = items.filter { it.verdict == "pattern" }
                 val nulls = items.filter { it.verdict == "no_clear_pattern" }
                 val waiting = items.filter { it.verdict == "not_enough_data" }
                 patterns.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i },
                     onState = { st -> vm.setInsightState(i.id, st) }) } }
-                if (nulls.isNotEmpty()) animatedItem(key = "nulls-title") {
-                    Text("Checked, nothing notable", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 4.dp, top = 12.dp))
+                if (nulls.isNotEmpty()) animatedItem(key = "nulls") {
+                    Group(title = "Checked, nothing notable") {
+                        nulls.forEach { i ->
+                            val (icon, shape) = categoryStyle(i.category)
+                            row(i.headline, icon = icon, iconShape = shape, onClick = { method = i }, accent = i.category)
+                        }
+                    }
                 }
-                nulls.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = false, onMethod = { method = i }) } }
                 if (waiting.isNotEmpty()) animatedItem(key = "waiting") {
                     Group(title = "Still collecting data") {
                         waiting.forEach { i ->
                             val (icon, shape) = categoryStyle(i.category)
-                            row(i.question, supporting = i.detail.ifBlank { i.headline }, icon = icon, iconShape = shape, onClick = { method = i },
-                                accent = i.category)
+                            row(i.question, supporting = i.headline, icon = icon, iconShape = shape, onClick = { method = i }, accent = i.category)
                         }
-                    }
-                }
-                data?.value?.let { r ->
-                    animatedItem(key = "footer") {
-                        Text("Updated ${Format.shortDate(r.localDate)} · revision ${r.revision} · ${items.firstOrNull()?.algorithmVersion ?: ""}",
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -233,18 +226,12 @@ fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit, onState: 
                 }
             }
             Text(i.headline, style = if (emphasised) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge)
-            Text(i.detail, style = MaterialTheme.typography.bodyMedium)
             i.chart?.let { InsightChart(it, Modifier.fillMaxWidth()) }
-            i.practical?.let {
-                Surface(shape = MaterialTheme.shapes.medium, color = cs.secondaryContainer) {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer, modifier = Modifier.padding(14.dp))
-                }
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(listOfNotNull(i.sampleSize?.let { "n = $it" },
-                    when (i.confidence) { "consistent" -> "held on newer data"; "emerging" -> "emerging, not yet re-checked"; else -> null })
+                Text(listOfNotNull(i.sampleSize?.let { "$it runs" },
+                    when (i.confidence) { "consistent" -> "held on newer data"; "emerging" -> "emerging"; else -> null })
                     .joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
-                TextButton(onClick = onMethod) { Text("How it's worked out") }
+                TextButton(onClick = onMethod) { Text("Details") }
             }
             if (onState != null && i.verdict == "pattern") Row {
                 if (i.userState == null) {
@@ -267,6 +254,12 @@ private fun MethodSheet(i: Insight, onDismiss: () -> Unit) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(i.question, style = MaterialTheme.typography.headlineSmall)
             Text(i.headline, style = MaterialTheme.typography.titleMedium)
+            if (i.detail.isNotBlank()) Text(i.detail, style = MaterialTheme.typography.bodyMedium)
+            i.practical?.let {
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(14.dp))
+                }
+            }
             Group(title = "Method") { custom { Text(i.method, style = MaterialTheme.typography.bodyMedium) } }
             if (i.confounders.isNotEmpty()) Group(title = "What else could explain it") {
                 i.confounders.forEach { c -> row(c) }
@@ -354,5 +347,34 @@ fun InsightChart(chart: JsonObject, modifier: Modifier = Modifier) {
             }
         }
         else -> Unit
+    }
+}
+
+
+/** The key numbers of the last 4 weeks, each with its change against the 4 weeks before. */
+@Composable
+private fun StatsGrid(st: com.bennybar.runnersidekick.data.remote.Stats) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Last 4 weeks", style = MaterialTheme.typography.titleSmall, color = cs.primary, modifier = Modifier.padding(start = 4.dp))
+        st.items.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { s ->
+                    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.weight(1f)) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(s.label, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                            Text(s.value, style = MaterialTheme.typography.titleLarge)
+                            s.change?.let { c ->
+                                // Green when the change is in the better direction (lower pace/HR/hard share), neutral otherwise
+                                val good = when (s.higherIs) { "lower" -> c < 0; "higher" -> c > 0; else -> null }
+                                Text((if (c > 0) "+" else "") + "$c% vs before", style = MaterialTheme.typography.labelMedium,
+                                    color = when (good) { true -> com.bennybar.runnersidekick.ui.theme.LocalDataColors.current.pace; false -> cs.tertiary; else -> cs.onSurfaceVariant })
+                            }
+                        }
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
     }
 }

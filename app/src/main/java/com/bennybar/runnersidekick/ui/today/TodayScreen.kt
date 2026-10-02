@@ -161,7 +161,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
-                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenInsights) { evidence = it } }
+                animatedItem(key = "readings") { Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }) { evidence = it } }
                 report.recentRun?.let { run ->
                     animatedItem(key = "lastrun") {
                         Group(title = "Latest run") {
@@ -179,10 +179,19 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     }
     when (sheet) {
         "scores" -> report?.scores?.let { ScoresSheet(it, onDismiss = { sheet = null }) }
+        "vo2" -> report?.let { r ->
+            SheetColumn(onDismiss = { sheet = null }) {
+                Text("VO₂ max", style = MaterialTheme.typography.headlineSmall)
+                r.readingNotes["vo2max"]?.let { com.bennybar.runnersidekick.ui.components.NoteBlock(it) }
+                TextButton(onClick = { sheet = null; com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }) {
+                    Text("Compare with your age group")
+                }
+            }
+        }
         "why" -> report?.let { WhySheet(it, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) { f -> sheet = null; evidence = f } }
         "briefing" -> report?.let { BriefingSheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
     }
-    evidence?.let { EvidenceSheet(it) { evidence = null } }
+    evidence?.let { f -> EvidenceSheet(f, today?.value?.readingNotes?.get(f.metric)) { evidence = null } }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

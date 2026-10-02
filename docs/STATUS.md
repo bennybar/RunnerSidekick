@@ -138,6 +138,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   now merged. Readings that aren't in yet show the last value with its date instead of "Not recorded".
 - Transitions: one 120 ms crossfade everywhere, as in kitzi.
 
+## Readings explained, a more numeric Insights (2026-10-02, v0.16.0)
+- Tapping a reading on Today opens with one sentence on how good the value is (against your usual range, and people
+  of your age and sex where a reference exists) and what the reading means.
+- Insights starts with a "Last 4 weeks" grid (distance, runs, time, pace, heart rate, longest run, climb, share in
+  zones 4–5), each against the 4 weeks before. Those numbers are calculated, not written by AI. The coach shows its
+  TL;DR and the point titles, with the full analysis one tap away. Pattern cards are compact and keep their text
+  under "Details". Patterns where nothing notable turned up are a short list.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

@@ -194,7 +194,19 @@ data class MorningReport(
     val changes: List<String> = emptyList(),
     val race: RaceStatus? = null,
     val scores: Scores? = null,
+    @SerialName("reading_notes") val readingNotes: Map<String, ReadingNote> = emptyMap(),
 )
+
+/** How good a reading is and what it means, in one plain sentence each. */
+@Serializable
+data class ReadingNote(val verdict: String, val meaning: String)
+
+@Serializable
+data class StatItem(val id: String, val label: String, val value: String, val change: Int? = null,
+                    @SerialName("higher_is") val higherIs: String = "neutral")
+
+@Serializable
+data class Stats(@SerialName("window_days") val windowDays: Int = 28, val items: List<StatItem> = emptyList(), val basis: String? = null)
 
 @Serializable
 data class ScoreComponent(val id: String, val title: String, val value: String? = null, val points: Int? = null,
@@ -437,6 +449,7 @@ data class InsightsReport(
     @SerialName("generated_at") val generatedAt: String,
     val synthetic: Boolean,
     val insights: List<Insight>,
+    val stats: Stats? = null,
 )
 
 @Serializable

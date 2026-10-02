@@ -279,8 +279,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body["changes"] = changes.since_yesterday(conn, body, d)
             from . import scores
             body["scores"] = scores.build(conn, cfg.source, d)
-            body["highlights"] = highlights.build(conn, cfg.source, d, compare.build(conn, cfg.source, d), fc.current(conn, cfg.source, d),
-                                                  body["race"])
+            from . import readings
+            cmp = compare.build(conn, cfg.source, d)
+            body["highlights"] = highlights.build(conn, cfg.source, d, cmp, fc.current(conn, cfg.source, d), body["race"])
+            body["reading_notes"] = readings.notes(body["findings"], cmp)
         return body
 
     @api.get("/v1/trends")
@@ -462,8 +464,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
+        from . import stats
         with lock_reports:
-            return rp.build_insights(conn, cfg.source, today(conn), synthetic)
+            body = dict(rp.build_insights(conn, cfg.source, today(conn), synthetic))
+        body["stats"] = stats.four_weeks(conn, cfg.source, today(conn))
+        return body
 
     @api.get("/v1/reports")
     def list_reports(type: str | None = None, start: str | None = Query(default=None, alias="from"),
