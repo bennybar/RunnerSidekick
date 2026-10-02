@@ -93,6 +93,7 @@ private val TILE_METRICS = listOf("sleep_duration", "resting_hr", "hrv_overnight
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenInsights: () -> Unit, vm: TodayVm = viewModel(factory = factory(::TodayVm))) {
+    com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val status by vm.status.collectAsStateWithLifecycle()
     val today by vm.today.collectAsStateWithLifecycle()
     val fitness by vm.fitness.collectAsStateWithLifecycle()

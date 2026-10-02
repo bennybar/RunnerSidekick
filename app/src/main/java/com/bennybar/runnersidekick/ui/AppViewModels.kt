@@ -56,6 +56,16 @@ open class BaseVm(val repo: Repository) : ViewModel() {
     }
 
     fun clearError() { _error.value = null }
+
+    // Polls only run while their screen is visible (see TrackVisible); true until a screen says otherwise
+    private val visible = MutableStateFlow(true)
+    fun setVisible(v: Boolean) { visible.value = v }
+
+    /** The wait between polls: 3 s, growing ×1.5 to at most 15 s, and no requests at all while the screen is hidden. */
+    suspend fun pause(attempt: Int) {
+        kotlinx.coroutines.delay(kotlin.math.min(15_000.0, 3_000 * Math.pow(1.5, attempt.toDouble())).toLong())
+        visible.first { it }
+    }
 }
 
 class TodayVm(repo: Repository) : BaseVm(repo) {
@@ -65,21 +75,15 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     val coach = repo.coach.state(null)
 
     // New data changes the evidence, so the coach is asked again rather than left showing older advice
-    private fun updateCoach() = viewModelScope.launch { repo.pollCoach() }
+    private fun updateCoach() = viewModelScope.launch { repo.pollCoach(::pause) }
 
     init { refresh() }
 
     fun refresh() = launchIo {
         repo.refreshAll()
         updateCoach()
-        // An AI summary may still be in progress; check back a few times (bounded).
-        for (attempt in 0 until 6) {
-            if (today.value?.value?.narrative?.status != "pending") break
-            kotlinx.coroutines.delay(5000)
-            repo.refreshToday()
-        }
     }
-    fun syncNow() = launchIo { repo.syncNow() }
+    fun syncNow() = launchIo { repo.syncNow(::pause) }
 
 }
 
@@ -98,7 +102,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     private fun pollCoachJob() = viewModelScope.launch {
         _coachLoading.value = true
         try {
-            repo.pollCoach()
+            repo.pollCoach(::pause)
         } finally {
             _coachLoading.value = false
         }
@@ -115,10 +119,13 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     /** Re-fetch (bounded, without the busy indicator) while a screen's AI summary is written in the background. */
     private fun pollQuietly(fetch: suspend () -> Boolean) = viewModelScope.launch {
         for (attempt in 0 until 10) {
-            kotlinx.coroutines.delay(4000)
+            pause(attempt)
             if (!runCatching { fetch() }.getOrDefault(false)) return@launch
         }
     }
+    // One trends poll at a time: a new date range replaces the previous range's poll
+    private var trendsPoll: kotlinx.coroutines.Job? = null
+    private fun pollTrends(d: Int) { trendsPoll?.cancel(); trendsPoll = pollQuietly { repo.refreshTrends(d) } }
     private val _days = MutableStateFlow(28)
     val days: StateFlow<Int> = _days.asStateFlow()
 
@@ -126,9 +133,9 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
 
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); if (repo.refreshTrends(_days.value)) pollQuietly { repo.refreshTrends(_days.value) } }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); if (repo.refreshTrends(_days.value)) pollTrends(_days.value) }
         .also { loadCoach() }
-    fun setDays(d: Int) { _days.value = d; launchIo { if (repo.refreshTrends(d)) pollQuietly { repo.refreshTrends(d) } } }
+    fun setDays(d: Int) { _days.value = d; trendsPoll?.cancel(); launchIo { if (repo.refreshTrends(d)) pollTrends(d) } }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 }
 
@@ -143,7 +150,7 @@ class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     /** One-off message after a manual sync ("2 new runs", "No new runs"). */
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
     fun syncNow() = launchIo {
-        val n = repo.syncRunsNow()
+        val n = repo.syncRunsNow(::pause)
         _syncResult.value = "Synced with Garmin · " + when (n) { 0 -> "no new runs"; 1 -> "1 new run"; else -> "$n new runs" }
     }
     fun clearSyncResult() { _syncResult.value = null }
@@ -162,7 +169,7 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
         if (repo.refreshRunAi(id, request = true) != "pending") return@launchIo
         viewModelScope.launch {
             for (attempt in 0 until 20) {
-                kotlinx.coroutines.delay(3000)
+                pause(attempt)
                 if (runCatching { repo.refreshRunAi(id) }.getOrDefault("failed") != "pending") break
             }
         }

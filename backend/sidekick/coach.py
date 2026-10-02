@@ -27,7 +27,7 @@ from .narrative import OpenAIProvider
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "coach-1.5"
+PROMPT_VERSION = "coach-1.6"
 MAX_ITEMS = 4
 CATEGORIES = ["training", "recovery", "sleep", "pacing", "habits"]
 FACT = re.compile(r"\{fact:([a-z0-9_]+)\}")
@@ -72,8 +72,9 @@ bundle computed from their Garmin data, check-ins and plans. Write:
   their weekly focus). Prefer synthesis over repeating single findings. Give each a confidence.
 - recommendations: up to four specific, practical options for the coming days, ordered by importance, each with a
   short "why". Respect today's plan and their goal type. Frame them as options, not orders. Give each a direction:
-  easier, same or harder than what they have been doing. When the bundle's plan:today has intensity_held_back true or
-  state consider_easier, no recommendation may be harder.
+  easier, same or harder than what they have been doing. plan:today is the app's decision for today (readiness and the
+  next run): explain it and build on it, never contradict it. When it has intensity_held_back true, no recommendation
+  may be harder.
 
 Hard rules:
 - Use only the bundle. Cite the evidence ids every item relies on (at least one per item), only in "evidence_ids".
@@ -138,9 +139,19 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
                    rs["garmin_prediction_s"])
 
     m = rp.build_morning(conn, source, today, False)
-    rec = m["recommendation"]
-    b.item("plan:today", "today", state=rec["state"], reason=rec["reason"], suggestion=rec["suggestion"], plan=rec.get("plan"),
-           intensity_held_back=rec["suppress_intensity"], provisional=m["provisional"])
+    # The app's one decision for today (readiness and the next run): the coach explains it, it doesn't make another
+    from .decide import decide
+    dec = decide(conn, source, today, m)
+    nxt = dec["next_run"] or {}
+    b.item("plan:today", "today", next_run=nxt.get("kind"), next_run_day=nxt.get("day_label"), next_run_reasons=nxt.get("why", []),
+           readiness_label=(dec["readiness"].get("label") or "unknown"), held_back_because=dec["hold_reason"],
+           intensity_held_back=dec["hold_back"], provisional=m["provisional"])
+    if dec["readiness"].get("score") is not None:
+        b.fact("readiness", "training readiness out of a hundred", f"{dec['readiness']['score']}", dec["readiness"]["score"])
+    if nxt.get("distance_km"):
+        b.fact("next_run_km", "suggested distance of the next run", f"{nxt['distance_km']:.1f} km", nxt["distance_km"])
+    if (nxt.get("hr") or {}).get("max"):
+        b.fact("next_run_hr_cap", "heart-rate cap for the next run", f"{nxt['hr']['max']} bpm", nxt["hr"]["max"])
     for f in m["findings"]:
         if f["status"] in ("missing",):
             continue
@@ -280,7 +291,7 @@ def validate(raw: str, b: Bundle) -> dict:
     if not isinstance(d, dict) or set(d) != {"tldr", "summary", "summary_evidence_ids", "insights", "recommendations"}:
         raise CoachError("schema mismatch")
     today = b.items.get("plan:today", {})
-    held_back = bool(today.get("intensity_held_back")) or today.get("state") == "consider_easier"
+    held_back = bool(today.get("intensity_held_back"))
 
     def capped(conf, cited):
         """Confidence no higher than the strongest cited evidence supports."""

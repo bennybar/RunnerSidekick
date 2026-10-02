@@ -169,3 +169,17 @@ fun VerdictChip(verdict: String?) {
         Text(text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
+
+/** Tells the screen's ViewModel whether the screen is on show, so its polls pause while it's hidden or the app is in
+ * the background. */
+@Composable
+fun TrackVisible(vm: com.bennybar.runnersidekick.ui.BaseVm) {
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+            vm.setVisible(owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs); vm.setVisible(false) }
+    }
+}

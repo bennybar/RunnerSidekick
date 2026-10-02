@@ -25,7 +25,11 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(45, TimeUnit.SECONDS)  // the whole request, so a slow backend can't hold the radio open
         .build()
+
+    // Last body and ETag per GET URL: an unchanged answer comes back as an empty 304 instead of the full JSON
+    private val etags = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
 
     /** Returns the raw JSON body so callers can cache exactly what the backend said. */
     suspend fun getRaw(path: String, query: Map<String, String> = emptyMap(), headers: Map<String, String> = emptyMap()): String =
@@ -43,10 +47,21 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
     suspend fun postPublic(base: String, path: String, body: String): Pair<Int, String> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(base.trimEnd('/') + path).post(body.toRequestBody("application/json".toMediaType())).build()
         try {
-            http.newCall(req).execute().use { it.code to it.body.string() }
+            http.newCall(req).await().use { it.code to it.body.string() }
         } catch (e: IOException) {
             throw ApiException.Network(e)
         }
+    }
+
+    /** Runs the call asynchronously; cancelling the coroutine cancels the HTTP request itself. */
+    private suspend fun okhttp3.Call.await(): okhttp3.Response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation { cancel() }
+        enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) { if (!cont.isCancelled) cont.resumeWith(Result.failure(e)) }
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                if (cont.isActive) cont.resumeWith(Result.success(response)) else response.close()
+            }
+        })
     }
 
     private suspend fun call(method: String, path: String, query: Map<String, String>, body: String?,
@@ -56,17 +71,23 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
             val url = (base.trimEnd('/') + path).toHttpUrl().newBuilder().apply {
                 query.forEach { (k, v) -> addQueryParameter(k, v) }
             }.build()
+            val key = "$token|$url"
+            val known = if (method == "GET") etags[key] else null
             val req = Request.Builder().url(url)
                 .apply { headers.forEach { (k, v) -> header(k, v) } }
                 .header("Authorization", "Bearer $token")
+                .apply { known?.let { header("If-None-Match", it.first) } }
                 .method(method, body?.toRequestBody("application/json".toMediaType()))
                 .build()
             try {
-                http.newCall(req).execute().use { resp ->
+                http.newCall(req).await().use { resp ->
                     when {
+                        resp.code == 304 && known != null -> known.second
                         resp.code == 401 -> throw ApiException.Unauthorized()
                         !resp.isSuccessful -> throw ApiException.Http(resp.code)
-                        else -> resp.body.string()
+                        else -> resp.body.string().also { text ->
+                            if (method == "GET") resp.header("ETag")?.let { etags[key] = it to text } ?: etags.remove(key)
+                        }
                     }
                 }
             } catch (e: IOException) {

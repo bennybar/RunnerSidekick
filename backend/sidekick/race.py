@@ -34,6 +34,10 @@ def goal(conn) -> dict | None:
     d, dist = get_setting(conn, "race_date", None), get_setting(conn, "race_distance", None)
     if not d or dist not in DISTANCES:
         return None
+    try:
+        date.fromisoformat(d)
+    except ValueError:
+        return None  # an impossible stored date (saved before validation) means no race goal, not a broken Today
     return {"date": d, "distance": dist, "target_s": get_setting(conn, "race_target_s", None), "name": get_setting(conn, "race_name", None)}
 
 
@@ -107,11 +111,11 @@ SESSION_TEXT = {
 QUALITY_MIN = {"tempo": 45, "intervals": 45, "race_pace": 40, "strides": 35}
 
 
-def week_plan(conn, source: str, today: date) -> dict | None:
+def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None:
     """This week's sessions toward the race: one long run, the phase's quality sessions, the rest easy, sized from your
     recent typical week. Recomputed every day from what you actually ran, so a missed session is not made up later.
-    Guardrails: when today's advice holds intensity back or Garmin rates the load above its range, quality becomes
-    optional and volume doesn't grow."""
+    Guardrails: when today's decision holds intensity back (held, from decide) or Garmin rates the load above its range,
+    quality becomes optional and volume doesn't grow."""
     from datetime import timedelta
 
     from . import reports as rp
@@ -131,8 +135,6 @@ def week_plan(conn, source: str, today: date) -> dict | None:
     g = get_setting(conn, "garmin_fitness", None) or {}
     ts = g.get("training_status") or {}
     over = ts.get("acute_load") and ts.get("chronic_max") and ts["acute_load"] > ts["chronic_max"]
-    morning = rp.build_morning(conn, source, today, False)["recommendation"]
-    held = bool(morning.get("suppress_intensity")) or morning["state"] == "consider_easier"
     factor = VOLUME_FACTOR[st["phase"]]
     guard = None
     if (held or over) and factor > 1:

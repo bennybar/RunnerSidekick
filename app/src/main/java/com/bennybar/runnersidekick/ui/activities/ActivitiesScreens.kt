@@ -114,6 +114,7 @@ private fun distanceParts(m: Double?, units: Units): Pair<String, String> = Form
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(factory = factory(::ActivitiesVm))) {
+    com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val acts by vm.activities.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -209,6 +210,7 @@ private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewModel(key = id, factory = factory { ActivityVm(it, id) })) {
+    com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val detail by vm.detail.collectAsStateWithLifecycle()
     val ai by vm.ai.collectAsStateWithLifecycle()
     val aiScroll = remember { mutableStateOf(0) }

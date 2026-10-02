@@ -28,6 +28,11 @@ def profile(conn, today: date) -> dict:
     src = get_setting(conn, "source_profile", None) or {}
     sex = get_setting(conn, "profile_sex", None) or src.get("sex")
     birth = get_setting(conn, "profile_birth_date", None) or src.get("birth_date")
+    try:
+        if birth:
+            age_on(birth, today)
+    except ValueError:
+        birth = src.get("birth_date") if birth != src.get("birth_date") else None  # a stored impossible date counts as missing
     source = "settings" if (get_setting(conn, "profile_sex", None) or get_setting(conn, "profile_birth_date", None)) else src.get("source")
     return {"sex": sex, "birth_date": birth, "age": age_on(birth, today) if birth else None, "source": source,
             "detected": {"sex": src.get("sex"), "birth_date": src.get("birth_date")} if src else None}

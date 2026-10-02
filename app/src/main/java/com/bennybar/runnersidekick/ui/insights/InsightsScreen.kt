@@ -103,6 +103,7 @@ fun InsightsScreen(
     onOpenDay: (String) -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit, onOpenSettings: () -> Unit,
     vm: InsightsVm = viewModel(factory = factory(::InsightsVm)),
 ) {
+    com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val data by vm.insights.collectAsStateWithLifecycle()
     val weekly by vm.weekly.collectAsStateWithLifecycle()
     val fitness by vm.fitness.collectAsStateWithLifecycle()

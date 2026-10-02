@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 import os
@@ -177,6 +178,20 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     app = FastAPI(title="Runner Sidekick", docs_url=None, redoc_url=None, openapi_url=None)
     api = APIRouter(dependencies=[Depends(current_user)])
 
+    @app.middleware("http")
+    async def etag(request, call_next):
+        """Every JSON GET carries an ETag; when the app already has that exact body it gets an empty 304 instead, so
+        repeated refreshes and polls cost the phone almost nothing to download."""
+        resp = await call_next(request)
+        if request.method != "GET" or resp.status_code != 200 or not resp.headers.get("content-type", "").startswith("application/json"):
+            return resp
+        body = b"".join([chunk async for chunk in resp.body_iterator])
+        tag = '"' + hashlib.sha256(body).hexdigest()[:32] + '"'
+        if request.headers.get("if-none-match") == tag:
+            return Response(status_code=304, headers={"ETag": tag})
+        headers = {k: v for k, v in resp.headers.items() if k.lower() != "content-length"}
+        return Response(content=body, status_code=200, headers={**headers, "ETag": tag}, media_type="application/json")
+
     def do_sync(ucfg: Config, user_id: int, force: bool = False) -> dict:
         with sync_locks.setdefault(user_id, threading.Lock()):
             running.add(user_id)
@@ -269,23 +284,23 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/today")
     def today_report(day: str | None = Query(default=None, alias="date"), conn=Depends(db)):
-        d = date.fromisoformat(day) if day else today(conn)
+        try:
+            d = date.fromisoformat(day) if day else today(conn)
+        except ValueError:
+            raise HTTPException(422, "date must be YYYY-MM-DD")
         with lock_reports:
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         body = with_narrative(conn, body)
         if body is not None and d == today(conn):
             from . import compare, highlights
             from . import focus as fc
-            from . import race
             from . import changes
-            body["race"] = race.status(conn, d)
-            if body["race"]:
-                body["race"]["week"] = race.week_plan(conn, cfg.source, d)
+            from .decide import decide
+            dec = decide(conn, cfg.source, d, body)
+            body["race"], body["readiness"], body["next_run"] = dec["race"], dec["readiness"], dec["next_run"]
+            body["decision"] = {"hold_back": dec["hold_back"], "hold_reason": dec["hold_reason"], "today_kind": dec["today_kind"]}
             from . import scores
             body["scores"] = scores.build(conn, cfg.source, d)
-            from . import readiness
-            body["readiness"] = readiness.build(conn, cfg.source, d, body)
-            body["next_run"] = readiness.next_run(conn, cfg.source, d, body, body["readiness"], body["race"])
             body["changes"] = changes.since_yesterday(conn, body, d, cfg.source)
             from . import readings
             cmp = compare.build(conn, cfg.source, d)
@@ -659,6 +674,13 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 raise HTTPException(422, "unknown timezone")
         if body.running_days is not None and any(not 0 <= d <= 6 for d in body.running_days):
             raise HTTPException(422, "running_days are 0 (Mon) .. 6 (Sun)")
+        for k in ("profile_birth_date", "race_date"):
+            v = getattr(body, k)
+            try:
+                if v is not None:
+                    date.fromisoformat(v)  # the pattern alone lets 2026-02-30 through, which would break Today
+            except ValueError:
+                raise HTTPException(422, f"{k} is not a real date")
         for k, v in body.model_dump(exclude_unset=True).items():
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones

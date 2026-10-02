@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 from . import coach as ch
 from .db import next_id, one, plain, utc_now
@@ -151,6 +151,13 @@ def view(row: dict) -> dict:
     return v
 
 
+RETRY_AFTER_S = 1800
+
+
+def age_s(row: dict) -> float:
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))).total_seconds()
+
+
 def cached(conn, kind: str, day: date, h: str) -> dict | None:
     """Today's summary for exactly this data, if one was written (or failed) already."""
     return one(conn.section_summary, {"kind": kind, "local_date": day.isoformat(), "input_hash": h}, sort=[("id", -1)])
@@ -160,7 +167,8 @@ def generate(conn, kind: str, b: ch.Bundle, day: date, model: str, api_key: str,
     """Never raises; outcomes (including a spent budget) are recorded so the app stops waiting."""
     h = input_hash(b, model)
     hit = cached(conn, kind, day, h)
-    if hit:
+    # A written summary is final for this data; a failure only for half an hour, then it's tried again
+    if hit and (hit["status"] == "ok" or age_s(hit) < RETRY_AFTER_S):
         return view(hit)
     call = reserve_call(conn, f"summary:{kind}", budget)
     status, out, detail = "ok", None, None

@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.data
 
+import androidx.room.withTransaction
+
 import com.bennybar.runnersidekick.data.local.CachedBlob
 import com.bennybar.runnersidekick.data.local.CheckinEntity
 import com.bennybar.runnersidekick.data.local.ReportEntity
@@ -26,7 +28,6 @@ import com.bennybar.runnersidekick.data.remote.ReportListItem
 import com.bennybar.runnersidekick.data.remote.SettingsDto
 import com.bennybar.runnersidekick.data.remote.Status
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -48,7 +49,9 @@ class Repository(
     val settings: SettingsStore,
 ) {
     private val json = api.json
-    private val withNulls = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = true }
+    // encodeDefaults: without it, a value equal to its default (ai_enabled = false, a cleared goal = null) is left out of
+    // the request, so the server could never turn AI off or clear a field
+    private val withNulls = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = true; encodeDefaults = true }
 
     private fun <T> observe(key: String, decode: (String) -> T): Flow<Cached<T>?> =
         settings.settings.map { it.currentMode }.flatMapLatest { mode ->
@@ -88,10 +91,10 @@ class Repository(
     }
 
     /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
-    suspend fun pollCoach() {
+    suspend fun pollCoach(pause: suspend (Int) -> Unit) {
         for (attempt in 0 until 20) {
             if (runCatching { refreshCoach() }.getOrDefault("failed") != "pending") return
-            delay(4000)
+            pause(attempt)
         }
     }
 
@@ -218,6 +221,9 @@ class Repository(
 
     private suspend fun put(key: String, body: String) {
         val mode = settings.settings.first().currentMode ?: return
+        // Unchanged content isn't rewritten: no disk write and no needless refresh of every screen observing it
+        val existing = db.cache().get(key)
+        if (existing != null && existing.mode == mode && existing.json == body) return
         db.cache().put(CachedBlob(key, mode, body, System.currentTimeMillis()))
     }
 
@@ -262,12 +268,15 @@ class Repository(
 
     suspend fun refreshJournal() {
         val list = json.decodeFromString(ListSerializer(ReportListItem.serializer()), api.getRaw("/v1/reports", mapOf("limit" to "200")))
-        list.forEach { cacheReport(it.id, it.type, it.subjectKey, it.localDate, it.revision, it.title, it.state, null) }
+        // One transaction for the whole list; rows that didn't change are skipped in cacheReport
+        db.withTransaction { list.forEach { cacheReport(it.id, it.type, it.subjectKey, it.localDate, it.revision, it.title, it.state, null) } }
     }
 
     private suspend fun cacheReport(id: Long, type: String, key: String, date: String, rev: Int, title: String?, state: String?, body: String?) {
         val mode = settings.settings.first().currentMode ?: return
         val existing = db.reports().get(id)
+        if (body == null && existing != null && existing.mode == mode && existing.revision == rev && existing.title == title &&
+            existing.state == state) return
         db.reports().upsert(ReportEntity(id, type, key, date, rev, title, state, mode, body ?: existing?.json, System.currentTimeMillis()))
     }
 
@@ -290,9 +299,9 @@ class Repository(
     }
 
     /** Syncs with Garmin now and says how many new runs arrived. */
-    suspend fun syncRunsNow(): Int {
+    suspend fun syncRunsNow(pause: suspend (Int) -> Unit): Int {
         val before = activities.first()?.value.orEmpty().map { it.sourceId }.toSet()
-        syncNow()
+        syncNow(pause)
         return activities.first()?.value.orEmpty().count { it.sourceId !in before }
     }
 
@@ -307,10 +316,10 @@ class Repository(
     }
 
     /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. For an explicit tap only. */
-    suspend fun syncNow() {
+    suspend fun syncNow(pause: suspend (Int) -> Unit) {
         api.post("/v1/sync")
-        for (attempt in 0 until 90) {
-            delay(2000)
+        for (attempt in 0 until 40) {
+            pause(attempt)
             if (!refreshStatus().syncRunning) break
         }
         refreshAll()

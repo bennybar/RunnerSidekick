@@ -213,6 +213,10 @@ def current(conn, source: str, today: date) -> dict:
             "kind": opts[0]["kind"], "params": {"auto": True, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5])},
             "chosen_at": utc_now()}}, upsert=True)
         row = one(conn.weekly_focus, {"week_start": ws.isoformat()})
+    elif row and row["params"].get("auto") and opts and opts[0]["kind"] == "recovery" and row["kind"] != "recovery":
+        # A focus the app picked follows a safety change (reported pain or illness puts recovery first); one you chose stays
+        conn.weekly_focus.update_one({"week_start": ws.isoformat()}, {"$set": {"kind": "recovery", "chosen_at": utc_now()}})
+        row = one(conn.weekly_focus, {"week_start": ws.isoformat()})
     prev = one(conn.weekly_focus, {"week_start": (ws - timedelta(days=7)).isoformat()})
     return {
         "week_start": ws.isoformat(),

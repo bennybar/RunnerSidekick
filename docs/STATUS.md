@@ -209,12 +209,25 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
     notifications read; the server's hourly cron does the syncing.
   - The worker is scheduled only while signed in and needs the battery not to be low.
   - One coach poll at a time.
-- Not done yet:
-  - From the review: removing Health /100 (a product call), and merging readiness/next run with the older
-    recommendation rules.
-  - Six older defects to re-check: settings that won't clear or disable AI, invalid dates on Today, failed-summary
-    retries, concurrent budget overrun, focus after pain, revoked PR highlights.
-  - Battery: pausing polls when a screen is hidden, cancellable HTTP, ETags, fewer cache writes.
+- Open: removing Health /100 (a product call). The rest was done in v0.22.0.
+
+## One decision, defects closed, network diet (2026-10-02, v0.22.0)
+- One decision (`decide.py`): readiness, whether intensity is held back, and the next run. Today, the race week, the
+  morning notification, the AI coach (coach-1.6 explains it and can't contradict it) and the AI input on runs all read
+  it. The older rules are only safety inputs: pain or illness, and several recovery signals at once. Missing or still-
+  learning data no longer forces "easy" by itself; readiness handles it.
+- Older defects fixed, each with a regression test:
+  - Settings couldn't turn AI off or clear a field: the app left out values equal to their defaults.
+  - Impossible dates (Feb 30) are rejected, and stored ones no longer break Today.
+  - A failed summary is retried after 30 minutes.
+  - The AI budget is one atomic counter per day.
+  - An automatic weekly focus switches to recovery after pain.
+  - Personal-best highlights read only each run's latest revision.
+- Network and battery:
+  - Polls pause while their screen is hidden and back off from 3 to 15 s; a new Trends range cancels the old poll.
+  - Requests are cancellable, with a 45 s total timeout.
+  - JSON GETs carry an ETag, and an unchanged answer is an empty 304.
+  - Unchanged cache entries and journal rows aren't rewritten; the journal is saved in one transaction.
 
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders

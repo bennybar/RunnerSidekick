@@ -63,16 +63,20 @@ object Notifier {
             val isToday = r.localDate == local.toLocalDate().toString()
             val inWindow = local.toLocalTime() >= start
             val ready = !r.provisional || local.toLocalTime() >= end
-            // A changed plan or suggestion updates the notification even when the state stays the same
-            val stateKey = "${r.recommendation.state}|${r.recommendation.suggestion.hashCode()}"
+            // The same one decision Today shows: readiness and the next run. A changed decision updates the notification.
+            val rd = r.readiness?.takeIf { it.status == "ok" }
+            val nr = r.nextRun
+            val title = rd?.let { "Readiness ${it.score} · ${it.headline ?: it.label}" } ?: r.headline
+            val text = nr?.let { n -> listOfNotNull("${n.title} ${n.dayLabel.lowercase()}", n.distanceKm?.let { "%.1f km".format(it) }, n.hr?.text)
+                .joinToString(" · ") } ?: r.recommendation.suggestion
+            val stateKey = "${rd?.score}|${title.hashCode()}|${text.hashCode()}"
             if (isToday && inWindow && ready && (state.morningDate != r.localDate || state.morningState != stateKey)) {
                 val firstToday = state.morningDate != r.localDate
-                // The app asks only when an answer would change today's advice
-                val body = r.recommendation.suggestion + if (r.checkinPrompt?.ask == true) "\nOne quick question in the app: how recovered do you feel?" else ""
+                val body = text + (nr?.why?.takeIf { it.isNotEmpty() }?.let { "\n" + it.joinToString(" · ") } ?: "")
                 val n = NotificationCompat.Builder(ctx, CH_MORNING)
                     .setSmallIcon(R.drawable.ic_stat_pulse)
-                    .setContentTitle((if (r.provisional) "Provisional · " else "") + r.headline)
-                    .setContentText(r.recommendation.suggestion)
+                    .setContentTitle(title)
+                    .setContentText(text)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     .setContentIntent(openApp(ctx)).setAutoCancel(true)
                     .setOnlyAlertOnce(true).setSilent(!firstToday) // a revision updates quietly

@@ -404,3 +404,15 @@ nothing to judge.
 | Heart-rate drift | steady runs only: ≤5% good, ≤10% ok, else low |
 | Hills | info, from 30 m climb: the hilliest km with its flat-equivalent pace |
 | Training effect | Garmin's aerobic effect in Garmin's words. Low when ≥4 on an easy run, or when overreaching; otherwise info |
+
+## The day's decision — `decide.py`
+
+Intensity is held back when any of these is true:
+- pain or illness was reported (rule R0);
+- the rules say "consider easier" (several recovery signals);
+- readiness is below 60;
+- readiness isn't known.
+
+The race week plan gets that "held" flag. The next run turns it into an easy run, and turns pain or very low readiness
+into rest. hold_back also covers a next run today that is easy or rest. The AI coach and the AI input on runs receive
+hold_back and may not suggest anything harder.

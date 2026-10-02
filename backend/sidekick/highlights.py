@@ -54,7 +54,15 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
 
     # New personal bests in the last week (from the post-run reports)
     since = (today - timedelta(days=BEST_WINDOW_DAYS - 1)).isoformat()
+    seen: set[str] = set()
     for r in many(conn.report, {"type": "post_run", "local_date": {"$gte": since}}, sort=[("local_date", -1), ("revision", -1)]):
+        # Only each run's latest revision, and only runs that still exist: an older revision's "best" may since have been
+        # revised away (a re-sync, a corrected run)
+        if r["subject_key"] in seen:
+            continue
+        seen.add(r["subject_key"])
+        if rp.activity_by_source_id(conn, source, r["subject_key"]) is None:
+            continue
         b = r["body"]
         for k, e in (b.get("best_efforts") or {}).items():
             if e.get("is_best") and not any(h["id"] == f"best:{k}" for h in out):

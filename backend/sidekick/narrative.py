@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from pymongo.database import Database
 
 from .db import next_id, one, plain, put, utc_now
@@ -217,14 +219,21 @@ def calls_today(conn: Database) -> int:
 
 
 def reserve_call(conn: Database, feature: str, limit: int) -> int | None:
-    """Records an AI call before it is made; None when today's budget is used up. Claim first, then check, so two
-    concurrent requests can't both take the last call."""
+    """Records an AI call before it is made; None when today's budget is used up. The day's count is one atomic
+    counter, incremented before checking, so concurrent requests can't both take the last call."""
+    day = datetime.now(timezone.utc).date().isoformat()
+    key = f"ai_calls:{day}"
+    if conn.counters.find_one({"_id": key}) is None:
+        try:  # the day's first call starts from the ledger (calls made before this counter existed)
+            conn.counters.insert_one({"_id": key, "n": calls_today(conn)})
+        except DuplicateKeyError:
+            pass
+    n = conn.counters.find_one_and_update({"_id": key}, {"$inc": {"n": 1}}, return_document=ReturnDocument.AFTER)["n"]
+    if n > limit:
+        conn.counters.update_one({"_id": key}, {"$inc": {"n": -1}})
+        return None
     cid = next_id(conn, "ai_call")
     conn.ai_call.insert_one({"id": cid, "feature": feature, "created_at": utc_now(), "outcome": None})
-    day = datetime.now(timezone.utc).date().isoformat()
-    if conn.ai_call.count_documents({"created_at": {"$gte": day}, "id": {"$lte": cid}}) > limit:
-        conn.ai_call.delete_one({"id": cid})
-        return None
     return cid
 
 

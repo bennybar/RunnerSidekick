@@ -229,7 +229,8 @@ def day_label(d: date, today: date) -> str:
     return "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%A")
 
 
-def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: dict | None) -> dict | None:
+def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: dict | None, hold: str | None = None) -> dict | None:
+    """hold: why intensity is held back today (from decide.hold_reason), or None."""
     zones = rp.hr_zones(conn)
     runs = rp.activities(conn, source, (today - timedelta(days=27)).isoformat(), today.isoformat())
     if len(runs) < 3:
@@ -253,12 +254,9 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     elif day == today and score is not None and score < 40:
         kind = "rest"
         why.append("readiness is very low today")
-    elif day == today and (rec["state"] == "consider_easier" or rec["suppress_intensity"] or (score is not None and score < 60)):
+    elif day == today and hold:
         kind = "easy"
-        why.append("readiness is low for anything harder" if score is not None and score < 60 else
-                   "today's sleep and HRV aren't in yet" if rec["rule_id"] in ("R1", "R1c") else
-                   "your usual ranges are still being learned" if rec["state"] == "insufficient_data" else
-                   "today's readings suggest easier" if rec["state"] == "consider_easier" else "one reading stands out today")
+        why.append(hold)
     elif planned and planned["kind"] in ("long", "easy"):
         kind = planned["kind"]
         why.append(f"your race week plan ({race['label']})")

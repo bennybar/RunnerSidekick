@@ -136,7 +136,9 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
         b.item("race:goal", "race_goal", distance=rs["label"], phase=rs["phase"], phase_note=rs["phase_note"])
         b.fact("race_days", "days to the race", f"{rs['days_to_go']}", rs["days_to_go"])
     m = rp.build_morning(conn, source, today, False)
-    b.item("today:advice", "today", state=m["recommendation"]["state"], intensity_held_back=m["recommendation"]["suppress_intensity"])
+    from .decide import decide
+    dec = decide(conn, source, today, m)
+    b.item("today:advice", "today", next_run=(dec["next_run"] or {}).get("kind"), intensity_held_back=dec["hold_back"])
     return b
 
 
