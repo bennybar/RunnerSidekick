@@ -247,6 +247,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   - Fitness numbers are fetched after a new run or every 3 hours; zones and profile once a day.
   - The 1 s pause between Garmin calls stays, because Garmin rate-limits hard.
 
+## Background refresh setting (2026-10-02, v0.23.1)
+- Settings → Notifications → Background refresh, off by default. With notifications off, it keeps the phone's copy
+  (Today, runs, weekly review, focus) fresh about every 3 hours, with a network and the battery not low, and sends no
+  notifications.
+- With notifications on, the job stays hourly and the switch shows as already on. With both off, nothing is scheduled.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

@@ -32,6 +32,8 @@ data class LocalSettings(
     /** "<backend url>#<user id>" of the signed-in account, once known. Scopes local check-ins. */
     val account: String?,
     val hasOwnAiKey: Boolean = false,
+    /** Keep the phone's copy fresh in the background even with notifications off (every few hours). */
+    val backgroundRefresh: Boolean = false,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -45,6 +47,7 @@ class SettingsStore(private val context: Context) {
     private val kImperial = booleanPreferencesKey("imperial")
     private val kMode = stringPreferencesKey("current_mode")
     private val kNotify = booleanPreferencesKey("notifications_enabled")
+    private val kBackground = booleanPreferencesKey("background_refresh")
     private val kAccount = stringPreferencesKey("current_account")
     private val kAiKey = stringPreferencesKey("own_openai_key_enc")
     private val kMorningDate = stringPreferencesKey("notified_morning_date")
@@ -62,6 +65,7 @@ class SettingsStore(private val context: Context) {
             notificationsEnabled = p[kNotify] ?: false,
             account = p[kAccount],
             hasOwnAiKey = p[kAiKey] != null,
+            backgroundRefresh = p[kBackground] ?: false,
         )
     }
 
@@ -70,6 +74,7 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun setNotificationsEnabled(on: Boolean) = context.dataStore.edit { it[kNotify] = on }
+    suspend fun setBackgroundRefresh(on: Boolean) = context.dataStore.edit { it[kBackground] = on }
 
     suspend fun markWeeklyNotified(weekStart: String) = context.dataStore.edit { it[kWeekly] = weekStart }
 

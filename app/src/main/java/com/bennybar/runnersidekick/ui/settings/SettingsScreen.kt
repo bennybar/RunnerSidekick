@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -113,6 +114,7 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }
     fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }
+    fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }
 
     fun export(ctx: android.content.Context, uri: Uri) = launchIo {
         val body = repo.exportJson()
@@ -339,6 +341,14 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                     Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
                                         if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
                                     })
+                                })
+                            row("Background refresh", supporting = if (local?.notificationsEnabled == true)
+                                    "Already on with notifications (about hourly)."
+                                else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
+                                icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
+                                trailing = {
+                                    Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
+                                        enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
                                 })
                             custom {
                                 Text("Morning window", style = MaterialTheme.typography.titleMedium)

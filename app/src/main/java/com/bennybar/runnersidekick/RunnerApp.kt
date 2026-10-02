@@ -26,16 +26,23 @@ class RunnerApp : Application() {
         val settings = SettingsStore(this)
         repository = Repository(SidekickDb.create(this), ApiClient { settings.credentials() }, settings)
         Notifier.createChannels(this)
-        // Best-effort background refresh, only while signed in; timing is up to the OS (hourly at most, so the morning
-        // window can be met). The server syncs Garmin itself, so this only fetches what notifications need.
+        // Best-effort background refresh, only while signed in; timing is up to the OS. The server syncs Garmin itself, so
+        // this only fetches. Hourly with notifications on (so the morning window can be met); every 3 hours when it only
+        // keeps the phone's copy fresh; not at all when neither is wanted.
         val wm = WorkManager.getInstance(this)
         kotlinx.coroutines.MainScope().launch {
-            // The worker only serves notifications: scheduled while signed in with notifications on, cancelled otherwise
-            settings.settings.map { it.hasToken && it.notificationsEnabled }.distinctUntilChanged().collect { needed ->
-                if (needed) wm.enqueueUniquePeriodicWork(
+            settings.settings.map { s ->
+                when {
+                    !s.hasToken -> 0L
+                    s.notificationsEnabled -> 1L
+                    s.backgroundRefresh -> 3L
+                    else -> 0L
+                }
+            }.distinctUntilChanged().collect { hours ->
+                if (hours > 0) wm.enqueueUniquePeriodicWork(
                     "refresh",
                     ExistingPeriodicWorkPolicy.UPDATE,
-                    PeriodicWorkRequestBuilder<RefreshWorker>(1, TimeUnit.HOURS)
+                    PeriodicWorkRequestBuilder<RefreshWorker>(hours, TimeUnit.HOURS)
                         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
                         .build(),
                 ) else wm.cancelUniqueWork("refresh")
