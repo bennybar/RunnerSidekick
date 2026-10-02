@@ -187,12 +187,17 @@ def normalise_max_metrics(d: str, p: Any) -> list[Observation]:
 
 
 def normalise_weight(d: str, p: dict | None) -> list[Observation]:
-    grams = None
+    """Weight, and body fat when a scale reports it. The method says where the weight came from: a Garmin scale, or a
+    value entered in Garmin Connect."""
+    grams, fat, method = None, None, "garmin_weigh_in"
     for e in (p or {}).get("dateWeightList") or []:
         grams = non_negative(e.get("weight"))
         if grams is not None:
+            fat = non_negative(e.get("bodyFat"))
+            method = "garmin_scale" if "SCALE" in str(e.get("sourceType") or "").upper() else "garmin_entered"
             break
-    return [obs(d, "weight", grams / 1000.0 if grams is not None else None, method="garmin_weigh_in")]
+    return [obs(d, "weight", grams / 1000.0 if grams is not None else None, method=method),
+            obs(d, "body_fat_pct", fat, method="garmin_scale")]
 
 
 def normalise_fitness(race: dict, ts: dict) -> dict:
@@ -429,13 +434,15 @@ class GarminConnector:
         return out
 
     def profile(self) -> dict | None:
-        """Sex, birth date and first day of week only (comparisons, week boundaries). Weight, height and the rest are not stored."""
+        """Sex, birth date, height and first day of week (comparisons, BMI, week boundaries). Nothing else from the profile."""
         ud = (self._call("get_user_profile") or {}).get("userData") or {}
         sex = {"MALE": "male", "FEMALE": "female"}.get((ud.get("gender") or "").upper())
         first = ((ud.get("firstDayOfWeek") or {}).get("dayName") or "").lower() or None
         if not sex and not ud.get("birthDate") and not first:
             return None
-        return {"sex": sex, "birth_date": ud.get("birthDate"), "first_day_of_week": first, "source": "garmin"}
+        h = num(ud.get("height"))
+        return {"sex": sex, "birth_date": ud.get("birthDate"), "first_day_of_week": first,
+                "height_cm": round(h, 1) if h and 100 <= h <= 250 else None, "source": "garmin"}
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []

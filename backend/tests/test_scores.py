@@ -147,3 +147,28 @@ def test_carried_forward_vo2_is_stored_on_its_measurement_day():
     assert [(o.local_date, o.value) for o in obs] == [("2026-08-03", 46.2), ("2026-10-02", None)]
     same = normalise_max_metrics("2026-10-02", [{"generic": {"vo2MaxPreciseValue": 46.2, "calendarDate": "2026-10-02"}}])
     assert [(o.local_date, o.value) for o in same] == [("2026-10-02", 46.2)]
+
+
+def test_bmi_is_context_with_height_and_a_recent_weight():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    conn = synced()
+    body = lambda: {c["id"]: c for c in scores.build(conn, "fixture", ANCHOR)["health"]["components"]}["body"]  # noqa: E731
+    assert "height" in body()["say"]
+    set_setting(conn, "source_profile", {"sex": "male", "birth_date": "1983-06-02", "height_cm": 180.0})
+    assert "weigh-in" in body()["say"]
+    conn.daily_observation.insert_one({"source": "fixture", "local_date": (ANCHOR - timedelta(days=9)).isoformat(), "metric": "weight",
+                                       "value": 78.0, "state": "measured", "method": "garmin_entered"})
+    b = body()
+    assert b.get("context") and b["points"] is None and b["bmi"] == 24.1 and b["verdict"] == "good"
+    assert "entered in Garmin, 9 days ago" in b["say"]
+    conn.daily_observation.update_many({"metric": "weight"}, {"$set": {"local_date": (ANCHOR - timedelta(days=40)).isoformat()}})
+    assert "weigh-in" in body()["say"]  # too old to use
+
+
+def test_weight_source_and_body_fat_are_kept():
+    from sidekick.connectors.garmin import normalise_weight
+    scale = normalise_weight("2026-10-01", {"dateWeightList": [{"weight": 78000.0, "bodyFat": 17.5, "sourceType": "INDEX_SCALE"}]})
+    assert [(o.metric, o.value, o.method) for o in scale] == [("weight", 78.0, "garmin_scale"), ("body_fat_pct", 17.5, "garmin_scale")]
+    typed = normalise_weight("2026-10-01", {"dateWeightList": [{"weight": 78000.0, "bodyFat": None, "sourceType": "USER_SETTING"}]})
+    assert typed[0].method == "garmin_entered" and typed[1].value is None

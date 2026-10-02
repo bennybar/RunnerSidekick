@@ -326,6 +326,10 @@ Context lines, shown but not counted:
     window isn't the full time in bed.
   - Resting heart rate as your own 4-week change. Garmin's lowest-30-minute value isn't comparable to seated
     population references.
+  - Body (BMI): weight ÷ height². Height comes from your Garmin profile and weight from a weigh-in in the last 30
+    days; the line says whether it was a Garmin scale or entered in Garmin, and adds body fat when a scale reports
+    it. Verdict: good in 18.5–25 (22–27 from age 65), ok within 1.5 below or 3 above, otherwise low. Not counted,
+    because BMI can't tell muscle from fat.
 
 Rules added in 3.1:
 - **Scope labels:** Fitness is "aerobic fitness for your age, from Garmin's VO₂ max"; Health is "activity and sleep
@@ -348,7 +352,6 @@ Left out:
 - **HRV:** readiness uses it.
 - **Garmin's sedentary time:** all awake non-active time, standing included.
 - **Sleep stages and stress:** no solid reference ranges for consumer watches.
-- **BMI:** no height stored.
 
 "Potential score changes" lists up to two steps, each from one part's numbers, with its timeframe and the points the
 score would show if that part reached its target. That is not a prediction of the effort it takes. With intensity held

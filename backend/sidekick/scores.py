@@ -262,7 +262,44 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     rhr = part("resting_hr", "Resting heart rate", None, say, "Garmin's lowest 30-minute value of the day; your own trend, not counted")
     rhr["verdict"] = "info" if now is not None else "unknown"
     parts.append(context(rhr))
+    parts.append(context(body_part(conn, source, d, age)))
     return parts
+
+
+BODY_MAX_AGE_DAYS = 30  # a weight older than this isn't used
+
+
+def body_part(conn, source: str, d: date, age: int | None) -> dict:
+    """BMI from Garmin's height and a recent weight, with body fat when a scale gives it. Context only: BMI can't tell
+    muscle from fat, so it misreads many runners; the lowest-risk range in large studies is about 18.5–25 (somewhat
+    higher from 65)."""
+    note = ("BMI = weight ÷ height². Usual healthy range 18.5–25" + (" (about 22–27 from 65)" if age is not None and age >= 65 else "") +
+            "; it can't tell muscle from fat, so it isn't counted")
+    height = ((rp.get_setting(conn, "source_profile", None) or {}).get("height_cm"))
+    w = conn.daily_observation.find_one({"source": source, "metric": "weight", "state": "measured",
+                                         "local_date": {"$gte": (d - timedelta(days=BODY_MAX_AGE_DAYS)).isoformat(), "$lte": d.isoformat()}},
+                                        sort=[("local_date", -1)])
+    if not height:
+        p = part("body", "Body (BMI)", None, "Needs your height from Garmin", note)
+        p["verdict"] = "unknown"
+        return p
+    if not w:
+        p = part("body", "Body (BMI)", None, f"Needs a weigh-in in the last {BODY_MAX_AGE_DAYS} days", note)
+        p["verdict"] = "unknown"
+        return p
+    bmi = w["value"] / (height / 100) ** 2
+    hi = 27 if age is not None and age >= 65 else 25
+    lo = 22 if age is not None and age >= 65 else 18.5
+    ago = (d - date.fromisoformat(w["local_date"])).days
+    src = "Garmin scale" if w.get("method") == "garmin_scale" else "entered in Garmin"
+    say = f"BMI {bmi:.1f} · {w['value']:.1f} kg, {height:.0f} cm · weight {src}, {'today' if ago == 0 else f'{ago} days ago'}"
+    fat = conn.daily_observation.find_one({"source": source, "metric": "body_fat_pct", "state": "measured", "local_date": w["local_date"]})
+    if fat:
+        say += f" · body fat {fat['value']:.0f}%"
+    p = part("body", "Body (BMI)", None, say, note)
+    p["verdict"] = "good" if lo <= bmi <= hi else "ok" if lo - 1.5 <= bmi <= hi + 3 else "low"
+    p["bmi"] = round(bmi, 1)
+    return p
 
 
 IMPROVE_SHOWN = 2

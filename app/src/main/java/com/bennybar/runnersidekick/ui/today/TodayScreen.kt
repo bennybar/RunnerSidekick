@@ -482,23 +482,26 @@ private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnerside
                 Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
                     minLines = 2, maxLines = 2)
             }
-            com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(96.dp), description = "$title score ${v ?: "not available"} out of 100")
-            Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
-            val t = sc?.trend
-            // Completeness is shown on its own, never hidden behind the trend
-            Text(listOfNotNull(
-                when {
-                    t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
-                    t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
-                    t != null -> "Same as 4 weeks ago"
-                    else -> null
-                },
-                if (sc?.status == "partial") "partial" else null,
-                if (sc?.stale == true) "stale" else null,
-            ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
-                style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
-                Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = color)
+            // The ring and its lines, centred in the tile under the left-aligned title
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(96.dp), description = "$title score ${v ?: "not available"} out of 100")
+                Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
+                val t = sc?.trend
+                // Completeness is shown on its own, never hidden behind the trend
+                Text(listOfNotNull(
+                    when {
+                        t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
+                        t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
+                        t != null -> "Same as 4 weeks ago"
+                        else -> null
+                    },
+                    if (sc?.status == "partial") "partial" else null,
+                    if (sc?.stale == true) "stale" else null,
+                ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
+                    style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
+                    Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = color)
+                }
             }
         }
     }

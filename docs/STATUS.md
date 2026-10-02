@@ -314,6 +314,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   title.
 - Sparklines are smooth curves with a gradient fill, drawn left to right, with a haloed dot on today's value.
 
+## BMI as context, centred gauges (2026-10-02, v0.28.0)
+- The Garmin profile now also stores height (only sex, birth date, height and week start are kept). Weigh-ins keep
+  their source (scale or entered) and body fat when a scale reports it.
+- Health shows Body (BMI) as a context line, not counted: BMI from height and a weigh-in in the last 30 days, with
+  the usual range and its limits.
+- The Health and Fitness rings and their lines are centred in the tiles.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

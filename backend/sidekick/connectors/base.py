@@ -55,6 +55,7 @@ METRIC_UNITS: dict[str, str] = {
     "body_battery_low": "garmin_body_battery",
     "respiration_waking_avg": "breaths/min",
     "weight": "kg",
+    "body_fat_pct": "%",                   # only from a Garmin scale (Index) when it reports it
     "garmin_training_readiness": "garmin_score_0_100",
     "garmin_vo2max_running": "ml/kg/min",
     "garmin_sleep_score": "garmin_score_0_100",
