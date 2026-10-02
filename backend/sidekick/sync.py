@@ -37,6 +37,13 @@ class SyncResult:
     changed_activities: list[str] = field(default_factory=list)
     days_fetched: int = 0
     activities_fetched: int = 0
+    job_id: int | None = None
+
+
+def report_progress(conn, job_id: int | None, fraction: float, phase: str) -> None:
+    """How far a sync has got (0–1) and what it's doing, for the app's progress bar."""
+    if job_id is not None:
+        conn.sync_job.update_one({"id": job_id}, {"$set": {"progress": round(min(max(fraction, 0.0), 1.0), 3), "phase": phase}})
 
 
 def backoff_seconds(failures: int, base: float, cap: float = 6 * 3600, rng: random.Random | None = None) -> float:
@@ -113,12 +120,14 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
     conn.sync_job.insert_one({"id": job_id, "source": source, "kind": "sync", "started_at": utc_now(), "finished_at": None, "outcome": None,
                               "detail": None, "days_fetched": 0, "activities_fetched": 0})
     set_connection(conn, source, last_attempt_at=utc_now())
-    res = SyncResult("ok")
+    res = SyncResult("ok", job_id=job_id)
+    report_progress(conn, job_id, 0.02, "Connecting to Garmin")
     try:
         _sync_days(conn, connector, today, target, refetch_days, max_backfill_days, res)
         _sync_activities(conn, connector, today, target, refetch_days, max_activity_details, res)
         prev_fit = get_setting(conn, "garmin_fitness", None) or {}
         fit_due = bool(res.changed_activities) or (prev_fit.get("fetched_at") or "") < _hours_ago(FITNESS_EVERY_H)
+        report_progress(conn, job_id, 0.85, "Reading Garmin's fitness numbers")
         if hasattr(connector, "fitness_snapshot") and fit_due:
             snap = connector.fitness_snapshot(today)
             if snap:
@@ -167,18 +176,16 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
     inc_start = max(date.fromisoformat(target), (newest_done or today) - timedelta(days=refetch_days))
     # Today and yesterday are always re-read (sleep and summaries arrive late); older days of the window only while one
     # of their core readings is still missing. Each skipped day saves six Garmin calls.
-    d = inc_start
-    while d <= today:
-        if d < today - timedelta(days=1) and day_complete(conn, source, d):
-            d += timedelta(days=1)
-            continue
+    todo = [inc_start + timedelta(days=k) for k in range((today - inc_start).days + 1)]
+    todo = [d for d in todo if not (d < today - timedelta(days=1) and day_complete(conn, source, d))]
+    for i, d in enumerate(todo):
+        report_progress(conn, res.job_id, 0.05 + 0.45 * i / len(todo), "Reading your days from Garmin")
         for b in connector.read_days(d, d):
             res.changed_dates |= save_day(conn, source, b)
             oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
             _update_checkpoint(conn, source, "days", oldest_done=oldest)
             cp = one(conn.sync_checkpoint, {"source": source, "stream": "days"})
             res.days_fetched += 1
-        d += timedelta(days=1)
     _update_checkpoint(conn, source, "days", newest_done=today.isoformat())
     if cp["oldest_done"] is None:
         return
@@ -186,6 +193,7 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
     bf_end = oldest_done - timedelta(days=1)
     bf_start = max(date.fromisoformat(target), bf_end - timedelta(days=max_backfill - 1))
     if bf_end >= bf_start:
+        report_progress(conn, res.job_id, 0.5, "Reading earlier days from Garmin")
         for b in connector.read_days(bf_start, bf_end):
             res.changed_dates |= save_day(conn, source, b)
             _update_checkpoint(conn, source, "days", oldest_done=b.local_date)
@@ -206,12 +214,17 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
     fetched = 0
     recent = (today - timedelta(days=refetch_days)).isoformat()
     stale_before = (datetime.now(timezone.utc) - timedelta(hours=REFETCH_EVERY_H)).isoformat().replace("+00:00", "Z")
+    todo = []
     for s in summaries:
         if activity_hash(conn, source, s["source_id"]) == s["content_hash"]:
             # Samples and laps can arrive or be corrected after the summary; re-read recent runs now and then
             row = one(conn.activity, {"source": source, "source_id": s["source_id"]})
             if not (row and row["local_date"] >= recent and row["updated_at"] < stale_before):
                 continue
+        todo.append(s)
+    report_progress(conn, res.job_id, 0.55, "Checking your runs")
+    for s in todo:
+        report_progress(conn, res.job_id, 0.55 + 0.3 * fetched / min(len(todo), max_details), "Reading your runs")
         if fetched >= max_details:
             res.outcome = "partial"
             res.detail = "Activity detail limit reached for this run; next sync continues"

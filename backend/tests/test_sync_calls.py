@@ -47,3 +47,10 @@ def test_repeat_sync_skips_complete_days_and_rare_calls():
     assert {ANCHOR, date(2026, 9, 29)} <= fetched and len(fetched) <= 4
     # The activity list is the last week only, and fitness, zones and profile aren't asked again straight away
     assert again.lists and min(again.lists) >= date(2026, 9, 23) and again.extra == 0
+
+
+def test_sync_records_its_progress():
+    conn = connect(user_db_name(1, "fixture"))
+    res = run_sync(conn, Counting(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    job = conn.sync_job.find_one({"id": res.job_id})
+    assert 0.8 <= job["progress"] <= 1 and job["phase"]

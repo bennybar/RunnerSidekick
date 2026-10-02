@@ -258,6 +258,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   pull-to-refresh indicator appears only while you're pulling. Shared `RefreshBox` on Today, Insights, Activities,
   run detail and Journal.
 
+## Progress with percentage, plan-true next run (2026-10-02, v0.24.0)
+- Loading shows a real progress line with what's happening and a percentage ("Reading your days from Garmin · 23%").
+  - App refreshes count their steps.
+  - "Sync Garmin" and "Get new runs" follow the server's own progress (`sync_job.progress` and `phase`, exposed as
+    `/v1/status.sync_progress`): days, runs, Garmin's numbers, then updating reports. Then the app loads the results.
+- Next run follows the week plan:
+  - A planned rest day is skipped, never turned into a run; the next session still to do is chosen.
+  - A race before the next running day comes first, even on a day you don't usually run.
+- Trends: a new range cancels the previous range's first fetch as well (it runs inside the owning job).
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

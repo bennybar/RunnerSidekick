@@ -61,7 +61,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) openRun.value = route(intent)
-        setContent { RunnerTheme { App(openRun) } }
+        val progress = (application as RunnerApp).repository.progress
+        setContent {
+            RunnerTheme {
+                androidx.compose.runtime.CompositionLocalProvider(com.bennybar.runnersidekick.ui.components.LocalProgress provides progress) { App(openRun) }
+            }
+        }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

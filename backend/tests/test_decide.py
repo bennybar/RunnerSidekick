@@ -46,3 +46,27 @@ def test_next_run_numbers_agree_and_follow_the_race_plan():
     set_setting(conn, "race_date", next_day(conn, "fixture", ANCHOR).isoformat())  # race on the next running day
     n = decide(conn, "fixture", ANCHOR, rp.build_morning(conn, "fixture", ANCHOR, False))["next_run"]
     assert n["kind"] == "race" and n["distance_km"] == 10.0 and race.status(conn, ANCHOR)["phase"] == "race_week"
+
+
+def test_rest_days_stay_rest_and_an_off_schedule_race_comes_first():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    from sidekick.readiness import next_day
+    conn = connect(user_db_name(1, "fixture"))
+    run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    rp.regenerate(conn, "fixture", True, set(), [], ANCHOR)
+    set_setting(conn, "race_distance", "10k")
+    # A race on a day you don't usually run (Sunday with Mon/Wed/Fri/Sat running days), before the next running day
+    set_setting(conn, "running_days", [0])  # Mondays only: the next running day is after Sunday
+    sunday = next(ANCHOR + timedelta(days=k) for k in range(1, 8) if (ANCHOR + timedelta(days=k)).weekday() == 6)
+    assert sunday < next_day(conn, "fixture", ANCHOR)
+    set_setting(conn, "race_date", sunday.isoformat())
+    n = decide(conn, "fixture", ANCHOR, rp.build_morning(conn, "fixture", ANCHOR, False))["next_run"]
+    assert n["kind"] == "race" and n["date"] == sunday.isoformat() and n["distance_km"] == 10.0
+    set_setting(conn, "running_days", [0, 2, 4, 5])
+    # Whatever the week plan marks as rest is never offered as the next run
+    for days_out in (8, 20, 45):
+        set_setting(conn, "race_date", (ANCHOR + timedelta(days=days_out)).isoformat())
+        d = decide(conn, "fixture", ANCHOR, rp.build_morning(conn, "fixture", ANCHOR, False))
+        rest_days = {s["date"] for s in d["race"]["week"]["sessions"] if s["kind"] == "rest"}
+        assert d["next_run"]["date"] not in rest_days or d["next_run"]["kind"] == "rest"

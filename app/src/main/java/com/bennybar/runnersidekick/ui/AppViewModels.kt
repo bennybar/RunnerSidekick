@@ -30,29 +30,32 @@ open class BaseVm(val repo: Repository) : ViewModel() {
 
     fun <T> kotlinx.coroutines.flow.Flow<T>.state(initial: T) = stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initial)
 
-    fun launchIo(block: suspend () -> Unit): kotlinx.coroutines.Job =
-        viewModelScope.launch {
-            _busy.value = true
-            _error.value = null
-            try {
-                block()
-                _offline.value = false
-            } catch (e: ApiException) {
-                _offline.value = e is ApiException.Network
-                _error.value = when (e) {
-                    is ApiException.NotConfigured -> "Backend not set up. Open Settings to connect."
-                    is ApiException.Unauthorized -> "The backend rejected this device's token. Enter a new one in Settings."
-                    is ApiException.Network -> "Can't reach the backend. Showing saved data."
-                    is ApiException.Http -> "Backend error (${e.code}). Showing saved data."
-                }
-            } catch (e: kotlinx.serialization.SerializationException) {
-                // A contract mismatch must never crash the app or replace cached data
-                android.util.Log.e("RunnerSidekick", "Unexpected backend response", e)
-                _error.value = "Unexpected response from the backend. Showing saved data."
-            } finally {
-                _busy.value = false
+    fun launchIo(block: suspend () -> Unit): kotlinx.coroutines.Job = viewModelScope.launch { runIo(block) }
+
+    /** Runs [block] in the caller's own coroutine with the loading flag and error handling, so cancelling the caller
+     * cancels the work too. */
+    suspend fun runIo(block: suspend () -> Unit) {
+        _busy.value = true
+        _error.value = null
+        try {
+            block()
+            _offline.value = false
+        } catch (e: ApiException) {
+            _offline.value = e is ApiException.Network
+            _error.value = when (e) {
+                is ApiException.NotConfigured -> "Backend not set up. Open Settings to connect."
+                is ApiException.Unauthorized -> "The backend rejected this device's token. Enter a new one in Settings."
+                is ApiException.Network -> "Can't reach the backend. Showing saved data."
+                is ApiException.Http -> "Backend error (${e.code}). Showing saved data."
             }
+        } catch (e: kotlinx.serialization.SerializationException) {
+            // A contract mismatch must never crash the app or replace cached data
+            android.util.Log.e("RunnerSidekick", "Unexpected backend response", e)
+            _error.value = "Unexpected response from the backend. Showing saved data."
+        } finally {
+            _busy.value = false
         }
+    }
 
     fun clearError() { _error.value = null }
 
@@ -131,7 +134,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
      * cancelling it means no poll starts afterwards. */
     private fun fetchThenPoll(onTab: Int, fetch: suspend () -> Boolean) = viewModelScope.launch {
         var pending = false
-        launchIo { pending = fetch() }.join()
+        runIo { pending = fetch() }  // inside this job: a new range cancels the old fetch too, not just its poll
         if (pending) pollQuietly(onTab, fetch)
     }
     private suspend fun pollQuietly(onTab: Int, fetch: suspend () -> Boolean) {

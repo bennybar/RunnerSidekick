@@ -199,8 +199,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             try:
                 c = make_connector(conn, ucfg)
                 res = run_sync(conn, c, today(conn), cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days, force=force)
+                from .sync import report_progress
+                report_progress(conn, res.job_id, 0.92, "Updating your reports")
                 with lock_reports:
                     rp.regenerate(conn, c.source, synthetic, res.changed_dates, res.changed_activities, today(conn))
+                report_progress(conn, res.job_id, 1.0, "Done")
                 auto_run_ai(conn, res.changed_activities)
                 return {"outcome": res.outcome, "detail": res.detail, "days_fetched": res.days_fetched,
                         "activities_fetched": res.activities_fetched}
@@ -270,6 +273,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             "latest_observation_date": latest, "latest_activity_start": latest_act,
             "watch_sync_time": None,  # not exposed by the source; never guessed
             "backfill": cps.get("days"), "sync_running": user["id"] in running,
+            "sync_progress": ({"percent": round(100 * (job or {}).get("progress", 0)), "phase": (job or {}).get("phase")}
+                              if user["id"] in running else None),
             "last_job": job,
             "capabilities": row.get("capabilities", {}) if row else {},
             "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),

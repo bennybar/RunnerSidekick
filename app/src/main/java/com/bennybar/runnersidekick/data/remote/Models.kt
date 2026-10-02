@@ -16,9 +16,14 @@ data class Status(
     @SerialName("latest_observation_date") val latestObservationDate: String? = null,
     @SerialName("latest_activity_start") val latestActivityStart: String? = null,
     @SerialName("sync_running") val syncRunning: Boolean = false,
+    @SerialName("sync_progress") val syncProgress: SyncProgress? = null,
     val backfill: Backfill? = null,
     @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
 )
+
+/** How far the server's Garmin sync has got, while it runs. */
+@Serializable
+data class SyncProgress(val percent: Int = 0, val phase: String? = null)
 
 @Serializable
 data class GarminOfficial(val available: Boolean = false, val connected: Boolean = false, @SerialName("data_import") val dataImport: String? = null)

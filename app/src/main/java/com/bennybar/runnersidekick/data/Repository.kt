@@ -243,21 +243,35 @@ class Repository(
         return s
     }
 
-    suspend fun refreshAll() {
-        refreshStatus()
-        establishAccount()
-        pushPendingCheckins()
-        pullCheckins()
-        val todayBody = api.getRaw("/v1/today")
-        put("today", todayBody)
-        val r = json.decodeFromString<MorningReport>(todayBody)
-        cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, todayBody)
-        put("activities", api.getRaw("/v1/activities"))
-        put("insights", api.getRaw("/v1/insights"))
-        refreshWeekly()
-        refreshFitness()
-        refreshFocus()
-        refreshJournal()
+    /** What a refresh or sync is doing and how far it has got (0–1); null when nothing is running. */
+    data class Progress(val fraction: Float, val label: String)
+    private val _progress = kotlinx.coroutines.flow.MutableStateFlow<Progress?>(null)
+    val progress: kotlinx.coroutines.flow.StateFlow<Progress?> = _progress
+
+    /** Everything the screens show, step by step; [from]..[to] is this refresh's share of the progress bar. */
+    suspend fun refreshAll(from: Float = 0f, to: Float = 1f) {
+        val steps = listOf<Pair<String, suspend () -> Unit>>(
+            "Checking the connection" to { refreshStatus(); establishAccount(); pushPendingCheckins(); pullCheckins() },
+            "Loading today" to {
+                val todayBody = api.getRaw("/v1/today")
+                put("today", todayBody)
+                val r = json.decodeFromString<MorningReport>(todayBody)
+                cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, todayBody)
+            },
+            "Loading your runs" to { put("activities", api.getRaw("/v1/activities")) },
+            "Loading insights" to { put("insights", api.getRaw("/v1/insights")) },
+            "Loading your week" to { refreshWeekly(); refreshFocus() },
+            "Loading your fitness" to { refreshFitness() },
+            "Loading the journal" to { refreshJournal() },
+        )
+        try {
+            steps.forEachIndexed { i, (label, run) ->
+                _progress.value = Progress(from + (to - from) * i / steps.size, label)
+                run()
+            }
+        } finally {
+            if (to >= 1f) _progress.value = null
+        }
     }
 
     suspend fun refreshInsights() = put("insights", api.getRaw("/v1/insights"))
@@ -319,12 +333,21 @@ class Repository(
 
     /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. For an explicit tap only. */
     suspend fun syncNow(pause: suspend (Int) -> Unit) {
-        api.post("/v1/sync")
-        for (attempt in 0 until 40) {
-            pause(attempt)
-            if (!refreshStatus().syncRunning) break
+        try {
+            _progress.value = Progress(0f, "Starting the Garmin sync")
+            api.post("/v1/sync")
+            // The server's own progress fills the first 85%; loading the results fills the rest. A steady 3 s check
+            // (no growing back-off), so the bar keeps moving while you watch it.
+            for (attempt in 0 until 60) {
+                pause(0)
+                val s = refreshStatus()
+                if (!s.syncRunning) break
+                s.syncProgress?.let { _progress.value = Progress(0.85f * it.percent / 100f, it.phase ?: "Syncing with Garmin") }
+            }
+            refreshAll(0.85f, 1f)
+        } finally {
+            _progress.value = null
         }
-        refreshAll()
     }
 
     suspend fun saveCheckin(

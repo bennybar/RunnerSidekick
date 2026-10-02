@@ -26,6 +26,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -184,6 +186,11 @@ fun TrackVisible(vm: com.bennybar.runnersidekick.ui.BaseVm) {
     }
 }
 
+/** The app-wide refresh/sync progress (see Repository.progress), provided at the root. */
+val LocalProgress = androidx.compose.runtime.staticCompositionLocalOf<kotlinx.coroutines.flow.StateFlow<com.bennybar.runnersidekick.data.Repository.Progress?>> {
+    kotlinx.coroutines.flow.MutableStateFlow(null)
+}
+
 /** Pull-to-refresh without the spinner over the content: while data loads, a thin line along the top edge; the round
  * indicator shows only while you're pulling. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -191,8 +198,21 @@ fun TrackVisible(vm: com.bennybar.runnersidekick.ui.BaseVm) {
 fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier,
                content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
     val state = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val progress by LocalProgress.current.collectAsState()
     androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing, onRefresh, modifier, state = state, indicator = {
-        if (isRefreshing) androidx.compose.material3.LinearProgressIndicator(
+        val p = progress
+        if (isRefreshing && p != null) {
+            // A real share of the work, with what's being done and the percentage
+            val shown by androidx.compose.animation.core.animateFloatAsState(p.fraction, label = "progress")
+            Column(Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth()) {
+                androidx.compose.material3.LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(3.dp))
+                androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.End).padding(top = 4.dp, end = 12.dp)) {
+                    Text("${p.label} · ${(shown * 100).toInt()}%", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                }
+            }
+        } else if (isRefreshing) androidx.compose.material3.LinearProgressIndicator(
             Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))
         else if (state.distanceFraction > 0f) androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator(
             state = state, isRefreshing = false, modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter))

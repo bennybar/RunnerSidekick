@@ -226,6 +226,23 @@ def next_day(conn, source: str, today: date) -> date:
     return next(today + timedelta(days=k) for k in range(start, start + 8) if (today + timedelta(days=k)).weekday() in days)
 
 
+def session_day(conn, source: str, today: date, race: dict | None) -> date:
+    """The day of the next run. With a race week plan: its next session that's still to do (a planned rest day is
+    skipped, not turned into a run). A race before the next running day comes first, even on a day you don't
+    usually run."""
+    day = next_day(conn, source, today)
+    if race:
+        ran_today = bool(rp.activities(conn, source, today.isoformat(), today.isoformat()))
+        todo = [s for s in (race.get("week") or {}).get("sessions", [])
+                if s["kind"] != "rest" and s["status"] in ("today", "planned") and not (s["date"] == today.isoformat() and ran_today)]
+        if todo:
+            day = date.fromisoformat(todo[0]["date"])
+        race_day = date.fromisoformat(race["date"])
+        if today <= race_day < day:
+            day = race_day
+    return day
+
+
 def day_label(d: date, today: date) -> str:
     return "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%A")
 
@@ -237,7 +254,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     if len(runs) < 3:
         return None
     rec = morning["recommendation"]
-    day = next_day(conn, source, today)
+    day = session_day(conn, source, today, race)
     score = ready.get("score")
     rr = recent_runs(conn, source, today, zones)
     hard_recent = any(r["hard"] for r in rr)
@@ -255,7 +272,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     elif day == today and score is not None and score < 40:
         kind = "rest"
         why.append("readiness is very low today")
-    elif planned and planned["kind"] == "race":
+    elif (planned and planned["kind"] == "race") or (race and day.isoformat() == race["date"]):
         kind = "race"
         why.append(f"race day: {race['label']}")
     elif day == today and hold:
