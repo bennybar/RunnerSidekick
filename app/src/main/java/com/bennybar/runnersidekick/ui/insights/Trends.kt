@@ -213,9 +213,10 @@ private fun WeeklyVolumeCard(weeks: List<WeekVolume>, units: Units, onOpenRun: (
             Text("Week of ${Format.shortDate(sel.weekStart)}: ${sel.runs} ${if (sel.runs == 1) "run" else "runs"} · " +
                 "${Format.distance(sel.distanceM, units)} · ${Format.hoursMinutes(sel.movingS)}" + if (sel.partial) " (so far)" else "",
                 style = MaterialTheme.typography.titleSmall)
-            if (sel.activityIds.isNotEmpty()) Group {
-                sel.activityIds.forEach { id -> row("Open run", supporting = id.removePrefix("fx-run-"), icon = Icons.AutoMirrored.Outlined.DirectionsRun,
-                    iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(id) }) }
+            if (sel.runList.isNotEmpty()) Group {
+                sel.runList.forEach { r -> row("${Format.shortDate(r.localDate)} · ${Format.distance(r.distanceM, units)}",
+                    supporting = Format.pace(if (r.distanceM != null && r.movingS != null && r.distanceM > 0) r.movingS / (r.distanceM / 1000) else null, units),
+                    icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(r.sourceId) }) }
             }
         }
     }

@@ -17,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -52,7 +54,11 @@ fun ScreenSummaryCard(s: ScreenSummary?) {
                 }
                 if (s.status == "pending") LoadingIndicator(Modifier.size(24.dp))
             }
-            Text(shown.sentences.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge, color = cs.onSecondaryContainer)
+            // The takeaway on its own; the rest on tap
+            var more by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+            val lines = if (more) shown.sentences else shown.sentences.take(1)
+            Text(lines.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge, color = cs.onSecondaryContainer)
+            if (shown.sentences.size > 1) androidx.compose.material3.TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
         }
     }
 }

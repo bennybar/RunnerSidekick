@@ -16,8 +16,8 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "summary-1.3"
-MAX_SENTENCES = 4
+PROMPT_VERSION = "summary-1.4"
+MAX_SENTENCES = 3
 
 SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["sentences"],
@@ -26,9 +26,10 @@ SCHEMA = {
         "properties": {"text": {"type": "string"}, "evidence_ids": {"type": "array", "items": {"type": "string"}}}}}},
 }
 
-SYSTEM = """You write a short daily summary, two to four sentences, of one screen of a running app for the runner who
-owns the data. You receive a JSON evidence bundle of that screen's results. Say what stands out and how the parts
-relate; don't list everything. Keep each sentence under forty words.
+SYSTEM = """You write a short daily summary, one to three sentences, of one screen of a running app for the runner who
+owns the data. You receive a JSON evidence bundle of that screen's results. The first sentence is the takeaway, under
+twenty words; it is shown on its own. Any further sentence says how the parts relate; don't list everything. Keep each
+sentence under thirty words.
 
 Hard rules:
 - Use only the bundle. Each sentence cites the evidence ids it relies on, only in "evidence_ids"; never write ids in text.

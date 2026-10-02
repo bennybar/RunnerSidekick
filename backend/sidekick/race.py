@@ -162,11 +162,18 @@ def week_plan(conn, source: str, today: date) -> dict | None:
     q_total = sum(QUALITY_MIN[k] for k in kinds.values() if k in QUALITY_MIN)
     n_easy = sum(1 for k in kinds.values() if k == "easy")
     easy_min = (max(25, round(((target_s / 60) - (long_min or 0) - q_total) / n_easy / 5) * 5) if target_s and n_easy else None)
+    # One shared budget: fixed quality lengths, the easy minimum and the long-run floor can add up to more than the week's
+    # target, so every session is scaled down together until they fit (5-minute steps, at least 10 minutes)
+    planned = {d: {"long": long_min, "easy": easy_min, "rest": None, "race": None}.get(k, QUALITY_MIN.get(k)) for d, k in kinds.items()}
+    total = sum(m for m in planned.values() if m)
+    if target_s and total > target_s / 60:
+        f = target_s / 60 / total
+        planned = {d: (max(10, int(m * f / 5) * 5) if m else m) for d, m in planned.items()}
     sessions = []
     for d in days:
         k = kinds.get(d, "rest")
         ran = acts.get(d.isoformat())
-        minutes = {"long": long_min, "easy": easy_min, "rest": None, "race": None}.get(k, QUALITY_MIN.get(k))
+        minutes = planned.get(d)
         status_ = ("done" if ran else "rest" if k == "rest" else "missed" if d < today else "today" if d == today else "planned")
         if ran and k == "rest":
             status_ = "extra"

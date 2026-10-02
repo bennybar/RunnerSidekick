@@ -296,7 +296,17 @@ class Repository(
         return activities.first()?.value.orEmpty().count { it.sourceId !in before }
     }
 
-    /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. */
+    /** The background worker's small refresh: what the notifications read, nothing else. */
+    suspend fun backgroundRefresh() {
+        refreshStatus()
+        pushPendingCheckins()
+        put("today", api.getRaw("/v1/today"))
+        put("activities", api.getRaw("/v1/activities"))
+        refreshWeekly()
+        refreshFocus()
+    }
+
+    /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. For an explicit tap only. */
     suspend fun syncNow() {
         api.post("/v1/sync")
         for (attempt in 0 until 90) {

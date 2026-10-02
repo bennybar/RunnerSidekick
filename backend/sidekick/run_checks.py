@@ -9,6 +9,7 @@ from statistics import mean
 from . import reports as rp
 
 EASY_KINDS = {"easy", "long", "recovery"}
+EASY_SHARE = 0.7  # as in the weekly focus: an easy run spends at least 70% of its time below zone 3
 HARD_KINDS = {"tempo", "intervals", "race"}
 # Garmin's own wording for its training effect scale
 TE_LABELS = [(1.0, "No effect"), (2.0, "Minor"), (3.0, "Maintaining"), (4.0, "Improving"), (5.0, "Highly improving"), (99, "Overreaching")]
@@ -48,8 +49,11 @@ def build(conn, source: str, report: dict) -> list[dict]:
         if z:
             hard = round(100 * z["hard"])
             if kind in EASY_KINDS:
-                v = "good" if z["hard"] <= 0.1 else "ok" if z["hard"] <= 0.3 else "low"
-                say = f"Easy, as meant ({hard}% in zones 4–5)" if v == "good" else f"Harder than an easy run ({hard}% in zones 4–5)"
+                # Easy means below zone 3, as everywhere else in the app (not merely "no zone 4–5")
+                easy = round(100 * z["easy"])
+                v = "good" if z["easy"] >= EASY_SHARE else "ok" if z["easy"] >= 0.5 and z["hard"] <= 0.1 else "low"
+                say = f"Easy, as meant ({easy}% below zone 3)" if v == "good" else \
+                    f"Harder than an easy run ({easy}% below zone 3, {hard}% in zones 4–5)"
             elif kind in HARD_KINDS:
                 v = "good" if z["hard"] >= 0.3 else "ok"
                 say = f"Hard, as a {kind} should be ({hard}% in zones 4–5)" if v == "good" else f"Easier than a {kind} ({hard}% in zones 4–5)"

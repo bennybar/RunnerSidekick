@@ -363,6 +363,11 @@ stress, and stays lower overall.
 Each part also gets a verdict: good (85+ points), ok (60+) or low. Running more than 120% of usual is never
 "good". The app shows that verdict and a plain line ("Normal for you", "Short (5 h 47 min)").
 
+A score needs at least one overnight part (HRV, resting HR or sleep); load and recovery alone come from the same
+running history. Reported pain or illness (rule R0) caps the score at 35 ("Take it easy or rest"), and the next run
+becomes rest. The fading load averages are divided by the share of their weight the available history covers
+(1 − e^(−days/τ)), so a short history doesn't read as a spike.
+
 "Usual" is the personal range median. While that is still being learned, it is the median of at least 4 earlier days
 in the last two weeks, marked provisional. When today's value isn't in yet, yesterday's is used and labelled.
 
@@ -394,7 +399,7 @@ nothing to judge.
 | Check | Rule |
 |---|---|
 | Pacing | second half vs first, on complete km: ≤5 s/km slower good (≥3 s/km faster good); ≤15 ok; else low |
-| Effort | share of time in zones 4–5 vs the run type. Easy, long or recovery: ≤10% good, ≤30% ok, else low. Tempo, intervals or race: ≥30% good. Unknown type: info |
+| Effort | time in zones vs the run type. Easy, long or recovery: ≥70% below zone 3 good, ≥50% with ≤10% in zones 4–5 ok, else low. Tempo, intervals or race: ≥30% good. Unknown type: info |
 | Cadence | steady = max − min across km ≤ 6 spm; good when steady and ≥165 spm, else ok |
 | Heart-rate drift | steady runs only: ≤5% good, ≤10% ok, else low |
 | Hills | info, from 30 m climb: the hilliest km with its flat-equivalent pace |

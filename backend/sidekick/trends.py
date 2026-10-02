@@ -83,7 +83,9 @@ def build_trends(conn, source: str, today: date, days: int, synthetic: bool) -> 
         sel = [a for a in acts if w.isoformat() <= a["local_date"] <= (w + timedelta(days=6)).isoformat()]
         weeks.append({"week_start": w.isoformat(), "runs": len(sel), "distance_m": round(sum(a["distance_m"] or 0 for a in sel), 1),
                       "moving_s": round(sum(a["moving_s"] or 0 for a in sel)), "partial": w + timedelta(days=6) > today,
-                      "activity_ids": [a["source_id"] for a in sel]})
+                      "activity_ids": [a["source_id"] for a in sel],
+                      "run_list": [{"source_id": a["source_id"], "local_date": a["local_date"], "distance_m": a["distance_m"],
+                                    "moving_s": a["moving_s"]} for a in sel]})
         w += timedelta(days=7)
     # Pace at the same heart rate (reuses the insight's per-device computation over the longer history)
     insight = rp_efficiency(conn, source, today)

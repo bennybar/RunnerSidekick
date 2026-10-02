@@ -24,3 +24,14 @@ def test_pacing_cadence_and_training_effect_verdicts(monkeypatch):
     assert even["pacing"]["say"] == "Even all the way" and even["cadence"]["say"].startswith("Varied")
     assert even["training_effect"]["verdict"] == "info" and "maintaining" in even["training_effect"]["say"]
     assert "hills" not in even  # under 30 m of climbing isn't worth a line
+
+
+def test_easy_run_all_in_zone_3_is_not_easy(monkeypatch):
+    from sidekick import focus
+    monkeypatch.setattr(rc.rp, "hr_zones", lambda conn: {"floors": [100, 120, 140, 160, 175]})
+    monkeypatch.setattr(rc.rp, "activity_by_source_id", lambda conn, s, sid: {"id": 1})
+    monkeypatch.setattr(focus, "zone_shares", lambda conn, a, floors: {"easy": 0.0, "hard": 0.0})
+    c = by_id(rc.build(None, "x", report([split(i, 350) for i in range(5)], "easy")))
+    assert c["effort"]["verdict"] == "low" and "0% below zone 3" in c["effort"]["say"]
+    monkeypatch.setattr(focus, "zone_shares", lambda conn, a, floors: {"easy": 0.85, "hard": 0.0})
+    assert by_id(rc.build(None, "x", report([split(i, 350) for i in range(5)], "easy")))["effort"]["verdict"] == "good"

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EmojiEvents
-import androidx.compose.material.icons.outlined.Handshake
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
@@ -62,13 +61,11 @@ private fun clock(s: Double?): String {
 }
 
 /**
- * The fitness overview: Garmin's numbers (labelled as Garmin's), your records, and an explicit note when
- * Garmin's verdict and Runner Sidekick's own analysis point the same way.
+ * Garmin's view of your training (status, load against its range, race predictions) and your records.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit,
-                   firstDay: java.time.DayOfWeek = java.time.DayOfWeek.MONDAY) {
+fun FitnessSection(f: Fitness, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val g = f.garmin
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -79,27 +76,12 @@ fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit,
                         ShapeBadge(Icons.Outlined.MonitorHeart, MaterialShapes.Cookie9Sided, Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("Your fitness", style = MaterialTheme.typography.titleLarge)
-                            Text("Numbers calculated by Garmin, shown as Garmin supplies them", style = MaterialTheme.typography.labelSmall,
-                                color = cs.onSurfaceVariant)
+                            Text("Garmin training status", style = MaterialTheme.typography.titleLarge)
+                            Text("Calculated by Garmin", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                         }
                     }
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        g.vo2max?.let { v ->
-                            Column(Modifier.weight(1f)) {
-                                Text("VO₂ max", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                                Text("%.1f".format(v.value), style = MaterialTheme.typography.displayMedium)
-                                v.date?.let { Text("as of ${Format.shortDate(it)}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
-                            }
-                        }
-                        g.trainingStatus?.let { st -> StatusBlock(st, Modifier.weight(1f)) }
-                    }
-                    if (f.vo2maxSeries.size >= 2) {
-                        Vo2Chart(f.vo2maxSeries, firstDay)
-                        Text("VO₂ max: ${f.vo2maxSeries.size} Garmin measurements since ${Format.shortDate(f.vo2maxSeries.first().date)} " +
-                            "(%.1f → %.1f)".format(f.vo2maxSeries.first().value, f.vo2maxSeries.last().value),
-                            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                    }
+                    // VO2 max lives on Today and in Compare; this card is Garmin's view of your training
+                    g.trainingStatus?.let { st -> StatusBlock(st, Modifier.fillMaxWidth()) }
                     g.trainingStatus?.let { st -> LoadBar(st) }
                     g.racePredictions?.let { r ->
                         Text("Garmin race predictions", style = MaterialTheme.typography.titleSmall)
@@ -117,28 +99,6 @@ fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit,
                         g.heatAcclimationPct?.let { "Heat acclimation: ${it.toInt()}%" },
                     ).takeIf { it.isNotEmpty() }?.let {
                         Text(it.joinToString(" · ") + " (Garmin)", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                    }
-                }
-            }
-            // Agreement: Garmin's status/balance and our own intensity analysis come from the same runs, so this is
-            // consistency, not independent confirmation.
-            val strained = trainingStatusLabel(g.trainingStatus?.phrase) in setOf("Overreaching", "Strained", "Unproductive")
-            val shortEasy = g.loadBalance?.phrase == "AEROBIC_LOW_SHORTAGE"
-            if (mostlyHard && (strained || shortEasy)) {
-                Surface(shape = MaterialTheme.shapes.large, color = cs.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.Top) {
-                        ShapeBadge(Icons.Outlined.Handshake, MaterialShapes.SoftBurst, Modifier.size(40.dp), container = cs.tertiary, content = cs.onTertiary)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Garmin agrees: too much hard running", style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer)
-                            Text(
-                                "Garmin: " + listOfNotNull(
-                                    if (strained) trainingStatusLabel(g.trainingStatus?.phrase)?.lowercase() else null,
-                                    if (shortEasy) "too little easy running" else null,
-                                ).joinToString(", ") + ". Your runs: mostly zones 4–5.",
-                                style = MaterialTheme.typography.bodyMedium, color = cs.onTertiaryContainer,
-                            )
-                        }
                     }
                 }
             }
@@ -193,14 +153,4 @@ private fun LoadBar(st: TrainingStatus) {
         Text(if (acute > hi) "Above Garmin's optimal range" else if (acute < lo) "Below Garmin's optimal range" else "Inside Garmin's optimal range",
             style = MaterialTheme.typography.labelMedium, color = if (acute > hi) cs.error else cs.onSurfaceVariant)
     }
-}
-
-/** VO2 max by week: Garmin's latest reading each week, last 8 weeks. */
-@Composable
-private fun Vo2Chart(series: List<com.bennybar.runnersidekick.data.remote.Point>, firstDay: java.time.DayOfWeek) {
-    val weeks = series.groupBy { Format.weekStart(java.time.LocalDate.parse(it.date), firstDay) }
-        .mapValues { (_, pts) -> pts.maxBy { it.date }.value }.toSortedMap().entries.toList().takeLast(8)
-    com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
-        weeks.map { com.bennybar.runnersidekick.ui.components.WeekPoint(it.key, it.value) }, decimals = 1, step = 1.0,
-        caption = "By week (latest Garmin reading)", description = "VO2 max by week")
 }

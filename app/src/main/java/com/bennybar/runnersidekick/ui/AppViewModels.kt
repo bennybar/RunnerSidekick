@@ -89,7 +89,13 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     private val _coachLoading = MutableStateFlow(false)
     val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
 
-    fun loadCoach() = viewModelScope.launch {
+    private var coachJob: kotlinx.coroutines.Job? = null
+    // One coach poll at a time: opening Insights asks from both the ViewModel and the screen
+    fun loadCoach() {
+        if (coachJob?.isActive == true) return
+        coachJob = pollCoachJob()
+    }
+    private fun pollCoachJob() = viewModelScope.launch {
         _coachLoading.value = true
         try {
             repo.pollCoach()

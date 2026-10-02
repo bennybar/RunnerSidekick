@@ -185,6 +185,37 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - The card says "Written automatically for this new run"; Settings explains the rule. Older runs keep the
   Get AI input button.
 
+## Insights trimmed, calculation fixes, battery (2026-10-02, v0.21.0)
+- Insights:
+  - Repeats removed: the "Garmin agrees" card, the hard-running and same-heart-rate pattern cards (covered by the
+    stats grid, the coach and Trends), and VO₂ max from Garmin's card (now "Garmin training status").
+  - Pattern cards have no buttons; "I'm working on it / Dismiss" sit in Details.
+  - Compare cards show the verdict and chart, with the explanation on tap. The screen summaries show their first
+    sentence (prompt summary-1.4: a takeaway first, at most 3 sentences).
+  - Trends lists runs by date, distance and pace instead of raw ids. The weekly review card is its headline only.
+- Calculation fixes from an external review:
+  - The training-load cache is keyed per user database and run revision.
+  - Readiness needs at least one overnight reading, and reported pain or illness caps it at 35 and makes the next run
+    rest.
+  - The fading load averages are bias-corrected for short history (22 vs 84 days of identical training now read the
+    same).
+  - Race-week sessions are scaled into one weekly budget.
+  - No 3 km floor on the next run.
+  - "Easy, as meant" requires 70% below zone 3.
+  - The resting-HR sentence ranks your typical value, not today's reading, against the population.
+  - "Update AI input" appears when a run's type was changed after its AI input was written.
+- Battery:
+  - The background worker no longer starts a Garmin sync and polls it (up to ~100 requests). It fetches only what
+    notifications read; the server's hourly cron does the syncing.
+  - The worker is scheduled only while signed in and needs the battery not to be low.
+  - One coach poll at a time.
+- Not done yet:
+  - From the review: removing Health /100 (a product call), and merging readiness/next run with the older
+    recommendation rules.
+  - Six older defects to re-check: settings that won't clear or disable AI, invalid dates on Today, failed-summary
+    retries, concurrent budget overrun, focus after pain, revoked PR highlights.
+  - Battery: pausing polls when a screen is hidden, cancellable HTTP, ETags, fewer cache writes.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

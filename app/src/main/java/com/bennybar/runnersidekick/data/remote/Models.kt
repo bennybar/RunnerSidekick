@@ -436,6 +436,10 @@ data class SettingsDto(
 @Serializable
 data class EffortIn(val rpe: Int, @SerialName("client_updated_at") val clientUpdatedAt: String)
 
+@Serializable
+data class TrendRun(@SerialName("source_id") val sourceId: String, @SerialName("local_date") val localDate: String,
+                    @SerialName("distance_m") val distanceM: Double? = null, @SerialName("moving_s") val movingS: Double? = null)
+
 /** One plain check of how a run went, with a verdict: good, ok, low or info. */
 @Serializable
 data class RunCheck(val id: String, val title: String, val say: String, val verdict: String)
@@ -507,6 +511,7 @@ data class WeekVolume(
     @SerialName("moving_s") val movingS: Double,
     val partial: Boolean,
     @SerialName("activity_ids") val activityIds: List<String> = emptyList(),
+    @SerialName("run_list") val runList: List<TrendRun> = emptyList(),
 )
 
 @Serializable
@@ -717,6 +722,8 @@ data class RunAi(
     @SerialName("key_source") val keySource: String? = null,
     /** "auto" when written right after a sync for a new run, "asked" when requested */
     val trigger: String? = null,
+    /** The run's type was changed after the input was written */
+    val stale: Boolean = false,
     val tldr: String? = null,
     val summary: String? = null,
     @SerialName("went_well") val wentWell: List<RunAiPoint> = emptyList(),

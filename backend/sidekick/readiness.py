@@ -22,7 +22,9 @@ ACUTE_DAYS, CHRONIC_DAYS, RECOVERY_HOURS = 7, 28, 48
 LOAD_OK, LOAD_SLOPE = 1.1, 160      # acute/chronic up to 1.1 scores 100; 1.35 → 60; 1.6 → 20
 RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining effort / typical run)
 CAP_ABOVE_LOWEST = 40  # the score is never more than 40 points above its weakest part
-HARD_SHARE = 0.3  # a run with at least 30% of its time in zones 4–5 counts as hard
+HARD_SHARE = 0.3
+OVERNIGHT = {"hrv", "resting_hr", "sleep"}
+PAIN_CAP = 35  # reported pain or illness: never above this  # a run with at least 30% of its time in zones 4–5 counts as hard
 
 
 def label(score: int) -> str:
@@ -69,7 +71,8 @@ _load_cache: dict[tuple, float] = {}
 def run_load(conn, a: dict, floors: list[float] | None) -> float:
     """Edwards training load of one run: moving minutes in each heart-rate zone times 1–5. Without usable heart rate,
     the run's minutes times 2 (a moderate guess)."""
-    key = (a["id"], a.get("moving_s"), tuple(floors or ()))
+    # Per user database (activity ids are per user) and per revision of the run's data (corrected samples recompute)
+    key = (conn.name, a["id"], a.get("content_hash"), a.get("updated_at"), a.get("moving_s"), tuple(floors or ()))
     if key in _load_cache:
         return _load_cache[key]
     from .analytics import insights as ins
@@ -107,8 +110,11 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
     floors = zones["floors"] if zones else None
     loads = [(e, run_load(conn, a, floors)) for e, a in ends]
     # Fading averages per day (a per-day rate, so acute and chronic are comparable)
-    acute = sum(l * exp(-(at - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS
-    chronic = sum(l * exp(-(at - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS
+    # Fading averages start from zero; divided by the share of each one's weight the history actually covers, so a short
+    # history doesn't read as a spike (the slower chronic average would otherwise lag far behind)
+    span = (at - ends[0][0]).total_seconds() / 86400 + 1
+    acute = sum(l * exp(-(at - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS / (1 - exp(-span / ACUTE_DAYS))
+    chronic = sum(l * exp(-(at - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS / (1 - exp(-span / CHRONIC_DAYS))
     typical = median(l for e, l in loads if (at - e).days < 28) if any((at - e).days < 28 for e, _ in loads) else median(l for _, l in loads)
     fatigue = sum(l * exp(-(at - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads) / typical if typical else 0
     days = (at.date() - ends[-1][0].date()).days
@@ -184,6 +190,9 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         if p["id"] == "load" and p["verdict"] == "good" and not p["say"].startswith("Normal"):
             p["verdict"] = "ok"  # "heavier than usual" never reads as good
     out = combine(parts, WEIGHTS)
+    # Load and recovery both come from the running history: without any overnight reading there's no score
+    if out["status"] == "ok" and not any(p.get("points") is not None for p in parts if p["id"] in OVERNIGHT):
+        out = {"status": "unavailable", "components": parts, "detail": "Waiting for last night's sleep, HRV or resting heart rate."}
     if out["status"] == "ok":
         # One very low part (a big jump in running, a short night) limits the whole score
         low = min(p["points"] for p in parts if p.get("points") is not None)
@@ -194,6 +203,9 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 85]
         if weak:
             out["held_back_by"] = min(weak, key=lambda p: p["points"])["title"]
+        if morning["recommendation"]["rule_id"] == "R0":
+            # Reported pain or illness overrides every reading
+            out.update(score=min(out["score"], PAIN_CAP), label="Low", headline="Take it easy or rest", held_back_by="What you reported")
     out.update(algorithm_version=READINESS_VERSION,
                basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 40 points "
                      "above it. A guide, not a medical score.")
@@ -235,7 +247,10 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
 
     # The race week's session for that day, when a race goal is set
     planned = next((s for s in (race or {}).get("week", {}).get("sessions", []) if s["date"] == day.isoformat()), None) if race else None
-    if day == today and score is not None and score < 40:
+    if day == today and rec["rule_id"] == "R0":
+        kind = "rest"
+        why.append("you reported pain or illness")
+    elif day == today and score is not None and score < 40:
         kind = "rest"
         why.append("readiness is very low today")
     elif day == today and (rec["state"] == "consider_easier" or rec["suppress_intensity"] or (score is not None and score < 60)):
@@ -262,7 +277,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
 
     km = {"rest": None, "easy": typical * (0.7 if score is not None and score < 60 else 0.9), "steady": typical,
           "long": min(longest * 1.1, max(longest, typical * 1.3))}[kind]
-    km = max(3.0, round(km * 2) / 2) if km else None
+    km = max(1.0, round(km * 2) / 2) if km else None  # half-km steps; no larger floor, so "shorter" stays shorter
     easy_pace = None
     ins = rp.latest_body(conn, "insights")
     if ins:

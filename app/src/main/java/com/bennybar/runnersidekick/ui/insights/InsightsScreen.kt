@@ -80,6 +80,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+private val REPEATED_ELSEWHERE = setOf("intensity", "efficiency")
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 fun categoryStyle(category: String): Pair<ImageVector, RoundedPolygon> = when (category) {
     "training" -> Icons.Outlined.FitnessCenter to MaterialShapes.Cookie9Sided
@@ -154,15 +156,15 @@ fun InsightsScreen(
                 focus?.value?.let { f -> animatedItem(key = "focus") {
                     com.bennybar.runnersidekick.ui.today.FocusCard(f, onChoose = vm::chooseFocus, onOpenRun = onOpenRun) } }
                 fitness?.value?.let { f ->
-                    animatedItem(key = "fitness") { FitnessSection(f, mostlyHard = items.any { it.id == "intensity" && it.verdict == "pattern" }, onOpenRun = onOpenRun, firstDay = firstDay) }
+                    animatedItem(key = "fitness") { FitnessSection(f, onOpenRun = onOpenRun) }
                 }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
                 if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
-                val patterns = items.filter { it.verdict == "pattern" }
+                // Hard-running share is in the stats grid and the coach; pace at the same heart rate is charted in Trends
+                val patterns = items.filter { it.verdict == "pattern" && it.id !in REPEATED_ELSEWHERE }
                 val nulls = items.filter { it.verdict == "no_clear_pattern" }
                 val waiting = items.filter { it.verdict == "not_enough_data" }
-                patterns.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i },
-                    onState = { st -> vm.setInsightState(i.id, st) }) } }
+                patterns.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i }) } }
                 if (nulls.isNotEmpty()) animatedItem(key = "nulls") {
                     Group(title = "Checked, nothing notable") {
                         nulls.forEach { i ->
@@ -182,7 +184,7 @@ fun InsightsScreen(
             }
         }
     }
-    method?.let { MethodSheet(it) { method = null } }
+    method?.let { m -> MethodSheet(data?.value?.insights?.firstOrNull { it.id == m.id } ?: m, onState = { st -> vm.setInsightState(m.id, st) }) { method = null } }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -198,14 +200,13 @@ fun WeeklyCard(w: com.bennybar.runnersidekick.data.remote.WeeklyReport, onOpen: 
                     color = cs.onPrimaryContainer)
             }
             Text(w.headline, style = MaterialTheme.typography.headlineSmall, color = cs.onPrimaryContainer)
-            Text("Next week: ${w.nextWeekFocus.text}", style = MaterialTheme.typography.bodyMedium, color = cs.onPrimaryContainer)
-            Text("Open the full review", style = MaterialTheme.typography.labelLarge, color = cs.primary)
+            Text("Next week's focus and details", style = MaterialTheme.typography.labelLarge, color = cs.primary)
         }
     }
 }
 
 @Composable
-fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit, onState: ((String?) -> Unit)? = null) {
+fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val container = if (emphasised) cs.surfaceContainerHigh else cs.surfaceContainer
     val (icon, shape) = categoryStyle(i.category)
@@ -233,23 +234,13 @@ fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit, onState: 
                     .joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
                 TextButton(onClick = onMethod) { Text("Details") }
             }
-            if (onState != null && i.verdict == "pattern") Row {
-                if (i.userState == null) {
-                    TextButton(onClick = { onState("working_on") }) { Text("I'm working on it") }
-                    TextButton(onClick = { onState("dismissed") }) { Text("Dismiss") }
-                } else {
-                    Text(if (i.userState == "working_on") "You're working on this" else "Dismissed", style = MaterialTheme.typography.labelLarge,
-                        color = cs.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically).padding(start = 12.dp))
-                    TextButton(onClick = { onState(null) }) { Text("Undo") }
-                }
-            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MethodSheet(i: Insight, onDismiss: () -> Unit) {
+private fun MethodSheet(i: Insight, onState: (String?) -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(i.question, style = MaterialTheme.typography.headlineSmall)
@@ -263,6 +254,17 @@ private fun MethodSheet(i: Insight, onDismiss: () -> Unit) {
             Group(title = "Method") { custom { Text(i.method, style = MaterialTheme.typography.bodyMedium) } }
             if (i.confounders.isNotEmpty()) Group(title = "What else could explain it") {
                 i.confounders.forEach { c -> row(c) }
+            }
+            // Marking a pattern lives here, not on the card
+            if (i.verdict == "pattern") Row(verticalAlignment = Alignment.CenterVertically) {
+                if (i.userState == null) {
+                    TextButton(onClick = { onState("working_on") }) { Text("I'm working on it") }
+                    TextButton(onClick = { onState("dismissed"); onDismiss() }) { Text("Dismiss") }
+                } else {
+                    Text(if (i.userState == "working_on") "You're working on this" else "Dismissed", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
+                    TextButton(onClick = { onState(null) }) { Text("Undo") }
+                }
             }
             Text(listOfNotNull(i.sampleSize?.let { "Sample size $it" }, i.evidence.dateRange.takeIf { it.size == 2 }?.let { "${it[0]} – ${it[1]}" },
                 i.algorithmVersion, "Associations only, not causes or medical advice").joinToString(" · "),

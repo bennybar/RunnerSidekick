@@ -133,14 +133,14 @@ private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
                             b[0].jsonPrimitive.doubleOrNull!! to b[1].jsonPrimitive.doubleOrNull!! })
                 }
             }
-            i.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            if (i.method != null || i.caveats.isNotEmpty()) {
+            if (i.detail != null || i.method != null || i.caveats.isNotEmpty()) {
                 if (more) {
+                    i.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                     i.method?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
                     i.caveats.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
                     i.source?.let { Text("Reference: $it", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
                 }
-                TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "How it's compared") }
+                TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "Details") }
             }
         }
     }

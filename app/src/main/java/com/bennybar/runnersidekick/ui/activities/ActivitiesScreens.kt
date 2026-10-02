@@ -232,7 +232,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                     // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
                     if (r != null) {
                         // Any finished AI input for this run counts (also one kept from before the run's data was refreshed)
-                        val st = ai?.value?.let { v -> if (v.status != "ok" && v.previous?.status == "ok") "ok" else v.status }
+                        // ...unless you changed the run's type since: then it can be rewritten for the new type
+                        val st = ai?.value?.let { v -> if (v.status != "ok" && v.previous?.status == "ok" && !v.stale) "ok" else v.status }
                         androidx.compose.material3.FilledTonalButton(
                             onClick = { vm.askAi(); aiScroll.value++ },
                             // Already written for this run: nothing more to ask for (it's shown at the top)
@@ -241,7 +242,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                             if (st == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
                             else Icon(if (st == "ok") Icons.Outlined.CheckCircle else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (st == "ok") "AI input ready" else "Get AI input")
+                            Text(if (st == "ok") "AI input ready" else if (ai?.value?.stale == true) "Update AI input" else "Get AI input")
                         }
                     }
                 },

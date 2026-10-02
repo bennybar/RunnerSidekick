@@ -597,7 +597,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             return run_ai.view(hit)
         if not start:
             prev = run_ai.latest(conn, sid)
-            return {"status": "none", "previous": run_ai.view(prev) if prev and prev["status"] == "ok" else None}
+            # Stale only when you changed what the run was meant to be after the input was written (the bundle also
+            # changes daily with today's advice, which isn't a reason to rewrite it)
+            intent = one(conn.run_intent, {"activity_source_id": sid})
+            stale = bool(prev and intent and (intent.get("client_updated_at") or "") > prev["created_at"])
+            return {"status": "none", "previous": run_ai.view(prev) if prev and prev["status"] == "ok" else None, "stale": stale}
         run_ai_inflight.add((conn.name, sid))
         threading.Thread(target=run_ai_bg, args=(conn.name, sid, b, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
                          daemon=True).start()

@@ -104,3 +104,13 @@ def test_race_week_contains_the_race_and_no_long_run():
     kinds = {s["date"]: s["kind"] for s in w["sessions"]}
     assert kinds["2026-10-03"] == "race" and "long" not in kinds.values()
     assert all(k in ("rest", "race") for d, k in kinds.items() if d > "2026-10-03")
+
+
+def test_low_volume_week_plan_stays_inside_its_target():
+    conn = synced()
+    set_race(conn, 60)  # build phase: long run, tempo and easy days
+    conn.activity.update_many({}, {"$set": {"moving_s": 900}})  # 15-minute runs: a low-volume runner
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    planned = sum(s["minutes"] or 0 for s in w["sessions"])
+    assert w["target_minutes"] and planned <= w["target_minutes"] + 5
+    assert all((s["minutes"] or 10) >= 10 for s in w["sessions"])
