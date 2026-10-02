@@ -221,8 +221,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if not ai.enabled:
             body["narrative"] = {"status": "disabled"}
             return body
-        if body["type"] == "morning":
-            # Today shows the coach's TL;DR instead; a morning narrative would be paid for and never read
+        if body["type"] in ("morning", "post_run"):
+            # Today shows the coach's TL;DR and a run has its own AI input, so a narrative would be paid for and never read
             body["narrative"] = None
             return body
         hit = nv.cached(conn, body, ai.model)
@@ -541,7 +541,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         with lock_reports:
             report = rp.build_post_run(conn, cfg.source, sid, synthetic)
         s = rp.samples_for(conn, a["id"])
-        return {"report": with_narrative(conn, report), "chart": downsample(s) if s else None}
+        from . import run_checks
+        body = with_narrative(conn, report)
+        if body is not None:
+            body["checks"] = run_checks.build(conn, cfg.source, body)
+        return {"report": body, "chart": downsample(s) if s else None}
 
     run_ai_inflight: set[tuple] = set()
 

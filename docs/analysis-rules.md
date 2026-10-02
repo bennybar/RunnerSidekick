@@ -385,3 +385,17 @@ Distance comes from the runs of the last 4 weeks:
 - long: at least the longest run, up to 10% more.
 
 The heart-rate cap is the top of zone 2, or zone 3 for steady runs. Pace and time come from the measured easy pace.
+
+## How a run went — `run_checks.py`
+
+Calculated when a run is opened; stored reports don't change. Verdicts are good / ok / low, or info where there is
+nothing to judge.
+
+| Check | Rule |
+|---|---|
+| Pacing | second half vs first, on complete km: ≤5 s/km slower good (≥3 s/km faster good); ≤15 ok; else low |
+| Effort | share of time in zones 4–5 vs the run type. Easy, long or recovery: ≤10% good, ≤30% ok, else low. Tempo, intervals or race: ≥30% good. Unknown type: info |
+| Cadence | steady = max − min across km ≤ 6 spm; good when steady and ≥165 spm, else ok |
+| Heart-rate drift | steady runs only: ≤5% good, ≤10% ok, else low |
+| Hills | info, from 30 m climb: the hilliest km with its flat-equivalent pace |
+| Training effect | Garmin's aerobic effect in Garmin's words. Low when ≥4 on an easy run, or when overreaching; otherwise info |

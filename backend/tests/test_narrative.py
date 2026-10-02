@@ -133,17 +133,13 @@ def test_api_attaches_narrative_without_blocking(tmp_path):
         time.sleep(0.1)
     assert client.get("/v1/today", headers=h).json()["narrative"]["status"] == "disabled"
     client.put("/v1/settings", json={"ai_enabled": True}, headers=h)
-    # Today shows the coach's TL;DR, so no morning narrative is generated (or paid for)
+    # Today shows the coach's TL;DR and a run has its own AI input: no narrative is generated (or paid for) for either
     assert client.get("/v1/today", headers=h).json()["narrative"] is None
     sid = client.get("/v1/activities", headers=h).json()[0]["source_id"]
-    first = client.get(f"/v1/activities/{sid}", headers=h).json()["report"]["narrative"]["status"]
-    assert first in ("pending", "ok")
-    for _ in range(50):
-        n = client.get(f"/v1/activities/{sid}", headers=h).json()["report"]["narrative"]
-        if n["status"] != "pending":
-            break
-        time.sleep(0.05)
-    assert n["status"] == "ok" and n["sentences"]
+    run = client.get(f"/v1/activities/{sid}", headers=h).json()["report"]
+    assert run["narrative"] is None and run["checks"]
+    time.sleep(0.2)
+    assert p.calls == 0
 
 
 def test_forced_regeneration_counts_every_call(setup):

@@ -161,7 +161,6 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
             }
         }
     }
-    fun setEffort(rpe: Int) = launchIo { repo.setEffort(id, rpe) }
     fun setIntent(kind: String, note: String?) = launchIo { repo.setIntent(id, kind, note) }
 }
 

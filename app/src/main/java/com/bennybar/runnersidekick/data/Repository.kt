@@ -9,7 +9,6 @@ import com.bennybar.runnersidekick.data.remote.ActivityDetail
 import com.bennybar.runnersidekick.data.remote.ActivitySummary
 import com.bennybar.runnersidekick.data.remote.ApiClient
 import com.bennybar.runnersidekick.data.remote.CheckinDto
-import com.bennybar.runnersidekick.data.remote.EffortIn
 import com.bennybar.runnersidekick.data.remote.AuthResult
 import com.bennybar.runnersidekick.data.remote.CoachView
 import com.bennybar.runnersidekick.data.remote.DayPlanIn
@@ -351,12 +350,6 @@ class Repository(
             illness = s.illness, notes = s.notes, tagsJson = json.encodeToString(ListSerializer(String.serializer()), s.tags),
             clientUpdatedAt = s.clientUpdatedAt, pendingSync = false, account = acct,
         ))
-    }
-
-    suspend fun setEffort(activityId: String, rpe: Int) {
-        api.putRaw("/v1/activities/$activityId/effort", json.encodeToString(EffortIn(rpe, Instant.now().toString())))
-        refreshActivity(activityId)
-        refreshFocus()  // the weekly focus reports perceived effort
     }
 
     suspend fun remoteSettings(): SettingsDto = json.decodeFromString(api.getRaw("/v1/settings"))

@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bennybar.runnersidekick.data.local.Units
+import com.bennybar.runnersidekick.ui.components.VerdictChip
 import com.bennybar.runnersidekick.data.remote.Finding
 import com.bennybar.runnersidekick.data.remote.MorningReport
 import com.bennybar.runnersidekick.data.remote.Status
@@ -521,20 +522,6 @@ private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOp
             Text((s.heldBackBy?.let { "Held back by: ${it.lowercase()} · " } ?: "") + "tap for details",
                 style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
-    }
-}
-
-@Composable
-private fun VerdictChip(verdict: String?) {
-    val cs = MaterialTheme.colorScheme
-    val (text, bg, fg) = when (verdict) {
-        "good" -> Triple("Good", cs.primaryContainer, cs.onPrimaryContainer)
-        "ok" -> Triple("OK", cs.secondaryContainer, cs.onSecondaryContainer)
-        "low" -> Triple("Low", cs.tertiaryContainer, cs.onTertiaryContainer)
-        else -> Triple("—", cs.surfaceContainerHighest, cs.onSurfaceVariant)
-    }
-    Surface(shape = MaterialTheme.shapes.large, color = bg) {
-        Text(text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
 

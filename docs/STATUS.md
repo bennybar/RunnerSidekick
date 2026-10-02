@@ -168,6 +168,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   load (heart-rate zones × minutes, fading over 7 vs 28 days) and a recovery part (recent effort fading over about
   2 days). Backtested against Garmin's readiness on real data: both now drop on the same mornings after runs.
 
+## Plainer run screen (2026-10-02, v0.19.0)
+- "How it went": plain checks with Good / OK / Low / Info instead of story sentences. The checks are pacing, effort
+  against the run type, cadence, heart-rate drift (steady runs), hills and Garmin's training effect.
+- The AI input card shows its TL;DR and the next-time tip, with went well / to work on one tap away.
+- Removed:
+  - the old per-run AI narrative (it often said nothing; the server no longer generates it, one AI call less per run);
+  - the "drift not calculated" jargon row;
+  - the perceived-effort input (no manual inputs).
+- Garmin's numbers are rounded (training load 179, not 179.26…), and its training effect isn't repeated.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

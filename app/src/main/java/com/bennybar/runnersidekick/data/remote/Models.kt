@@ -365,6 +365,7 @@ data class PostRunReport(
     @SerialName("next_focus") val nextFocus: String,
     val narrative: Narrative? = null,
     val story: List<String> = emptyList(),
+    val checks: List<RunCheck> = emptyList(),
     @SerialName("best_efforts") val bestEfforts: Map<String, BestEffort> = emptyMap(),
     val intent: RunIntent? = null,
 )
@@ -434,6 +435,10 @@ data class SettingsDto(
 
 @Serializable
 data class EffortIn(val rpe: Int, @SerialName("client_updated_at") val clientUpdatedAt: String)
+
+/** One plain check of how a run went, with a verdict: good, ok, low or info. */
+@Serializable
+data class RunCheck(val id: String, val title: String, val say: String, val verdict: String)
 
 @Serializable
 data class Insight(

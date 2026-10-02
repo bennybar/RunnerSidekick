@@ -28,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.EmojiEvents
-import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timeline
@@ -82,13 +81,17 @@ import com.bennybar.runnersidekick.ui.theme.LocalDataColors
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
+// Garmin's training effect is shown with a verdict under "How it went", so it isn't repeated here
 private val GARMIN_LABELS = mapOf(
-    "aerobicTrainingEffect" to "Aerobic training effect",
-    "anaerobicTrainingEffect" to "Anaerobic training effect",
-    "trainingEffectLabel" to "Training effect",
     "activityTrainingLoad" to "Training load",
     "calories" to "Calories (kcal)",
 )
+
+/** Garmin's numbers as people read them: whole numbers where decimals mean nothing. */
+private fun garminValue(key: String, v: String): String = when (key) {
+    "activityTrainingLoad", "calories" -> v.toDoubleOrNull()?.roundToInt()?.toString() ?: v
+    else -> v
+}
 
 private enum class Filter(val label: String) { ALL("All"), ROAD("Road"), TRAIL("Trail"), TREADMILL("Treadmill") }
 
@@ -257,7 +260,11 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                 // Shown at the top once asked for (or already written); the button lives in the top bar
                 if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
-                if (r.story.isNotEmpty()) item {
+                if (r.checks.isNotEmpty()) item {
+                    Group(title = "How it went") {
+                        r.checks.forEach { c -> row(c.title, supporting = c.say, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
+                    }
+                } else if (r.story.isNotEmpty()) item {
                     Group(title = "How the run went") {
                         custom {
                             r.story.forEach { line ->
@@ -315,28 +322,13 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                         }
                     }
                 }
-                r.narrative?.takeIf { it.status == "ok" }?.let { n ->
-                    item {
-                        Group(title = "AI summary · ${n.model ?: n.provider}") {
-                            custom {
-                                Text(n.sentences.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge)
-                                Text("Numbers come from the analysis below.", style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-                            }
-                        }
-                    }
-                }
-                item {
+                // Only findings that say something; checks that couldn't run aren't listed
+                if (r.findings.isNotEmpty()) item {
                     Group(title = "Analysis") {
                         r.findings.forEach { f -> row(f.title, supporting = f.statement, icon = Icons.Outlined.Timeline, iconShape = MaterialShapes.Pill,
                             onClick = { evidence = f }) }
-                        val d = r.decoupling
-                        val kind = when (r.classification.kind) { "steady" -> "Steady effort"; "variable" -> "Variable effort / intervals"; else -> "Effort type unknown" }
-                        if (!d.eligible) row("Heart-rate drift not calculated", supporting = "$kind. " + d.reasons.joinToString("; "),
-                            icon = Icons.Outlined.Favorite, iconShape = MaterialShapes.Pill)
                     }
                 }
-                item { EffortGroup(r, vm::setEffort) }
                 if (r.splits.isNotEmpty()) item { Splits(r, units) }
                 if (r.comparable.runs.isNotEmpty()) item {
                     Group(title = "Similar runs (${r.comparable.n}) · distance ±20%, similar climbing, steady") {
@@ -352,9 +344,9 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                 // estimate only when the day's value is missing, labelled as such
                 val vo2 = r.garminVo2maxDay?.let { listOf("VO₂ max" to "%.1f".format(it.value)) }
                     ?: r.garminMetrics["vO2MaxValue"]?.let { listOf("VO₂ max (this run's estimate)" to it.toString().trim('"')) }.orEmpty()
-                val garmin = vo2 + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to v.toString().trim('"') } }
+                val garmin = vo2 + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
                 if (garmin.isNotEmpty()) item {
-                    Group(title = "From Garmin · shown as supplied") { garmin.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) } }
+                    Group(title = "From Garmin") { garmin.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) } }
                 }
             }
         }
@@ -393,22 +385,6 @@ private fun RunHero(r: PostRunReport, units: Units) {
 }
 
 @Composable
-private fun EffortGroup(r: PostRunReport, onSet: (Int) -> Unit) {
-    Group(title = "How hard did it feel?") {
-        custom {
-            Text("Perceived effort, 1 (very easy) to 10 (max)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (1..10).forEach { v -> FilterChip(selected = r.effort?.rpe == v, onClick = { onSet(v) }, label = { Text("$v") }) }
-            }
-            r.effort?.let {
-                Text("Session-RPE load ${it.sessionRpeLoad}. ${it.note}", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
-            }
-        }
-    }
-}
-
-@Composable
 private fun Splits(r: PostRunReport, units: Units) {
     Group(title = "Splits") {
         custom {
@@ -429,9 +405,9 @@ private fun Splits(r: PostRunReport, units: Units) {
                     Text("+${Format.elevation(s.elevationGainM, units)}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            Text("Flat-equivalent = grade-adjusted pace (Minetti energy-cost model): what the effort would give on flat ground.",
+            Text("Flat-equiv. = the pace this effort would give on flat ground.",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-            if (r.splits.any { !it.complete }) Text("* Partial split, left out of split comparisons", style = MaterialTheme.typography.labelSmall,
+            if (r.splits.any { !it.complete }) Text("* Partial km", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(2.dp))
         }
@@ -459,13 +435,16 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
             }
             when {
                 shown != null -> {
+                    // Compact: the one line and the next-time tip; the rest on request
+                    var more by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
                     shown.tldr?.let { com.bennybar.runnersidekick.ui.insights.Tldr(it) }
-                    shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
-                    if (shown.wentWell.isNotEmpty()) {
+                    // Older input has no one-liner: its summary is shown as plain text instead
+                    if (more || shown.tldr == null) shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    if (more && shown.wentWell.isNotEmpty()) {
                         Text("Went well", style = MaterialTheme.typography.titleSmall, color = cs.primary)
                         shown.wentWell.forEach { p -> Bullet(p.text) }
                     }
-                    if (shown.toWorkOn.isNotEmpty()) {
+                    if (more && shown.toWorkOn.isNotEmpty()) {
                         Text("To work on", style = MaterialTheme.typography.titleSmall, color = cs.primary)
                         shown.toWorkOn.forEach { p -> Bullet(p.text) }
                     }
@@ -478,6 +457,8 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                             }
                         }
                     }
+                    if (!more && (shown.wentWell.isNotEmpty() || shown.toWorkOn.isNotEmpty()))
+                        androidx.compose.material3.TextButton(onClick = { more = true }) { Text("What went well, what to work on") }
                     Text("Written by AI (${shown.model ?: "OpenAI"})" + (if (shown.keySource == "user") " with your key" else "") +
                         " · numbers come from the app · guidance, not medical advice", style = MaterialTheme.typography.labelSmall,
                         color = cs.onSurfaceVariant)

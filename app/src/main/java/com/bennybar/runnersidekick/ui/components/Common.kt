@@ -153,3 +153,19 @@ fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
         }
     }
 }
+
+/** Good / OK / Low (or Info) next to a plain-language check. */
+@Composable
+fun VerdictChip(verdict: String?) {
+    val cs = MaterialTheme.colorScheme
+    val (text, bg, fg) = when (verdict) {
+        "good" -> Triple("Good", cs.primaryContainer, cs.onPrimaryContainer)
+        "ok" -> Triple("OK", cs.secondaryContainer, cs.onSecondaryContainer)
+        "low" -> Triple("Low", cs.tertiaryContainer, cs.onTertiaryContainer)
+        "info" -> Triple("Info", cs.surfaceContainerHighest, cs.onSurfaceVariant)
+        else -> Triple("—", cs.surfaceContainerHighest, cs.onSurfaceVariant)
+    }
+    Surface(shape = MaterialTheme.shapes.large, color = bg) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+    }
+}
