@@ -130,13 +130,12 @@ fun FitnessSection(f: Fitness, mostlyHard: Boolean, onOpenRun: (String) -> Unit,
                         ShapeBadge(Icons.Outlined.Handshake, MaterialShapes.SoftBurst, Modifier.size(40.dp), container = cs.tertiary, content = cs.onTertiary)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("Garmin and your own data agree", style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer)
+                            Text("Garmin agrees: too much hard running", style = MaterialTheme.typography.titleMedium, color = cs.onTertiaryContainer)
                             Text(
-                                listOfNotNull(
-                                    if (strained) "Garmin rates your training as ${trainingStatusLabel(g.trainingStatus?.phrase)?.lowercase()}" else null,
-                                    if (shortEasy) "Garmin sees too little low-intensity aerobic work" else null,
-                                ).joinToString(", and ") + ". That matches what Runner Sidekick finds: most of your running is in zones 4–5. " +
-                                    "Both views come from the same runs, so this is consistency rather than independent proof.",
+                                "Garmin: " + listOfNotNull(
+                                    if (strained) trainingStatusLabel(g.trainingStatus?.phrase)?.lowercase() else null,
+                                    if (shortEasy) "too little easy running" else null,
+                                ).joinToString(", ") + ". Your runs: mostly zones 4–5.",
                                 style = MaterialTheme.typography.bodyMedium, color = cs.onTertiaryContainer,
                             )
                         }

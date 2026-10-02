@@ -65,10 +65,11 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     base, against = usual(f, today) if v is not None else (None, "")
     if base:
         pct = 100 * (v - base) / base
-        parts.append({"id": "hrv", "title": "HRV vs usual", "value": f"{round(v)} ms", "points": round(100 if pct >= -5 else clamp(100 + 4 * (pct + 5))),
+        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms", "points": round(100 if pct >= -5 else clamp(100 + 4 * (pct + 5))),
+                      "say": "Normal for you" if pct >= -5 else f"Lower than usual ({pct:.0f}%)",
                       "note": f"{pct:+.0f}% vs {against} {round(base)} ms" + (f" · {when}" if when else "") + "; 5% below or better scores 100"})
     else:
-        parts.append({"id": "hrv", "title": "HRV vs usual", "value": f"{round(v)} ms" if v else None, "points": None,
+        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms" if v else None, "points": None, "say": "Not known yet",
                       "note": "Needs a few nights to know your usual"})
 
     f = by.get("resting_hr")
@@ -76,41 +77,53 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     base, against = usual(f, today) if v is not None else (None, "")
     if base:
         d = v - base
-        parts.append({"id": "resting_hr", "title": "Resting heart rate vs usual", "value": f"{round(v)} bpm",
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm",
                       "points": round(100 if d <= 1 else clamp(100 - 12 * (d - 1))),
+                      "say": "Normal for you" if d <= 1 else f"Higher than usual (+{d:.0f} bpm)",
                       "note": f"{d:+.0f} bpm vs {against} {round(base)}" + (f" · {when}" if when else "") + "; each bpm over +1 costs 12 points"})
     else:
-        parts.append({"id": "resting_hr", "title": "Resting heart rate vs usual", "value": f"{round(v)} bpm" if v else None, "points": None,
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm" if v else None, "points": None,
+                      "say": "Not known yet",
                       "note": "Needs a few days to know your usual"})
 
     v, when = current(by.get("sleep_duration"), today)
     if v is not None:
         h = v / 3600
-        parts.append({"id": "sleep", "title": "Sleep last night", "value": f"{int(h)} h {round((h % 1) * 60):02d} min",
-                      "points": round(100 if h >= 7 else clamp(100 - 30 * (7 - h))),
+        hm = f"{int(h)} h {round((h % 1) * 60):02d} min"
+        parts.append({"id": "sleep", "title": "Sleep", "value": hm, "points": round(100 if h >= 7 else clamp(100 - 30 * (7 - h))),
+                      "say": f"Enough ({hm})" if h >= 7 else f"Short ({hm})",
                       "note": "7 h or more scores 100; each hour short costs 30 points" + (f" · {when}" if when else "")})
     else:
-        parts.append({"id": "sleep", "title": "Sleep last night", "value": None, "points": None, "note": "Not in yet"})
+        parts.append({"id": "sleep", "title": "Sleep", "value": None, "points": None, "say": "Not in yet", "note": "Not in yet"})
 
     f = by.get("running_moving_time_7d")
     if f and f.get("comparison", {}).get("value"):
         ratio = f["observed"]["value"] / f["comparison"]["value"]
-        parts.append({"id": "load", "title": "Running, last 7 days", "value": f"{round(100 * ratio)}% of usual",
+        parts.append({"id": "load", "title": "Running this week", "value": f"{round(100 * ratio)}% of usual",
                       "points": round(100 if ratio <= 1.2 else clamp(100 - 100 * (ratio - 1.2) / 0.6)),
+                      "say": "A normal amount" if ratio <= 1.2 else f"{'More' if ratio <= 1.5 else 'Much more'} than usual ({round(100 * ratio)}%)",
                       "note": "Against your weekly average of the 4 weeks before; up to 120% scores 100, 180% scores 0"})
     else:
-        parts.append({"id": "load", "title": "Running, last 7 days", "value": None, "points": None, "note": "Needs 4 weeks of runs"})
+        parts.append({"id": "load", "title": "Running this week", "value": None, "points": None, "say": "Not known yet",
+                      "note": "Needs 4 weeks of runs"})
 
     rr = recent_runs(conn, source, today, zones)
     if rr:
         r = rr[0]
         when = ["today", "yesterday", "2 days ago"][r["days_ago"]]
         pts = (40 if r["days_ago"] == 0 else 60 if r["days_ago"] == 1 else 85) if r["hard"] else (75 if r["days_ago"] == 0 else 90 if r["days_ago"] == 1 else 100)
-        parts.append({"id": "recent", "title": "Last run", "value": f"{'hard' if r['hard'] else 'easy'}, {when}", "points": pts,
+        say = (f"Hard, {when}: " + ("still recovering" if r["days_ago"] <= 1 else "mostly recovered")) if r["hard"] else f"Easy, {when}"
+        parts.append({"id": "recent", "title": "Last run", "value": f"{'hard' if r['hard'] else 'easy'}, {when}", "points": pts, "say": say,
                       "note": "Hard means 30% or more of the time in zones 4–5; points come back over 2–3 days"})
     else:
-        parts.append({"id": "recent", "title": "Last run", "value": "none in 2 days", "points": 100, "note": "Rested legs"})
+        parts.append({"id": "recent", "title": "Last run", "value": "none in 2 days", "points": 100, "say": "None in 2 days: rested",
+                      "note": "Rested legs"})
 
+    for p in parts:
+        pts = p.get("points")
+        p["verdict"] = "unknown" if pts is None else "good" if pts >= 85 else "ok" if pts >= 60 else "low"
+        if p["id"] == "load" and p["verdict"] == "good" and not p["say"].startswith("A normal"):
+            p["verdict"] = "ok"  # "more than usual" never reads as good
     out = combine(parts, WEIGHTS)
     if out["status"] == "ok":
         # One very low part (a big jump in running, a short night) limits the whole score
@@ -118,6 +131,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         if out["score"] > low + CAP_ABOVE_LOWEST:
             out["score"], out["capped_by"] = low + CAP_ABOVE_LOWEST, next(p["id"] for p in parts if p.get("points") == low)
         out["label"] = label(out["score"])
+        out["headline"] = {"High": "Ready to train", "Moderate": "Fine for an easy run", "Low": "Take it easy or rest"}[out["label"]]
+        weak = [p for p in parts if p.get("points") is not None and p["points"] < 85]
+        if weak:
+            out["held_back_by"] = min(weak, key=lambda p: p["points"])["title"]
     out.update(algorithm_version=READINESS_VERSION,
                basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 50 points "
                      "above it. A guide, not a medical score.")
@@ -164,7 +181,10 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
         why.append("readiness is very low today")
     elif day == today and (rec["state"] == "consider_easier" or rec["suppress_intensity"] or (score is not None and score < 60)):
         kind = "easy"
-        why.append("today's readings say keep it easy" if score is None or score >= 60 else "readiness is low for anything harder")
+        why.append("readiness is low for anything harder" if score is not None and score < 60 else
+                   "today's sleep and HRV aren't in yet" if rec["rule_id"] in ("R1", "R1c") else
+                   "your usual ranges are still being learned" if rec["state"] == "insufficient_data" else
+                   "today's readings suggest easier" if rec["state"] == "consider_easier" else "one reading stands out today")
     elif planned and planned["kind"] in ("long", "easy"):
         kind = planned["kind"]
         why.append(f"your race week plan ({race['label']})")

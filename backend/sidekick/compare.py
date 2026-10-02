@@ -87,7 +87,7 @@ def vo2_item(sex: str, age: int, g: dict) -> dict:
     return {**base, "status": "ok", "value": v, "unit": "mL/kg/min", "rating": rating, "percentile": round(pct) if pct is not None else None,
             "position": where, "group": grp, "typical_age": round(t_age) if t_age is not None else None,
             "headline": f"{rating} for {grp}",
-            "detail": f"Your VO₂ max of {v:.1f} (Garmin, {g['vo2max'].get('date') or 'latest'}) is {pos}. It is {typical}.",
+            "detail": f"Your VO₂ max of {v:.1f} (Garmin) is {pos}. It is {typical}.",
             "method": "Garmin's VO₂ max placed among the Cooper Institute ratings for your sex and age group; the position between "
                       "published percentiles is interpolated. 'Typical' is the midpoint of the 40th and 60th percentiles.",
             "caveats": nearest_note(outside, age, lo, hi) + [

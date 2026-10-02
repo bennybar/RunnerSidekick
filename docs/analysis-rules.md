@@ -345,6 +345,9 @@ above it. Labels: 75+ high, 50+ moderate, otherwise low. Garmin's training readi
 | Running, last 7 days (15) | 100 up to 120% of the prior 4-week weekly mean, 0 at 180% |
 | Last run (15) | hard (≥30% in zones 4–5): 40 today, 60 yesterday, 85 two days ago; easy: 75, 90, 100 |
 
+Each part also gets a verdict: good (85+ points), ok (60+) or low. Running more than 120% of usual is never
+"good". The app shows that verdict and a plain line ("Normal for you", "Short (5 h 47 min)").
+
 "Usual" is the personal range median. While that is still being learned, it is the median of at least 4 earlier days
 in the last two weeks, marked provisional. When today's value isn't in yet, yesterday's is used and labelled.
 

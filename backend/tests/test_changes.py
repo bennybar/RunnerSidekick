@@ -19,5 +19,5 @@ def test_changes_since_yesterday():
     today = rp.build_morning(conn, "fixture", ANCHOR, True)
     ch = changes.since_yesterday(conn, today, ANCHOR)
     assert "Your check-in is included." in ch and "Today's plan is set: easy." in ch
-    assert any(c.startswith("The call is now Consider easier") for c in ch)  # pain → easier
+    assert not any(c.startswith("The call is now") for c in ch)  # the old day's-call label is no longer shown
     assert changes.since_yesterday(conn, today, ANCHOR - timedelta(days=60)) == []  # no earlier briefing

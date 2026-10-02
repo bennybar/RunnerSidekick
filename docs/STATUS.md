@@ -153,6 +153,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   never read; it was about half of all calls). All calls use low reasoning effort (a real coach call went from 31 s
   to 18 s with fewer output tokens, same validated output). Each call's token use is now logged in `ai_call.usage`.
 
+## Plainer Today, screen review (2026-10-02, v0.18.0)
+- Today: the day's-call card ("Not enough data · train by feel") is gone. It contradicted readiness and the next run,
+  which now sit right under the scores. The readiness breakdown shows a plain line and a Good / OK / Low verdict per
+  part instead of points and formulas. "Since yesterday" now reports readiness moves of 5 or more, instead of the
+  old call label.
+- One freshness pill instead of three. Reading tiles say "Yesterday's" instead of "From … · today's not in yet".
+- Insights: the coach card shows two findings and one thing to try (the rest under "Show full analysis"). The
+  Garmin agreement card is one line. Compare no longer shows an ISO date.
+- Journal: the Check-ins tab only appears for people who logged check-ins before.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

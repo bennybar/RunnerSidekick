@@ -212,12 +212,14 @@ data class Stats(@SerialName("window_days") val windowDays: Int = 28, val items:
 
 @Serializable
 data class ScoreComponent(val id: String, val title: String, val value: String? = null, val points: Int? = null,
-                          @SerialName("weight_pct") val weightPct: Int = 0, val note: String? = null)
+                          @SerialName("weight_pct") val weightPct: Int = 0, val note: String? = null,
+                          val say: String? = null, val verdict: String? = null)
 
 @Serializable
 data class Score(val status: String, val score: Int? = null, val label: String? = null, val used: Int? = null, val of: Int? = null,
                  val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
-                 @SerialName("capped_by") val cappedBy: String? = null)
+                 @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
+                 @SerialName("held_back_by") val heldBackBy: String? = null)
 
 /** The next run, calculated from readiness, recent runs and Garmin's zones. */
 @Serializable

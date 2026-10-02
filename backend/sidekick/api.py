@@ -280,12 +280,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body["race"] = race.status(conn, d)
             if body["race"]:
                 body["race"]["week"] = race.week_plan(conn, cfg.source, d)
-            body["changes"] = changes.since_yesterday(conn, body, d)
             from . import scores
             body["scores"] = scores.build(conn, cfg.source, d)
             from . import readiness
             body["readiness"] = readiness.build(conn, cfg.source, d, body)
             body["next_run"] = readiness.next_run(conn, cfg.source, d, body, body["readiness"], body["race"])
+            body["changes"] = changes.since_yesterday(conn, body, d, cfg.source)
             from . import readings
             cmp = compare.build(conn, cfg.source, d)
             body["highlights"] = highlights.build(conn, cfg.source, d, cmp, fc.current(conn, cfg.source, d), body["race"])

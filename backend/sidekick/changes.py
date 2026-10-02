@@ -1,5 +1,5 @@
-"""What changed in today's call compared with yesterday's: the state and suggestion, readings that moved in or out
-of your usual range, the plan, and a check-in. Computed when the briefing is read, from stored reports, so it never
+"""What changed since yesterday: training readiness (when it moved by 5 or more), readings that moved in or out of
+your usual range, the plan, and a check-in. Computed when the briefing is read, from stored reports, so it never
 affects report revisions."""
 
 from __future__ import annotations
@@ -8,24 +8,21 @@ from datetime import date, timedelta
 
 from . import reports as rp
 
-STATE_LABELS = {"usual_plan": "Usual plan", "consider_easier": "Consider easier", "insufficient_data": "Not enough data"}
 OUTSIDE = ("outside", "sustained")
+READINESS_STEP = 5
 
 
-def label(rec: dict) -> str:
-    if rec["state"] == "usual_plan" and rec.get("suppress_intensity"):
-        return "Go by feel"
-    return STATE_LABELS.get(rec["state"], rec["state"])
-
-
-def since_yesterday(conn, today_body: dict, d: date) -> list[str]:
+def since_yesterday(conn, today_body: dict, d: date, source: str | None = None) -> list[str]:
     prev = rp.latest_body(conn, "morning", {"subject_key": (d - timedelta(days=1)).isoformat()})
     if prev is None:
         return []
     out = []
-    a, b = label(prev["recommendation"]), label(today_body["recommendation"])
-    if a != b:
-        out.append(f"The call is now {b} (yesterday: {a}).")
+    now = (today_body.get("readiness") or {}).get("score")
+    if source and now is not None:
+        from . import readiness
+        before = readiness.build(conn, source, d - timedelta(days=1), prev).get("score")
+        if before is not None and abs(now - before) >= READINESS_STEP:
+            out.append(f"Readiness {'up' if now > before else 'down'} to {now} (yesterday {before}).")
     old = {f["metric"]: f for f in prev.get("findings", [])}
     for f in today_body.get("findings", []):
         o = old.get(f["metric"])

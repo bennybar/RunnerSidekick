@@ -84,14 +84,15 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
     ) { padding ->
         PullToRefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item {
+                // The app no longer asks for check-ins; the tab only stays for people who logged some earlier
+                if (checkins.isNotEmpty()) item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         listOf("Reports", "Check-ins").forEachIndexed { i, l ->
                             SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
                         }
                     }
                 }
-                if (tab == 0) {
+                if (tab == 0 || checkins.isEmpty()) {
                     if (reports.isEmpty()) item { EmptyState(Icons.Outlined.MenuBook, "No reports yet", "Reports appear here after your first sync.") }
                     reports.groupBy { it.localDate.take(7) }.forEach { (month, rs) ->
                         item(key = "m$month") {
@@ -110,8 +111,7 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
                         }
                     }
                 } else {
-                    if (checkins.isEmpty()) item { EmptyState(Icons.Outlined.EditNote, "No check-ins yet", "Your daily check-ins from Today appear here.") }
-                    if (checkins.isNotEmpty()) item {
+                    item {
                         Group {
                             checkins.forEach { c ->
                                 val flags = listOfNotNull("Pain".takeIf { c.pain }, "Unwell".takeIf { c.illness }, "Not uploaded yet".takeIf { c.pendingSync })

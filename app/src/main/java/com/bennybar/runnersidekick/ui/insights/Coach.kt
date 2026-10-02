@@ -79,7 +79,8 @@ fun CoachCard(view: CoachView, loading: Boolean, insights: List<Insight>, onOpen
                 // Compact by default: the one line plus point titles; the full analysis on request
                 var full by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
                 if (!full) {
-                    (shown.insights.map { it.title } + shown.recommendations.map { "Try: ${it.title}" }).forEach { t ->
+                    // Two findings and the first thing to try; the rest is under "Show full analysis"
+                    (shown.insights.take(2).map { it.title } + shown.recommendations.take(1).map { "Try: ${it.title}" }).forEach { t ->
                         Text("• $t", style = MaterialTheme.typography.bodyMedium)
                     }
                     androidx.compose.material3.TextButton(onClick = { full = true }) { Text("Show full analysis") }
