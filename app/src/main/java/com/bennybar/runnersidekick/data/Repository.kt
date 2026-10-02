@@ -123,6 +123,8 @@ class Repository(
         api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(kind, note?.takeIf { it.isNotBlank() }, Instant.now().toString())))
         refreshActivity(activityId)
         refreshFocus()
+        // The AI input was written for the old type: refresh its state so "Update AI input" shows straight away
+        runCatching { refreshRunAi(activityId) }
     }
 
     suspend fun setInsightState(id: String, state: String?) {

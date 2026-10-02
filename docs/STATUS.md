@@ -229,6 +229,24 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   - JSON GETs carry an ETag, and an unchanged answer is an empty 304.
   - Unchanged cache entries and journal rows aren't rewritten; the journal is saved in one transaction.
 
+## Consistent plans, tidy polling, faster Garmin sync (2026-10-02, v0.23.0)
+- Next run:
+  - It picks one session first (safety, then the race week's session of any kind, including race day and quality,
+    then the history rules) and derives distance, time and effort from it.
+  - A planned duration converts to distance at your pace, so the numbers always describe the same run.
+- Race week: a target too small for every session at 10 minutes gets fewer sessions (easy days drop first, the guard
+  says so), then sessions are trimmed to fit.
+- App:
+  - Changing a run's type refreshes its AI state, so "Update AI input" shows right away.
+  - Today runs one coach poll at a time. Compare and Trends each own one fetch-and-poll job, tied to their sub-tab.
+    A new Trends range cancels the old one, including its first fetch.
+  - The hourly worker runs only while notifications are on.
+- Garmin sync:
+  - Days older than yesterday are re-read only while a core reading is missing.
+  - The activity history is listed in full once a day; otherwise only the last week.
+  - Fitness numbers are fetched after a new run or every 3 hours; zones and profile once a day.
+  - The 1 s pause between Garmin calls stays, because Garmin rate-limits hard.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

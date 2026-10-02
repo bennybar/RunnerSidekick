@@ -30,8 +30,9 @@ class RunnerApp : Application() {
         // window can be met). The server syncs Garmin itself, so this only fetches what notifications need.
         val wm = WorkManager.getInstance(this)
         kotlinx.coroutines.MainScope().launch {
-            settings.settings.map { it.hasToken }.distinctUntilChanged().collect { signedIn ->
-                if (signedIn) wm.enqueueUniquePeriodicWork(
+            // The worker only serves notifications: scheduled while signed in with notifications on, cancelled otherwise
+            settings.settings.map { it.hasToken && it.notificationsEnabled }.distinctUntilChanged().collect { needed ->
+                if (needed) wm.enqueueUniquePeriodicWork(
                     "refresh",
                     ExistingPeriodicWorkPolicy.UPDATE,
                     PeriodicWorkRequestBuilder<RefreshWorker>(1, TimeUnit.HOURS)

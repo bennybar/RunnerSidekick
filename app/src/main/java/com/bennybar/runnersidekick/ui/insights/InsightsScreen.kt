@@ -119,7 +119,7 @@ fun InsightsScreen(
     val todayReport by vm.today.collectAsStateWithLifecycle()
     val focus by vm.focus.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
-    LaunchedEffect(tab) { if (tab == 1) vm.loadCompare() }
+    LaunchedEffect(tab) { vm.setTab(tab); if (tab == 1) vm.loadCompare() }
     val requestedTab by InsightsTab.requested.collectAsStateWithLifecycle()
     LaunchedEffect(requestedTab) { requestedTab?.let { tab = it; InsightsTab.requested.value = null } }
     var method by remember { mutableStateOf<Insight?>(null) }

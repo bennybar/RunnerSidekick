@@ -63,6 +63,23 @@ def mark_reconnected(conn: Database, source: str) -> None:
     set_connection(conn, source, state=ConnectionState.CONNECTED.value, detail=None, consecutive_failures=0, retry_not_before=None)
 
 
+FITNESS_EVERY_H = 3      # Garmin's fitness snapshot: after a new run, otherwise every 3 hours
+META_EVERY_H = 24        # heart-rate zones and profile
+FULL_LIST_EVERY_H = 24   # the full activity history listing
+RECENT_LIST_DAYS = 7     # otherwise only this many days are listed
+CORE_DAY_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
+
+
+def _hours_ago(h: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat().replace("+00:00", "Z")
+
+
+def day_complete(conn, source: str, d: date) -> bool:
+    """All of a day's core readings are in: re-reading it can't add anything the advice uses."""
+    return conn.daily_observation.count_documents({"source": source, "local_date": d.isoformat(), "metric": {"$in": list(CORE_DAY_METRICS)},
+                                                   "state": "measured"}) == len(CORE_DAY_METRICS)
+
+
 def _checkpoint(conn, source, stream, target: str) -> dict:
     key = {"source": source, "stream": stream}
     conn.sync_checkpoint.update_one(key, {"$setOnInsert": {"backfill_target": target, "oldest_done": None, "newest_done": None,
@@ -100,7 +117,9 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
     try:
         _sync_days(conn, connector, today, target, refetch_days, max_backfill_days, res)
         _sync_activities(conn, connector, today, target, refetch_days, max_activity_details, res)
-        if hasattr(connector, "fitness_snapshot"):
+        prev_fit = get_setting(conn, "garmin_fitness", None) or {}
+        fit_due = bool(res.changed_activities) or (prev_fit.get("fetched_at") or "") < _hours_ago(FITNESS_EVERY_H)
+        if hasattr(connector, "fitness_snapshot") and fit_due:
             snap = connector.fitness_snapshot(today)
             if snap:
                 # Garmin sometimes leaves a part out (e.g. no VO2 max early in the day, or one call failing): keep the last
@@ -109,14 +128,18 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
                 merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
                 merged["fetched_at"] = utc_now()
                 set_setting(conn, "garmin_fitness", merged)
-        if hasattr(connector, "hr_zones"):
+        # Zones and the profile (sex, birth date, week start) rarely change: once a day
+        meta_due = (get_setting(conn, "source_meta_at", None) or "") < _hours_ago(META_EVERY_H)
+        if hasattr(connector, "hr_zones") and meta_due:
             zones = connector.hr_zones()
             if zones:
                 set_setting(conn, "source_hr_zones", zones)
-        if hasattr(connector, "profile"):
+        if hasattr(connector, "profile") and meta_due:
             prof = connector.profile()
             if prof:
                 set_setting(conn, "source_profile", prof)
+        if meta_due:
+            set_setting(conn, "source_meta_at", utc_now())
         purge_raw(conn, raw_retention_days)
         _record_capabilities(conn, connector)
         set_connection(conn, source, state=ConnectionState.CONNECTED.value, detail=None, last_success_at=utc_now(),
@@ -142,12 +165,20 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
     cp = _checkpoint(conn, source, "days", target)
     newest_done = date.fromisoformat(cp["newest_done"]) if cp["newest_done"] else None
     inc_start = max(date.fromisoformat(target), (newest_done or today) - timedelta(days=refetch_days))
-    for b in connector.read_days(inc_start, today):
-        res.changed_dates |= save_day(conn, source, b)
-        oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
-        _update_checkpoint(conn, source, "days", oldest_done=oldest)
-        cp = one(conn.sync_checkpoint, {"source": source, "stream": "days"})
-        res.days_fetched += 1
+    # Today and yesterday are always re-read (sleep and summaries arrive late); older days of the window only while one
+    # of their core readings is still missing. Each skipped day saves six Garmin calls.
+    d = inc_start
+    while d <= today:
+        if d < today - timedelta(days=1) and day_complete(conn, source, d):
+            d += timedelta(days=1)
+            continue
+        for b in connector.read_days(d, d):
+            res.changed_dates |= save_day(conn, source, b)
+            oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
+            _update_checkpoint(conn, source, "days", oldest_done=oldest)
+            cp = one(conn.sync_checkpoint, {"source": source, "stream": "days"})
+            res.days_fetched += 1
+        d += timedelta(days=1)
     _update_checkpoint(conn, source, "days", newest_done=today.isoformat())
     if cp["oldest_done"] is None:
         return
@@ -163,8 +194,13 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
 
 def _sync_activities(conn, connector, today: date, target: str, refetch_days: int, max_details: int, res: SyncResult) -> None:
     source = connector.source
-    _checkpoint(conn, source, "activities", target)
-    summaries = connector.list_activities(date.fromisoformat(target), today)
+    cp = _checkpoint(conn, source, "activities", target)
+    # The whole history is listed once a day, or until every activity has been read; otherwise only the last week
+    # (Garmin pages the list, so the full history is several requests)
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=FULL_LIST_EVERY_H)).isoformat().replace("+00:00", "Z")
+    full = not cp.get("complete") or (cp.get("full_listed_at") or "") < day_ago
+    start = date.fromisoformat(target) if full else max(date.fromisoformat(target), today - timedelta(days=max(refetch_days, RECENT_LIST_DAYS)))
+    summaries = connector.list_activities(start, today)
     # Newest first, so a bounded run covers recent activities before old ones
     summaries.sort(key=lambda s: s["start"], reverse=True)
     fetched = 0
@@ -186,7 +222,9 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
         res.changed_activities.append(a.source_id)
         res.changed_dates.add(a.local_date)
     res.activities_fetched = fetched
-    _update_checkpoint(conn, source, "activities", newest_done=today.isoformat())
+    done = res.outcome != "partial"
+    _update_checkpoint(conn, source, "activities", newest_done=today.isoformat(), complete=done or (bool(cp.get("complete")) and not full),
+                       **({"full_listed_at": utc_now()} if full and done else {}))
 
 
 def _record_capabilities(conn, connector) -> None:

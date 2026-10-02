@@ -30,7 +30,7 @@ open class BaseVm(val repo: Repository) : ViewModel() {
 
     fun <T> kotlinx.coroutines.flow.Flow<T>.state(initial: T) = stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initial)
 
-    fun launchIo(block: suspend () -> Unit) {
+    fun launchIo(block: suspend () -> Unit): kotlinx.coroutines.Job =
         viewModelScope.launch {
             _busy.value = true
             _error.value = null
@@ -53,7 +53,6 @@ open class BaseVm(val repo: Repository) : ViewModel() {
                 _busy.value = false
             }
         }
-    }
 
     fun clearError() { _error.value = null }
 
@@ -75,7 +74,11 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     val coach = repo.coach.state(null)
 
     // New data changes the evidence, so the coach is asked again rather than left showing older advice
-    private fun updateCoach() = viewModelScope.launch { repo.pollCoach(::pause) }
+    private var coachJob: kotlinx.coroutines.Job? = null
+    private fun updateCoach() {
+        if (coachJob?.isActive == true) return  // one coach poll at a time, however often Today refreshes
+        coachJob = viewModelScope.launch { repo.pollCoach(::pause) }
+    }
 
     init { refresh() }
 
@@ -114,18 +117,37 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val focus = repo.focus.state(null)
     fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
-    fun loadCompare() = launchIo { if (repo.refreshCompare()) pollQuietly { repo.refreshCompare() } }
+    // The visible sub-tab (0 Insights, 1 Compare, 2 Trends): Compare and Trends poll only while they're shown
+    private val tab = MutableStateFlow(0)
+    fun setTab(t: Int) { tab.value = t }
+    private var compareJob: kotlinx.coroutines.Job? = null
+    fun loadCompare() {
+        if (compareJob?.isActive == true) return
+        compareJob = fetchThenPoll(1, repo::refreshCompare)
+    }
 
     /** Re-fetch (bounded, without the busy indicator) while a screen's AI summary is written in the background. */
-    private fun pollQuietly(fetch: suspend () -> Boolean) = viewModelScope.launch {
+    /** The first fetch shows the refresh indicator and errors; the follow-up poll runs quietly. One job owns both, so
+     * cancelling it means no poll starts afterwards. */
+    private fun fetchThenPoll(onTab: Int, fetch: suspend () -> Boolean) = viewModelScope.launch {
+        var pending = false
+        launchIo { pending = fetch() }.join()
+        if (pending) pollQuietly(onTab, fetch)
+    }
+    private suspend fun pollQuietly(onTab: Int, fetch: suspend () -> Boolean) {
         for (attempt in 0 until 10) {
             pause(attempt)
-            if (!runCatching { fetch() }.getOrDefault(false)) return@launch
+            tab.first { it == onTab }
+            if (!runCatching { fetch() }.getOrDefault(false)) return
         }
     }
-    // One trends poll at a time: a new date range replaces the previous range's poll
-    private var trendsPoll: kotlinx.coroutines.Job? = null
-    private fun pollTrends(d: Int) { trendsPoll?.cancel(); trendsPoll = pollQuietly { repo.refreshTrends(d) } }
+    // One trends job (first fetch and its poll together): a new range cancels the old one, so a slow answer for the
+    // previous range can't restart its poll
+    private var trendsJob: kotlinx.coroutines.Job? = null
+    private fun loadTrends(d: Int) {
+        trendsJob?.cancel()
+        trendsJob = fetchThenPoll(2) { repo.refreshTrends(d) }
+    }
     private val _days = MutableStateFlow(28)
     val days: StateFlow<Int> = _days.asStateFlow()
 
@@ -133,9 +155,9 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
 
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); if (repo.refreshTrends(_days.value)) pollTrends(_days.value) }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); loadTrends(_days.value) }
         .also { loadCoach() }
-    fun setDays(d: Int) { _days.value = d; trendsPoll?.cancel(); launchIo { if (repo.refreshTrends(d)) pollTrends(d) } }
+    fun setDays(d: Int) { _days.value = d; loadTrends(d) }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }
 }
 

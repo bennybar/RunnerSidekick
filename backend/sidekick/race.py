@@ -109,6 +109,8 @@ SESSION_TEXT = {
     "strides": "Easy run with a few short strides at the end", "race": "Race day", "rest": "Rest",
 }
 QUALITY_MIN = {"tempo": 45, "intervals": 45, "race_pace": 40, "strides": 35}
+MIN_SESSION = 10  # minutes: no planned session is shorter
+KEEP_ORDER = ["long", "tempo", "intervals", "race_pace", "strides", "easy"]  # which sessions a small week keeps first
 
 
 def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None:
@@ -154,6 +156,17 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
         kinds[d] = q
     for d in usable:
         kinds.setdefault(d, "easy")
+    # A week too small for every session at its shortest (MIN_SESSION each) gets fewer sessions instead of overrunning:
+    # easy days go first, then quality, the long run last; race day always stays
+    if target_s:
+        fits = max(1, int(target_s / 60 // MIN_SESSION))
+        keep = sorted((d for d, k in kinds.items() if k != "race"), key=lambda d: (KEEP_ORDER.index(kinds[d]), d))
+        dropped = keep[fits:]
+        for d in dropped:
+            del kinds[d]
+        if dropped:
+            guard = (guard + " " if guard else "") + (f"This week's {round(target_s / 60)} minutes fit {fits} "
+                                                       f"session{'s' if fits != 1 else ''}, so {len(dropped)} became rest.")
     # Minutes: quality fixed, long ~30% of the target, the rest shared by easy days
     long_min = None
     if target_s:
@@ -170,7 +183,13 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
     total = sum(m for m in planned.values() if m)
     if target_s and total > target_s / 60:
         f = target_s / 60 / total
-        planned = {d: (max(10, int(m * f / 5) * 5) if m else m) for d, m in planned.items()}
+        planned = {d: (max(MIN_SESSION, int(m * f / 5) * 5) if m else m) for d, m in planned.items()}
+        # Raising a session to the minimum can tip the total back over: trim the longest, 5 minutes at a time
+        while sum(m for m in planned.values() if m) > target_s / 60:
+            d = max((d for d, m in planned.items() if m and m - 5 >= MIN_SESSION), key=lambda d: planned[d], default=None)
+            if d is None:
+                break
+            planned[d] -= 5
     sessions = []
     for d in days:
         k = kinds.get(d, "rest")

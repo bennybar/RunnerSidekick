@@ -114,3 +114,13 @@ def test_low_volume_week_plan_stays_inside_its_target():
     planned = sum(s["minutes"] or 0 for s in w["sessions"])
     assert w["target_minutes"] and planned <= w["target_minutes"] + 5
     assert all((s["minutes"] or 10) >= 10 for s in w["sessions"])
+
+
+def test_tiny_week_drops_sessions_instead_of_overrunning():
+    conn = synced()
+    set_race(conn, 60)
+    conn.activity.update_many({}, {"$set": {"moving_s": 300}})  # 5-minute runs: a target of about 20 minutes a week
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    planned = sum(s["minutes"] or 0 for s in w["sessions"])
+    assert w["target_minutes"] and planned <= max(w["target_minutes"], race.MIN_SESSION)
+    assert "became rest" in (w["guardrail"] or "")

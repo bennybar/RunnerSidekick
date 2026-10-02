@@ -214,7 +214,8 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
 
 # ---------------------------------------------------------------- the next run
 
-KIND_TITLE = {"rest": "Rest or a short walk", "easy": "Easy run", "steady": "Steady run", "long": "Long run, easy effort"}
+KIND_TITLE = {"rest": "Rest or a short walk", "easy": "Easy run", "steady": "Steady run", "long": "Long run, easy effort",
+              "tempo": "Tempo run", "intervals": "Intervals", "race_pace": "Race-pace session", "race": "Race day"}
 
 
 def next_day(conn, source: str, today: date) -> date:
@@ -246,7 +247,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     longest = max(a["distance_m"] or 0 for a in runs) / 1000
     why = [f"Readiness {score} ({ready['label'].lower()})"] if score is not None else []
 
-    # The race week's session for that day, when a race goal is set
+    # 1. Choose one session. Safety first, then the race week's session for that day (any kind), then the history rules.
     planned = next((s for s in (race or {}).get("week", {}).get("sessions", []) if s["date"] == day.isoformat()), None) if race else None
     if day == today and rec["rule_id"] == "R0":
         kind = "rest"
@@ -254,11 +255,14 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     elif day == today and score is not None and score < 40:
         kind = "rest"
         why.append("readiness is very low today")
+    elif planned and planned["kind"] == "race":
+        kind = "race"
+        why.append(f"race day: {race['label']}")
     elif day == today and hold:
         kind = "easy"
         why.append(hold)
-    elif planned and planned["kind"] in ("long", "easy"):
-        kind = planned["kind"]
+    elif planned and planned["kind"] != "rest":
+        kind = "easy" if planned["kind"] == "strides" else planned["kind"]
         why.append(f"your race week plan ({race['label']})")
     elif hard_recent:
         kind = "easy"
@@ -273,24 +277,37 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
         kind = "steady"
         why.append("you're fresh and recent running was balanced")
 
-    km = {"rest": None, "easy": typical * (0.7 if score is not None and score < 60 else 0.9), "steady": typical,
-          "long": min(longest * 1.1, max(longest, typical * 1.3))}[kind]
-    km = max(1.0, round(km * 2) / 2) if km else None  # half-km steps; no larger floor, so "shorter" stays shorter
+    # 2. Derive distance, time and effort from that one session, so they always agree with each other
     easy_pace = None
     ins = rp.latest_body(conn, "insights")
     if ins:
         e = next((i for i in ins["insights"] if i["id"] == "easy_pace" and i["verdict"] == "pattern"), None)
         easy_pace = (e or {}).get("effect", {}).get("pace_s_per_km")
+    paced = [a for a in runs if a.get("distance_m") and a.get("moving_s")]
+    typical_pace = median(a["moving_s"] / (a["distance_m"] / 1000) for a in paced) if paced else None
+    pace_s = easy_pace if kind in ("easy", "long") else typical_pace if kind in ("steady", "tempo", "intervals", "race_pace") else None
+    km = minutes = None
+    if kind == "race":
+        from .race import DISTANCES
+        km = round(DISTANCES[race["distance"]][1] / 1000, 1)
+    elif kind != "rest" and planned and planned.get("minutes") and kind == (planned["kind"] if planned["kind"] != "strides" else "easy"):
+        minutes = planned["minutes"]  # the plan's duration leads; the distance follows from it at your pace
+        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else None
+    elif kind != "rest":
+        km = {"easy": typical * (0.7 if score is not None and score < 60 else 0.9), "steady": typical,
+              "long": min(longest * 1.1, max(longest, typical * 1.3))}.get(kind, typical)
+        km = max(1.0, round(km * 2) / 2)  # half-km steps; no larger floor, so "shorter" stays shorter
+        minutes = round(km * pace_s / 60 / 5) * 5 if pace_s else None
     hr = None
-    if zones and kind in ("easy", "long"):
-        hr = {"max": round(zones["floors"][2]), "text": f"under {round(zones['floors'][2])} bpm (zone 2)"}
-    elif zones and kind == "steady":
-        hr = {"min": round(zones["floors"][2]), "max": round(zones["floors"][3]),
-              "text": f"{round(zones['floors'][2])}–{round(zones['floors'][3])} bpm (zone 3)"}
-    pace = f"about {rp.fmt_pace(easy_pace)} or slower" if easy_pace and kind in ("easy", "long") else None
-    minutes = round(km * easy_pace / 60 / 5) * 5 if km and easy_pace and kind in ("easy", "long") else None
-    if planned and planned.get("minutes") and kind == planned["kind"]:
-        minutes = planned["minutes"]
+    if zones:
+        f = [round(x) for x in zones["floors"]]
+        hr = {"easy": {"max": f[2], "text": f"under {f[2]} bpm (zone 2)"}, "long": {"max": f[2], "text": f"under {f[2]} bpm (zone 2)"},
+              "steady": {"min": f[2], "max": f[3], "text": f"{f[2]}–{f[3]} bpm (zone 3)"},
+              "tempo": {"min": f[3], "max": f[4], "text": f"{f[3]}–{f[4]} bpm (zone 4) in the middle block"},
+              "intervals": {"min": f[3], "text": f"repeats above {f[3]} bpm, easy jogs between"}}.get(kind)
+    pace = (f"about {rp.fmt_pace(easy_pace)} or slower" if easy_pace and kind in ("easy", "long") else
+            f"around {rp.fmt_pace(race['target_pace_s_per_km'])}" if kind in ("race", "race_pace") and race and race.get("target_pace_s_per_km")
+            else None)
     return {"date": day.isoformat(), "day_label": day_label(day, today), "kind": kind, "title": KIND_TITLE[kind],
             "distance_km": km, "minutes": minutes, "hr": hr, "pace": pace, "why": why, "algorithm_version": READINESS_VERSION,
             "basis": "Sized from your runs of the last 4 weeks (typical distance, longest run), Garmin's heart-rate zones and "
