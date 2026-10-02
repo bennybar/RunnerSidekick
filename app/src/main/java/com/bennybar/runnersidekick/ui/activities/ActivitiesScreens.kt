@@ -459,7 +459,8 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     }
                     if (!more && (shown.wentWell.isNotEmpty() || shown.toWorkOn.isNotEmpty()))
                         androidx.compose.material3.TextButton(onClick = { more = true }) { Text("What went well, what to work on") }
-                    Text("Written by AI (${shown.model ?: "OpenAI"})" + (if (shown.keySource == "user") " with your key" else "") +
+                    Text((if (shown.trigger == "auto") "Written automatically for this new run · " else "") +
+                        "AI (${shown.model ?: "OpenAI"})" + (if (shown.keySource == "user") " with your key" else "") +
                         " · numbers come from the app · guidance, not medical advice", style = MaterialTheme.typography.labelSmall,
                         color = cs.onSurfaceVariant)
                 }

@@ -178,6 +178,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   - the perceived-effort input (no manual inputs).
 - Garmin's numbers are rounded (training load 179, not 179.26…), and its training effect isn't repeated.
 
+## Automatic AI input for new runs (2026-10-02, v0.20.0)
+- After a sync (app-triggered or the hourly cron), new runs get AI input automatically with the server's key.
+- Safeguards: only runs that started in the last 36 hours, so a first sync's or backfill's history never qualifies.
+  Once per run, whatever the earlier outcome. At most 2 per sync. Never using the last 5 AI calls of the day.
+- The card says "Written automatically for this new run"; Settings explains the rule. Older runs keep the
+  Get AI input button.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

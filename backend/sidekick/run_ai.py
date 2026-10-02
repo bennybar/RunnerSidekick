@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from . import coach as ch
 from . import reports as rp
@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 PROMPT_VERSION = "run-ai-1.1"
 MAX_POINTS = 3
+# Written automatically after a sync, only for new runs: never for history pulled in by a first sync or a backfill
+AUTO_WINDOW_H = 36        # the run started within the last 36 hours
+AUTO_MAX_PER_SYNC = 2     # at most two runs per sync
+AUTO_BUDGET_RESERVE = 5   # leaves 5 of the day's AI calls for things you ask for yourself
 
 POINT = {"type": "object", "additionalProperties": False, "required": ["text", "evidence_ids"],
          "properties": {"text": {"type": "string"}, "evidence_ids": {"type": "array", "items": {"type": "string"}}}}
@@ -164,7 +168,8 @@ def input_hash(b: ch.Bundle, model: str) -> str:
 
 
 def view(row: dict) -> dict:
-    v = {"status": row["status"], "model": row["model"], "generated_at": row["created_at"], "key_source": row["key_source"]}
+    v = {"status": row["status"], "model": row["model"], "generated_at": row["created_at"], "key_source": row["key_source"],
+         "trigger": row.get("trigger", "asked")}
     if row["status"] == "ok":
         v.update(row["output"])
     else:
@@ -176,7 +181,8 @@ def latest(conn, sid: str, h: str | None = None) -> dict | None:
     return one(conn.run_ai, {"source_id": sid, **({"input_hash": h} if h else {})}, sort=[("id", -1)])
 
 
-def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str, key_source: str, budget: int, provider=None) -> dict:
+def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str, key_source: str, budget: int, provider=None,
+             trigger: str = "asked") -> dict:
     """Never raises; every outcome is recorded so the app stops waiting."""
     h = input_hash(b, model)
     hit = latest(conn, sid, h)
@@ -198,6 +204,43 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
     log.info("run ai %s %s: %s", sid, status, detail or "")
     conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": h, "model": model, "prompt_version": PROMPT_VERSION,
                             "status": status, "detail": detail, "output": plain(out) if out else None, "key_source": key_source,
-                            "created_at": utc_now()})
+                            "trigger": trigger, "created_at": utc_now()})
     return view(latest(conn, sid, h))
 
+
+
+def auto_candidates(conn, source: str, sids: list[str], budget: int, now: datetime | None = None) -> list[str]:
+    """Runs to write AI input for right after a sync: started within the last 36 hours, analysed, never written
+    before (whatever the earlier outcome), newest first, at most two, and only while the day's budget keeps a reserve."""
+    from .narrative import calls_today
+    now = now or datetime.now(timezone.utc)
+    room = min(AUTO_MAX_PER_SYNC, budget - AUTO_BUDGET_RESERVE - calls_today(conn))
+    runs = []
+    for sid in set(sids):
+        a = rp.activity_by_source_id(conn, source, sid)
+        if not a or not a.get("start_utc"):
+            continue
+        start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00"))
+        if now - start <= timedelta(hours=AUTO_WINDOW_H) and one(conn.run_ai, {"source_id": sid}) is None \
+                and rp.latest_body(conn, "post_run", {"subject_key": sid}) is not None:
+            runs.append((start, sid))
+    return [sid for _, sid in sorted(runs, reverse=True)][:max(room, 0)]
+
+
+def auto(conn, source: str, sids: list[str], today: date, model: str, api_key: str, budget: int, provider=None,
+         on_start=None, on_done=None) -> list[str]:
+    """Writes AI input for the new runs of a sync (see auto_candidates), one after another, with the server's key.
+    Never raises; returns the runs it wrote for."""
+    done = []
+    for sid in auto_candidates(conn, source, sids, budget):
+        if on_start:
+            on_start(sid)
+        try:
+            generate(conn, source, sid, bundle(conn, source, sid, today), model, api_key, "server", budget, provider=provider, trigger="auto")
+            done.append(sid)
+        except Exception:
+            log.exception("automatic run AI failed for %s", sid)
+        finally:
+            if on_done:
+                on_done(sid)
+    return done

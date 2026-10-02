@@ -362,6 +362,11 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                 },
                                 trailing = { Switch(checked = aiOn, enabled = r.aiAvailable || ownKey || aiOn, onCheckedChange = { aiOn = it }) })
                             custom {
+                                Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per " +
+                                    "sync, never for older history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. " +
+                                    "This uses the server's key; with only your own key, input is written when you ask.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 8.dp))
                                 Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. " +
                                     "Numbers in the summary are filled in from the report, not written by the AI. If its output doesn't pass checks, " +
                                     "no summary is shown and the report is unchanged.",

@@ -88,12 +88,28 @@ def make_connector(cfg, conn):
     return GarminConnector(cfg.garmin_token_dir, cfg.request_spacing_s), today
 
 
+def auto_run_ai(cfg, conn, source: str, sids: list[str], today) -> None:
+    """AI input for new runs of the last 36 hours, with the server's key (see run_ai.auto)."""
+    import os
+
+    from . import narrative as nv
+    from . import run_ai
+    from .config import secrets
+    key = os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")
+    if sids and key and rp.get_setting(conn, "ai_enabled", False):
+        wrote = run_ai.auto(conn, source, sids, today, rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL), key,
+                            int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "25")))
+        if wrote:
+            print(f"AI input written for {len(wrote)} new run(s)")
+
+
 def cmd_sync(cfg, loop: bool) -> int:
     conn = connect(cfg.db_name)
     while True:
         c, today = make_connector(cfg, conn)
         res = run_sync(conn, c, today, cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days)
         rp.regenerate(conn, c.source, c.synthetic, res.changed_dates, res.changed_activities, today)
+        auto_run_ai(cfg, conn, c.source, res.changed_activities, today)
         cp = one(conn.sync_checkpoint, {"source": c.source, "stream": "days"})
         print(f"{res.outcome}: {res.days_fetched} days, {res.activities_fetched} activities fetched"
               + (f" — {res.detail}" if res.detail else "")

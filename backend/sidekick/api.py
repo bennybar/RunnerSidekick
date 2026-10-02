@@ -186,6 +186,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 res = run_sync(conn, c, today(conn), cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days, force=force)
                 with lock_reports:
                     rp.regenerate(conn, c.source, synthetic, res.changed_dates, res.changed_activities, today(conn))
+                auto_run_ai(conn, res.changed_activities)
                 return {"outcome": res.outcome, "detail": res.detail, "days_fetched": res.days_fetched,
                         "activities_fetched": res.activities_fetched}
             except Exception:
@@ -548,6 +549,20 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"report": body, "chart": downsample(s) if s else None}
 
     run_ai_inflight: set[tuple] = set()
+
+    def auto_run_ai(conn, sids: list[str]) -> None:
+        """New runs from the last 36 hours get AI input right after a sync, in the background, with the server's key."""
+        from . import run_ai
+        ai = ai_config(conn)
+        if not sids or not ai.enabled or not (ai.api_key or run_ai_provider):
+            return
+        name = conn.name
+
+        def work():
+            c = connect(name)
+            run_ai.auto(c, cfg.source, sids, today(c), ai.model, ai.api_key, ai.max_calls_per_day, provider=run_ai_provider,
+                        on_start=lambda sid: run_ai_inflight.add((name, sid)), on_done=lambda sid: run_ai_inflight.discard((name, sid)))
+        threading.Thread(target=work, daemon=True).start()
 
     def run_ai_bg(db_name: str, sid: str, b, model: str, key: str, key_source: str, budget: int) -> None:
         from . import run_ai

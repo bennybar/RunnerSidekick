@@ -715,6 +715,8 @@ data class RunAi(
     val model: String? = null,
     @SerialName("generated_at") val generatedAt: String? = null,
     @SerialName("key_source") val keySource: String? = null,
+    /** "auto" when written right after a sync for a new run, "asked" when requested */
+    val trigger: String? = null,
     val tldr: String? = null,
     val summary: String? = null,
     @SerialName("went_well") val wentWell: List<RunAiPoint> = emptyList(),
