@@ -115,3 +115,12 @@ def test_unchanged_get_is_an_empty_304(tmp_path):
     cl.put("/v1/settings", json={"goal": "new goal"}, headers=h)
     changed = cl.get("/v1/settings", headers={**h, "If-None-Match": tag})
     assert changed.status_code == 200 and changed.json()["goal"] == "new goal"
+
+
+def test_run_caches_follow_the_database_and_the_run_revision():
+    conn = synced()
+    a = rp.activities(conn, "fixture", "2026-09-01", ANCHOR.isoformat())[-1]
+    k = rp.run_key(conn, a)
+    assert k != rp.run_key(conn, {**a, "updated_at": "2099-01-01T00:00:00Z"})  # corrected samples: recomputed
+    other = connect(user_db_name(2, "fixture"))
+    assert k != rp.run_key(other, a)  # another user's run with the same id: never shared

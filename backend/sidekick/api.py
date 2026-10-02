@@ -305,7 +305,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body["race"], body["readiness"], body["next_run"] = dec["race"], dec["readiness"], dec["next_run"]
             body["decision"] = {"hold_back": dec["hold_back"], "hold_reason": dec["hold_reason"], "today_kind": dec["today_kind"]}
             from . import scores
-            body["scores"] = scores.build(conn, cfg.source, d)
+            body["scores"] = scores.build(conn, cfg.source, d, hold_back=dec["hold_back"])
             body["changes"] = changes.since_yesterday(conn, body, d, cfg.source)
             from . import readings
             cmp = compare.build(conn, cfg.source, d)

@@ -16,6 +16,8 @@ sealed class ApiException(message: String) : Exception(message) {
     class Unauthorized : ApiException("Device token rejected by the backend")
     class Http(val code: Int) : ApiException("Backend returned HTTP $code")
     class Network(cause: IOException) : ApiException("Backend unreachable: ${cause.message}")
+    /** The backend answered, but the Garmin sync itself didn't finish well (or is still running). */
+    class Sync(val detail: String) : ApiException(detail)
 }
 
 class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {

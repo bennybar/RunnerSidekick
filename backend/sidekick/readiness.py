@@ -237,6 +237,10 @@ def session_day(conn, source: str, today: date, race: dict | None) -> date:
                 if s["kind"] != "rest" and s["status"] in ("today", "planned") and not (s["date"] == today.isoformat() and ran_today)]
         if todo:
             day = date.fromisoformat(todo[0]["date"])
+        elif race.get("week"):
+            # Nothing left to do this week (all rest, done or moved): the next run is next week's first running day
+            after = date.fromisoformat(race["week"]["week_start"]) + timedelta(days=7)
+            day = next_day(conn, source, after) if after > today else day
         race_day = date.fromisoformat(race["date"])
         if today <= race_day < day:
             day = race_day
@@ -281,6 +285,9 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     elif planned and planned["kind"] != "rest":
         kind = "easy" if planned["kind"] == "strides" else planned["kind"]
         why.append(f"your race week plan ({race['label']})")
+    elif race and race.get("phase") == "recovery":
+        kind = "easy"
+        why.append(f"recovery after {race['label']}: easy running only")
     elif hard_recent:
         kind = "easy"
         why.append("your last run was hard")

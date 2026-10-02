@@ -482,13 +482,17 @@ private fun ScoreTile(title: String, sc: com.bennybar.runnersidekick.data.remote
             }
             Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
             val t = sc?.trend
-            Text(when {
-                t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
-                t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
-                t != null -> "Same as 4 weeks ago"
-                sc?.status == "partial" -> "Partial · ${sc.missing.size} part${if (sc.missing.size == 1) "" else "s"} missing"
-                else -> "For your age"
-            }, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            // Completeness is shown on its own, never hidden behind the trend
+            Text(listOfNotNull(
+                when {
+                    t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
+                    t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
+                    t != null -> "Same as 4 weeks ago"
+                    else -> null
+                },
+                if (sc?.status == "partial") "partial" else null,
+            ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
+                style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
 }
@@ -520,19 +524,27 @@ private fun ScoreSheet(title: String, sc: com.bennybar.runnersidekick.data.remot
         Text("$title" + (sc.score?.let { " · $it" } ?: ""), style = MaterialTheme.typography.headlineSmall)
         Text(listOfNotNull(sc.label, sc.trend?.let { t -> if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta) })
             .joinToString(" · "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        sc.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
         Group {
-            sc.components.forEach { c -> row(c.title, supporting = c.say ?: c.value ?: c.note,
+            sc.components.filter { !it.context }.forEach { c -> row(c.title, supporting = c.say ?: c.value ?: c.note,
                 trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
         }
-        if (sc.improve.isNotEmpty()) Group(title = "To improve") {
-            sc.improve.forEach { x -> row(x.part, supporting = x.text, trailing = {
+        sc.components.filter { it.context }.takeIf { it.isNotEmpty() }?.let { ctx ->
+            Group(title = "Context · not counted") {
+                ctx.forEach { c -> row(c.title, supporting = c.say ?: c.note, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
+            }
+        }
+        if (sc.improve.isNotEmpty()) Group(title = "Potential score changes") {
+            sc.improve.forEach { x -> row(x.part, supporting = x.text + (x.horizon?.let { " · $it" } ?: ""), trailing = {
                 Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
                     Text("+${x.gain}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
             }) }
         }
-        if (sc.missing.isNotEmpty()) Text("Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts.",
+        if (sc.improve.isNotEmpty()) Text("What the score would show if that part reached its target; not a prediction of how much effort it takes.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (sc.missing.isNotEmpty() && sc.score != null) Text("Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }

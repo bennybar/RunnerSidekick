@@ -70,3 +70,18 @@ def test_rest_days_stay_rest_and_an_off_schedule_race_comes_first():
         d = decide(conn, "fixture", ANCHOR, rp.build_morning(conn, "fixture", ANCHOR, False))
         rest_days = {s["date"] for s in d["race"]["week"]["sessions"] if s["kind"] == "rest"}
         assert d["next_run"]["date"] not in rest_days or d["next_run"]["kind"] == "rest"
+
+
+def test_all_rest_recovery_week_gives_no_hard_run_this_week():
+    from datetime import timedelta
+    from sidekick.db import set_setting
+    conn = connect(user_db_name(1, "fixture"))
+    run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    rp.regenerate(conn, "fixture", True, set(), [], ANCHOR)
+    set_setting(conn, "race_distance", "half")
+    set_setting(conn, "race_date", (ANCHOR - timedelta(days=2)).isoformat())  # raced 2 days ago: recovery phase
+    d = decide(conn, "fixture", ANCHOR, rp.build_morning(conn, "fixture", ANCHOR, False))
+    assert d["race"]["phase"] == "recovery"
+    n = d["next_run"]
+    rest = {s["date"] for s in d["race"]["week"]["sessions"] if s["kind"] == "rest"}
+    assert n["kind"] in ("easy", "rest") and (n["date"] not in rest or n["kind"] == "rest")

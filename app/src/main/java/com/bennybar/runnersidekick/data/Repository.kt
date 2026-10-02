@@ -336,15 +336,24 @@ class Repository(
         try {
             _progress.value = Progress(0f, "Starting the Garmin sync")
             api.post("/v1/sync")
-            // The server's own progress fills the first 85%; loading the results fills the rest. A steady 3 s check
-            // (no growing back-off), so the bar keeps moving while you watch it.
-            for (attempt in 0 until 60) {
-                pause(0)
-                val s = refreshStatus()
+            // The server's own progress fills the first 85%; loading the results fills the rest. Checks back off from
+            // 2 s (the caller's pause decides; nothing while the screen is hidden).
+            var s = refreshStatus()
+            for (attempt in 0 until 30) {
+                pause(attempt)
+                s = refreshStatus()
                 if (!s.syncRunning) break
                 s.syncProgress?.let { _progress.value = Progress(0.85f * it.percent / 100f, it.phase ?: "Syncing with Garmin") }
             }
             refreshAll(0.85f, 1f)
+            // Say how the sync really ended, never "synced" after a failure or while it's still going
+            if (s.syncRunning) throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Still syncing with Garmin on the server; new data will appear shortly.")
+            when (s.lastJob?.outcome) {
+                "ok", "partial", null -> Unit
+                "auth_failed" -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Garmin needs you to sign in again before it can sync.")
+                "rate_limited", "deferred" -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Garmin asked us to wait; the sync will retry automatically.")
+                else -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("The Garmin sync didn't finish" + (s.lastJob?.detail?.let { ": $it" } ?: "."))
+            }
         } finally {
             _progress.value = null
         }

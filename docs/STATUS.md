@@ -278,6 +278,17 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Today shows Health and Fitness as two tiles; each opens its own breakdown with a plain line and Good / OK / Low per
   part, plus "To improve": the two calculated steps that would add the most points (v0.25.1).
 
+## Scores v3, review fixes (2026-10-02, v0.26.0)
+- Fitness is VO₂ max for age and sex (no invented percentiles outside the table). Age grade and consistency are
+  context only, with consistency over weeks of real history.
+- Health is activity (WHO), daily steps (Paluch 2022), sleep length night by night, sleep regularity and sleep
+  efficiency. Resting HR is a context line with its own 4-week trend. Health needs movement and sleep.
+- "Potential score changes" with timeframes; no harder-session step while intensity is held back.
+- Fixes:
+  - The run caches (efforts, classification) are keyed per database and run revision.
+  - An all-rest recovery week no longer yields a steady run.
+  - Manual sync reports a real failure or "still syncing" instead of success; its polls back off (2–8 s).
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

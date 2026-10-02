@@ -300,42 +300,41 @@ The day's call shows when it was worked out and when the Garmin data is from, pl
 briefing: the call itself, core readings moving outside or back within your usual range, a plan being set and a
 check-in being included. This is computed when the briefing is read, so it never creates report revisions.
 
-## Health and fitness scores — `scores.py` (`scores-2.0`)
+## Health and fitness scores — `scores.py` (`scores-3.0`)
 
-Each score runs from 0 to 100, with fixed parts and weights. Every part is tied to a published reference where one
-exists, and nothing is counted twice.
-- **Missing parts:** listed, and the score is marked partial (the weighted average of the parts that exist; at least
-  two are needed).
-- **Trend:** the same calculation 28 days earlier, shown only when the same parts were available then.
-- **Labels:** 85+ excellent, 70+ very good, 55+ good, 40+ fair.
-- **Part verdicts:** good from 75 points, ok from 50.
+Each score runs from 0 to 100, with fixed weights. Every counted part is tied to a published reference; the point
+curves are heuristics.
+- **Required parts:** Fitness needs a VO₂ max. Health needs some movement (activity or steps) and sleep length.
+- **Missing parts:** listed, and the score marked partial. The tile shows "partial" next to the trend.
+- **Trend:** only between calculations with the same counted parts.
+- **Labels:** 85+ excellent, 70+ very good, 55+ good, 40+ fair. Part verdicts: good from 75, ok from 50.
 
 | Score | Part (weight) | Points |
 |---|---|---|
-| Fitness | VO₂ max for age and sex (50) | Cooper/ACSM percentile of Garmin's VO₂ max as of that day; falls to 0 at 10 under the 40th, +1 per unit above the 95th |
-| Fitness | Recent running, age-graded (25) | best age grade (USATF/Alan Jones 2025) of efforts in the last 90 days; 40% scores 0, 90% scores 100 |
-| Fitness | Training regularity (25) | share of the last 8 complete weeks with 2+ runs or 75+ minutes |
-| Health | Weekly activity (30) | Garmin's intensity minutes, moderate + 2 × vigorous, as a weekly average over the days with data in the last 4 weeks (10+ days). The WHO guideline is 150–300: 150 scores 70, 300+ scores 100 |
-| Health | Resting HR for age and sex (25) | the share of the CDC/NHANES group with a higher resting HR, from your 4-week median |
-| Health | Sleep length (25) | 7–9 h median over 14 nights scores 100; −40 per hour outside |
-| Health | Sleep regularity (20) | standard deviation of the mid-sleep time over 14 nights: ±30 min or less scores 100, ±105 scores 0 |
+| Fitness | VO₂ max for age and sex (100) | Cooper/ACSM percentile; outside the table the text says "below the 40th / above the 95th percentile" (the internal curve extends) |
+| Health | Weekly activity (30) | moderate + 2 × vigorous intensity minutes, weekly average over days with data (10+ of 28). WHO guideline 150–300: 150 scores 70, 300+ scores 100 |
+| Health | Daily steps (25) | 2-week average; 2,000 scores 0, 8,000 (6,000 from age 60) scores 100 (Paluch et al. 2022) |
+| Health | Sleep length (20) | night by night: 7 h+ scores 100, −40 per hour short; the average of nights, and the count of short nights is shown. Long nights aren't penalised |
+| Health | Sleep regularity (15) | standard deviation of mid-sleep over 14 nights: ±30 min scores 100, ±105 scores 0 |
+| Health | Sleep efficiency (10) | time asleep ÷ (asleep + awake), 2-week average: 90%+ scores 100, 75% scores 0 (85% is the usual clinical line) |
 
-Left out on purpose:
-- **Garmin's fitness age:** built from VO₂ max and resting HR, so it would count them twice. It stays on Compare.
-- **HRV against your usual:** a day-to-day recovery signal, used by readiness.
-- **BMI:** the connector doesn't store height, and there are few weigh-ins.
+Context lines, shown but not counted:
+- **Fitness:** recent age-graded running (the fastest stretch of any run, not necessarily a hard effort). Also training
+  consistency: weeks with 2+ runs totalling 40+ min, or 75+ min. Only weeks with synced history count, and 4 are
+  needed.
+- **Health:** resting heart rate as your own 4-week change. Garmin's lowest-30-minute value isn't comparable to seated
+  population references.
 
-"To improve" lists up to two calculated steps, each from one part's numbers, with the score points it would add
-(the part's weight × the points it would gain):
-- VO₂ max: the next reference percentile value.
-- Age grade: the time over the same distance for +5 percentage points.
-- Regularity: weeks that fell short.
-- Activity: minutes a week to 150, or to 300 if you're already above 150.
-- Sleep: minutes a night to 7 h.
-- Sleep regularity: within ±30 min.
-- Resting HR: only when it's under the 75th percentile.
+Left out:
+- **Garmin's fitness age:** built from VO₂ max and resting HR.
+- **HRV:** readiness uses it.
+- **Garmin's sedentary time:** all awake non-active time, standing included.
+- **Sleep stages and stress:** no solid reference ranges for consumer watches.
+- **BMI:** no height stored.
 
-Steps under one point aren't shown.
+"Potential score changes" lists up to two steps, each from one part's numbers, with its timeframe and the points the
+score would show if that part reached its target. That is not a prediction of the effort it takes. With intensity held
+back by today's decision, the VO₂ max step says to keep building easy running. Steps under one point aren't shown.
 
 These are deterministic summaries of the readings, not medical scores. No language model is involved in any number.
 

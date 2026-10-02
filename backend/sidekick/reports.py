@@ -360,11 +360,17 @@ def suggestion_text(rec: dict, plan: dict | None = None, easy_ceiling: float | N
 
 # ---------------------------------------------------------------- post-run report
 
-_class_cache: dict[tuple[int, str], dict] = {}
+_class_cache: dict[tuple, dict] = {}
+
+
+def run_key(conn, a: dict) -> tuple:
+    """Cache key for anything computed from a run's samples: per user database and per revision of the run (a re-read
+    run, e.g. with corrected samples, gets a new updated_at)."""
+    return conn.name, a["id"], a["content_hash"], a.get("updated_at")
 
 
 def run_analysis(conn, a: dict) -> dict:
-    key = (a["id"], a["content_hash"])
+    key = run_key(conn, a)
     if key not in _class_cache:
         laps = laps_for(conn, a["id"])
         s = samples_for(conn, a["id"])
@@ -374,13 +380,13 @@ def run_analysis(conn, a: dict) -> dict:
     return _class_cache[key]
 
 
-_effort_cache: dict[tuple[int, str], dict] = {}
+_effort_cache: dict[tuple, dict] = {}
 
 EFFORT_LABELS = {"1k": "1 km", "5k": "5 km", "10k": "10 km", "half": "half marathon"}
 
 
 def efforts_for(conn, a: dict) -> dict:
-    key = (a["id"], a["content_hash"])
+    key = run_key(conn, a)
     if key not in _effort_cache:
         _effort_cache[key] = rn.best_efforts(samples_for(conn, a["id"]))
     return _effort_cache[key]

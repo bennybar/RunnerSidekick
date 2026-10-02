@@ -17,9 +17,14 @@ data class Status(
     @SerialName("latest_activity_start") val latestActivityStart: String? = null,
     @SerialName("sync_running") val syncRunning: Boolean = false,
     @SerialName("sync_progress") val syncProgress: SyncProgress? = null,
+    @SerialName("last_job") val lastJob: SyncJob? = null,
     val backfill: Backfill? = null,
     @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
 )
+
+/** The latest sync on the server and how it ended. */
+@Serializable
+data class SyncJob(val outcome: String? = null, val detail: String? = null, @SerialName("finished_at") val finishedAt: String? = null)
 
 /** How far the server's Garmin sync has got, while it runs. */
 @Serializable
@@ -218,7 +223,9 @@ data class Stats(@SerialName("window_days") val windowDays: Int = 28, val items:
 @Serializable
 data class ScoreComponent(val id: String, val title: String, val value: String? = null, val points: Int? = null,
                           @SerialName("weight_pct") val weightPct: Int = 0, val note: String? = null,
-                          val say: String? = null, val verdict: String? = null)
+                          val say: String? = null, val verdict: String? = null,
+                          /** Shown in the breakdown but not counted in the score */
+                          val context: Boolean = false)
 
 @Serializable
 data class Score(val status: String, val score: Int? = null, val label: String? = null, val used: Int? = null, val of: Int? = null,
@@ -229,7 +236,7 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
 
 /** One calculated step that would lift a score, and roughly how many points it would add. */
 @Serializable
-data class ScoreStep(val part: String, val text: String, val gain: Int)
+data class ScoreStep(val part: String, val text: String, val gain: Int, val horizon: String? = null)
 
 /** How a score moved: the same calculation [days] ago. */
 @Serializable

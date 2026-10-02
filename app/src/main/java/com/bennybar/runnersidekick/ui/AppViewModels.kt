@@ -47,6 +47,7 @@ open class BaseVm(val repo: Repository) : ViewModel() {
                 is ApiException.Unauthorized -> "The backend rejected this device's token. Enter a new one in Settings."
                 is ApiException.Network -> "Can't reach the backend. Showing saved data."
                 is ApiException.Http -> "Backend error (${e.code}). Showing saved data."
+                is ApiException.Sync -> e.detail
             }
         } catch (e: kotlinx.serialization.SerializationException) {
             // A contract mismatch must never crash the app or replace cached data
@@ -64,8 +65,9 @@ open class BaseVm(val repo: Repository) : ViewModel() {
     fun setVisible(v: Boolean) { visible.value = v }
 
     /** The wait between polls: 3 s, growing ×1.5 to at most 15 s, and no requests at all while the screen is hidden. */
-    suspend fun pause(attempt: Int) {
-        kotlinx.coroutines.delay(kotlin.math.min(15_000.0, 3_000 * Math.pow(1.5, attempt.toDouble())).toLong())
+    suspend fun pause(attempt: Int) = pause(attempt, 3_000.0, 15_000.0)
+    suspend fun pause(attempt: Int, firstMs: Double, maxMs: Double) {
+        kotlinx.coroutines.delay(kotlin.math.min(maxMs, firstMs * Math.pow(1.5, attempt.toDouble())).toLong())
         visible.first { it }
     }
 }
@@ -89,7 +91,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
         repo.refreshAll()
         updateCoach()
     }
-    fun syncNow() = launchIo { repo.syncNow(::pause) }
+    fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
 
 }
 
@@ -175,7 +177,7 @@ class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     /** One-off message after a manual sync ("2 new runs", "No new runs"). */
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
     fun syncNow() = launchIo {
-        val n = repo.syncRunsNow(::pause)
+        val n = repo.syncRunsNow { pause(it, 2_000.0, 8_000.0) }
         _syncResult.value = "Synced with Garmin · " + when (n) { 0 -> "no new runs"; 1 -> "1 new run"; else -> "$n new runs" }
     }
     fun clearSyncResult() { _syncResult.value = null }
