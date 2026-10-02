@@ -113,6 +113,8 @@ def normalise_user_summary(d: str, p: dict | None) -> list[Observation]:
         obs(d, "body_battery_low", non_negative(p.get("bodyBatteryLowestValue")), method="garmin_body_battery"),
         obs(d, "respiration_waking_avg", non_negative(p.get("avgWakingRespirationValue")), method="garmin_waking_avg"),
         obs(d, "active_duration", active, method="garmin_active_plus_highly_active"),
+        obs(d, "intensity_minutes_moderate", non_negative(p.get("moderateIntensityMinutes")), method="garmin_intensity_minutes"),
+        obs(d, "intensity_minutes_vigorous", non_negative(p.get("vigorousIntensityMinutes")), method="garmin_intensity_minutes"),
     ]
 
 

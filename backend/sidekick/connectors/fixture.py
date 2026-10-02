@@ -37,6 +37,7 @@ from .base import (
 from .garmin import content_hash, iso_utc
 
 FIXTURE_METRICS = {"resting_hr", "hrv_overnight_avg", "sleep_duration", "steps", "active_duration", "avg_stress",
+                   "intensity_minutes_moderate", "intensity_minutes_vigorous",
                    "body_battery_high", "body_battery_low", "garmin_training_readiness", "garmin_sleep_score"}
 
 
@@ -116,6 +117,9 @@ class FixtureConnector:
             Observation(ds, "garmin_sleep_score", score, method="garmin_sleep_score", source_record_id=sid),
             Observation(ds, "steps", round(r.gauss(9500, 2500)), method="garmin_daily_total"),
             Observation(ds, "active_duration", round(r.uniform(40, 110)) * 60, method="garmin_active_plus_highly_active"),
+            # From their own per-day random source, so adding them doesn't shift any other synthetic value
+            Observation(ds, "intensity_minutes_moderate", round(random.Random("im" + ds).uniform(5, 30)), method="garmin_intensity_minutes"),
+            Observation(ds, "intensity_minutes_vigorous", round(random.Random("iv" + ds).uniform(0, 15)), method="garmin_intensity_minutes"),
             Observation(ds, "avg_stress", round(r.uniform(22, 38) + (10 if episode else 0)), method="garmin_stress"),
             Observation(ds, "body_battery_high", round(min(100, r.uniform(70, 95) - (20 if episode else 0))), method="garmin_body_battery"),
             Observation(ds, "body_battery_low", round(r.uniform(10, 30)), method="garmin_body_battery"),

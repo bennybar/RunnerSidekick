@@ -1,20 +1,28 @@
-"""Two headline numbers for Today: a fitness score and a health score, each 0–100 and judged against people of your
-age and sex where a reference exists. Deterministic and transparent: every component shows its value, its points and
-its weight. Missing components are left out and the remaining weights are rescaled; a score needs at least two
-components. Not a medical score."""
+"""Two headline numbers for Today: a fitness score and a health score, each 0–100. Every part is tied to a published
+reference, nothing is counted twice, and the weights are fixed. A missing part is listed as missing and the score is
+marked partial (it's then the weighted average of the parts that exist; at least two are needed). Each score also
+says how it moved over 4 weeks. Deterministic; not a medical score.
+
+Fitness: VO2 max for your age and sex (Cooper/ACSM percentiles), recent age-graded running (USATF/Alan Jones 2025
+standards, best of the last 90 days) and training regularity (weeks with 2+ runs or 75+ minutes).
+Health: weekly activity against the WHO guideline (150–300 moderate-equivalent minutes; vigorous counts double),
+resting heart rate for your age and sex (CDC/NHANES), sleep length (7–9 h) and sleep regularity (how much the middle of
+your sleep moves night to night). Garmin's fitness age (built from VO2 max and resting HR) and HRV (a day-to-day
+recovery signal, used by readiness) are left out on purpose."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from statistics import median
+from datetime import date, datetime, timedelta
+from statistics import median, pstdev
 
 from . import compare
 from . import reports as rp
 from .analytics import norms as nm
 
-SCORES_VERSION = "scores-1.0"
-FITNESS_WEIGHTS = {"vo2max": 50, "age_grade": 25, "consistency": 25}
-HEALTH_WEIGHTS = {"resting_hr": 30, "fitness_age": 25, "sleep": 25, "hrv": 20}
+SCORES_VERSION = "scores-2.0"
+FITNESS_WEIGHTS = {"vo2max": 50, "age_grade": 25, "regularity": 25}
+HEALTH_WEIGHTS = {"activity": 30, "resting_hr": 25, "sleep_length": 25, "sleep_regularity": 20}
+TREND_DAYS = 28
 
 
 def clamp(x: float) -> float:
@@ -49,69 +57,133 @@ def combine(parts: list[dict], weights: dict[str, int]) -> dict:
     return {"status": "ok", "score": score, "label": label(score), "components": parts, "used": len(have), "of": len(parts)}
 
 
-def build(conn, source: str, today: date) -> dict:
-    cmp = compare.build(conn, source, today)
-    if cmp["missing"]:
-        return {"status": "unavailable", "missing": cmp["missing"], "algorithm_version": SCORES_VERSION}
-    sex, age = cmp["profile"]["sex"], cmp["profile"]["age"]
-    items = {i["id"]: i for i in cmp["items"]}
-    g = rp.get_setting(conn, "garmin_fitness", None) or {}
+def verdict(points: int | None) -> str:
+    return "unknown" if points is None else "good" if points >= 75 else "ok" if points >= 50 else "low"
 
-    # ---- fitness
-    f_parts = []
-    v = (g.get("vo2max") or {}).get("value")
-    f_parts.append({"id": "vo2max", "title": "VO₂ max for your age", "value": f"{v:.1f}" if v else None,
-                    "points": round(vo2_points(sex, age, v)) if v else None,
-                    "note": items["vo2max"].get("headline") if v else "No VO₂ max from Garmin yet"})
-    ag = items.get("age_grade") or {}
-    best = max((r["age_grade_pct"] for r in ag.get("rows", []) if r["kind"] == "best"), default=None)
-    if best is None:
-        best = max((r["age_grade_pct"] for r in ag.get("rows", [])), default=None)
-    f_parts.append({"id": "age_grade", "title": "Age-graded running", "value": f"{best:.0f}%" if best else None,
-                    "points": round(clamp((best - 40) * 2)) if best else None,  # 40% → 0, 90% (world class) → 100
-                    "note": "Your best age grade; 40% scores 0 and 90% scores 100" if best else "No graded times yet"})
-    first = rp.first_weekday(conn)
-    ws = rp.week_start(today, first)
+
+def part(pid: str, title: str, points: float | None, say: str, note: str) -> dict:
+    pts = None if points is None else round(clamp(points))
+    return {"id": pid, "title": title, "points": pts, "say": say, "note": note, "verdict": verdict(pts), "value": say if pts is not None else None}
+
+
+def vo2_on(conn, source: str, d: date, today: date) -> float | None:
+    """Garmin's VO2 max as of d: the latest daily reading up to then (today also falls back to Garmin's current value)."""
+    s = rp.series(conn, source, "garmin_vo2max_running", d.isoformat())
+    recent = [v for k, v in sorted(s.items()) if k >= (d - timedelta(days=60)).isoformat()]
+    if recent:
+        return recent[-1]
+    return ((rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}).get("value") if d == today else None
+
+
+def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str) -> list[dict]:
+    age = compare.age_on(birth, d)
+    parts = []
+    v = vo2_on(conn, source, d, today)
+    if v:
+        i, _ = nm.band_index(nm.VO2_BANDS, age)
+        lo, hi = nm.VO2_BANDS[i]
+        pts = vo2_points(sex, age, v)
+        parts.append(part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · better than about {round(pts)}% of {compare.group_label(sex, lo, hi)}"
+                          if 0 < pts < 100 else f"{v:.1f}", "Garmin's VO₂ max as a percentile of your age and sex group (Cooper/ACSM)"))
+    else:
+        parts.append(part("vo2max", "VO₂ max for your age", None, "No VO₂ max from Garmin yet", "Needs a recent VO₂ max from Garmin"))
+    # Recent age-graded running: the best graded effort of the last 90 days, not an all-time best
+    best = None
+    for a in rp.activities(conn, source, (d - timedelta(days=89)).isoformat(), d.isoformat()):
+        for k, e in rp.efforts_for(conn, a).items():
+            if k in compare.DISTANCE_LABELS:
+                ag = compare.age_grade(sex, compare.age_on(birth, date.fromisoformat(a["local_date"])), k, e["elapsed_s"])
+                if ag and (best is None or ag["age_grade_pct"] > best[0]):
+                    best = (ag["age_grade_pct"], ag["class"], compare.DISTANCE_LABELS[k])
+    parts.append(part("age_grade", "Recent running, age-graded", (best[0] - 40) * 2 if best else None,
+                      f"{best[0]:.0f}% ({best[1]}) · best {best[2].lower()} effort of the last 90 days" if best else "No 5 km+ effort in 90 days",
+                      "Age grade of your best effort in the last 90 days; 40% scores 0, 90% (world class) scores 100"))
+    # Regularity: weeks with a real training stimulus (2+ runs or 75+ minutes), last 8 complete weeks
+    ws = rp.week_start(d, rp.first_weekday(conn))
     weeks = [ws - timedelta(days=7 * k) for k in range(1, 9)]
     runs = rp.activities(conn, source, weeks[-1].isoformat(), (ws - timedelta(days=1)).isoformat())
-    active = sum(1 for w in weeks if any(w.isoformat() <= a["local_date"] <= (w + timedelta(days=6)).isoformat() for a in runs))
-    f_parts.append({"id": "consistency", "title": "Consistency", "value": f"{active} of 8 weeks",
-                    "points": round(100 * active / 8), "note": "Weeks with at least one run, last 8 complete weeks"})
+    good = 0
+    for w in weeks:
+        wk = [a for a in runs if w.isoformat() <= a["local_date"] <= (w + timedelta(days=6)).isoformat()]
+        good += len(wk) >= 2 or sum(a["moving_s"] or 0 for a in wk) >= 75 * 60
+    parts.append(part("regularity", "Training regularity", 100 * good / 8, f"{good} of 8 weeks with 2+ runs or 75+ min",
+                      "Last 8 complete weeks; a week counts with at least 2 runs or 75 minutes of running"))
+    return parts
 
-    # ---- health
-    h_parts = []
-    rhr = items.get("resting_hr") or {}
-    h_parts.append({"id": "resting_hr", "title": "Resting heart rate for your age", "value": f"{rhr['value']} bpm" if rhr.get("status") == "ok" else None,
-                    "points": rhr.get("lower_than_pct") if rhr.get("status") == "ok" else None,
-                    "note": rhr.get("headline") if rhr.get("status") == "ok" else "Not enough resting heart rate data yet"})
-    fa = (g.get("fitness_age") or {})
-    if fa.get("fitnessAge") is not None:
-        diff = (fa.get("chronologicalAge") or age) - fa["fitnessAge"]
-        h_parts.append({"id": "fitness_age", "title": "Fitness age vs your age", "value": f"{fa['fitnessAge']:.1f}",
-                        "points": round(clamp(50 + 10 * diff)), "note": f"{abs(diff):.1f} years {'younger' if diff >= 0 else 'older'} than your age (Garmin)"})
-    else:
-        h_parts.append({"id": "fitness_age", "title": "Fitness age vs your age", "value": None, "points": None, "note": "No fitness age from Garmin yet"})
-    sleep = [s for d, s in rp.series(conn, source, "sleep_duration", today.isoformat()).items() if d >= (today - timedelta(days=13)).isoformat()]
-    if len(sleep) >= 5:
-        h = median(sleep) / 3600
-        pts = 100 if 7 <= h <= 9 else clamp(100 - 50 * (7 - h)) if h < 7 else clamp(100 - 50 * (h - 9))
-        h_parts.append({"id": "sleep", "title": "Sleep", "value": f"{int(h)} h {round((h % 1) * 60):02d} min",
-                        "points": round(pts), "note": f"Typical night over the last two weeks ({len(sleep)} nights); 7–9 h scores 100"})
-    else:
-        h_parts.append({"id": "sleep", "title": "Sleep", "value": None, "points": None, "note": "Needs 5 nights in the last two weeks"})
-    hrv = items.get("hrv") or {}
-    band = (hrv.get("chart") or {}).get("band")
-    if hrv.get("status") == "ok" and band and hrv.get("value") is not None:
-        lo, hi = band
-        val = hrv["value"]
-        pts = 100 if lo <= val <= hi else clamp(100 - 100 * (lo - val) / max(lo, 1) * 2) if val < lo else 90
-        h_parts.append({"id": "hrv", "title": "HRV vs your usual", "value": f"{val} ms", "points": round(pts),
-                        "note": f"This week against your usual {lo}–{hi} ms"})
-    else:
-        h_parts.append({"id": "hrv", "title": "HRV vs your usual", "value": None, "points": None,
-                        "note": "Your usual range is still being learned"})
 
-    return {"status": "ok", "age": age, "sex": sex, "fitness": combine(f_parts, FITNESS_WEIGHTS), "health": combine(h_parts, HEALTH_WEIGHTS),
-            "basis": f"Compared with {'men' if sex == 'male' else 'women'} of your age where a reference exists. A summary of the "
-                     "readings below, not a medical score.", "algorithm_version": SCORES_VERSION}
+def health_parts(conn, source: str, d: date, sex: str, birth: str) -> list[dict]:
+    age = compare.age_on(birth, d)
+    parts = []
+    # Activity against the WHO guideline: moderate + 2 × vigorous minutes, as a weekly average over the days with data in
+    # the last 4 weeks (at least 10 of them)
+    since = (d - timedelta(days=27)).isoformat()
+    mod = {k: v for k, v in rp.series(conn, source, "intensity_minutes_moderate", d.isoformat()).items() if k >= since}
+    vig = {k: v for k, v in rp.series(conn, source, "intensity_minutes_vigorous", d.isoformat()).items() if k >= since}
+    days = sorted(set(mod) | set(vig))
+    if len(days) >= 10:
+        m = 7 * sum(mod.get(x, 0) + 2 * vig.get(x, 0) for x in days) / len(days)
+        pts = 70 * m / 150 if m <= 150 else 70 + 30 * min(1, (m - 150) / 150)
+        parts.append(part("activity", "Weekly activity", pts, f"{round(m)} min a week · WHO: 150–300",
+                          f"Garmin's intensity minutes, vigorous counted double, weekly average over {len(days)} days with data in the last "
+                          "4 weeks; 150 scores 70, 300 scores 100"))
+    else:
+        parts.append(part("activity", "Weekly activity", None, f"Needs 10 days of intensity minutes ({len(days)} so far)",
+                          "Garmin's intensity minutes, last 4 weeks"))
+    r = compare.rhr_item(conn, source, sex, age, d)
+    parts.append(part("resting_hr", "Resting heart rate for your age", r.get("lower_than_pct") if r["status"] == "ok" else None,
+                      f"{r['value']} bpm · lower than about {r['lower_than_pct']}% of {r['group']}" if r["status"] == "ok" else "Not enough days yet",
+                      "Your 4-week median against the CDC/NHANES distribution for your age and sex"))
+    nights = [s for k, s in rp.series(conn, source, "sleep_duration", d.isoformat()).items() if k >= (d - timedelta(days=13)).isoformat()]
+    if len(nights) >= 5:
+        h = median(nights) / 3600
+        parts.append(part("sleep_length", "Sleep length", 100 if 7 <= h <= 9 else 100 - 40 * (7 - h) if h < 7 else 100 - 40 * (h - 9),
+                          f"{int(h)} h {round((h % 1) * 60):02d} min a night", "Typical night over two weeks; 7–9 h scores 100, −40 per hour outside"))
+    else:
+        parts.append(part("sleep_length", "Sleep length", None, "Needs 5 nights in two weeks", "Typical night over two weeks"))
+    # Regularity: how far the middle of your sleep moves from night to night (standard deviation, main sleep only)
+    mids = []
+    for s in conn.sleep_session.find({"source": source, "is_nap": {"$ne": True}, "wake_date": {"$gte": (d - timedelta(days=13)).isoformat(),
+                                                                                              "$lte": d.isoformat()}}):
+        try:
+            st = datetime.fromisoformat(s["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=s.get("utc_offset_s") or 0)
+            en = datetime.fromisoformat(s["end_utc"].replace("Z", "+00:00")) + timedelta(seconds=s.get("utc_offset_s") or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        mid = st + (en - st) / 2
+        mids.append(((mid.hour * 60 + mid.minute) - 12 * 60) % (24 * 60))  # minutes after noon, so nights don't wrap
+    if len(mids) >= 5:
+        sd = pstdev(mids)
+        parts.append(part("sleep_regularity", "Sleep regularity", 100 if sd <= 30 else 100 - (sd - 30) * 4 / 3,
+                          f"Mid-sleep varies about ±{round(sd)} min", "Spread of your mid-sleep time over two weeks; ±30 min or less scores 100, ±105 scores 0"))
+    else:
+        parts.append(part("sleep_regularity", "Sleep regularity", None, "Needs 5 nights in two weeks", "Spread of your mid-sleep time"))
+    return parts
 
+
+def score(parts: list[dict], weights: dict[str, int]) -> dict:
+    out = combine(parts, weights)
+    if out["status"] == "ok":
+        missing = [p["title"] for p in parts if p["points"] is None]
+        if missing:
+            out.update(status="partial", missing=missing)
+    return out
+
+
+def build(conn, source: str, today: date) -> dict:
+    prof = compare.profile(conn, today)
+    if not prof["sex"] or not prof["birth_date"]:
+        return {"status": "unavailable", "missing": [k for k in ("sex", "birth_date") if not prof[k]], "algorithm_version": SCORES_VERSION}
+    sex, birth = prof["sex"], prof["birth_date"]
+    fitness = score(fitness_parts(conn, source, today, today, sex, birth), FITNESS_WEIGHTS)
+    health = score(health_parts(conn, source, today, sex, birth), HEALTH_WEIGHTS)
+    # How each score moved: the same calculation 4 weeks ago, compared only when the same parts were available
+    then = today - timedelta(days=TREND_DAYS)
+    for cur, old in ((fitness, score(fitness_parts(conn, source, then, today, sex, birth), FITNESS_WEIGHTS)),
+                     (health, score(health_parts(conn, source, then, sex, birth), HEALTH_WEIGHTS))):
+        same = {p["id"] for p in cur["components"] if p["points"] is not None} == {p["id"] for p in old["components"] if p["points"] is not None}
+        if cur.get("score") is not None and old.get("score") is not None and same:
+            cur["trend"] = {"delta": cur["score"] - old["score"], "days": TREND_DAYS}
+    return {"status": "ok", "age": compare.age_on(birth, today), "sex": sex, "fitness": fitness, "health": health,
+            "basis": "Each part is tied to a published reference for your age and sex where one exists, with fixed weights. "
+                     "Missing parts are listed, never guessed. A summary of the readings, not a medical score.",
+            "algorithm_version": SCORES_VERSION}

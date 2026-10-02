@@ -268,6 +268,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   - A race before the next running day comes first, even on a day you don't usually run.
 - Trends: a new range cancels the previous range's first fetch as well (it runs inside the owning job).
 
+## Health and fitness scores v2 (2026-10-02, v0.25.0)
+- Fitness: VO₂ max for age and sex, recent age-graded running (90 days) and training regularity (2+ runs or 75+ min a
+  week).
+- Health: weekly activity against the WHO guideline (Garmin intensity minutes, now stored; `backfill-intensity` fills
+  them from stored day summaries), resting HR for age and sex, sleep length and sleep regularity.
+- Fitness age and HRV left the scores (no double counting). Fixed weights; missing parts are listed and marked
+  partial; a 4-week trend.
+- Today shows Health and Fitness as two tiles; each opens its own breakdown with a plain line and Good / OK / Low per
+  part.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

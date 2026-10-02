@@ -224,7 +224,12 @@ data class ScoreComponent(val id: String, val title: String, val value: String? 
 data class Score(val status: String, val score: Int? = null, val label: String? = null, val used: Int? = null, val of: Int? = null,
                  val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
-                 @SerialName("held_back_by") val heldBackBy: String? = null)
+                 @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
+                 val trend: ScoreTrend? = null)
+
+/** How a score moved: the same calculation [days] ago. */
+@Serializable
+data class ScoreTrend(val delta: Int, val days: Int = 28)
 
 /** The next run, calculated from readiness, recent runs and Garmin's zones. */
 @Serializable

@@ -138,7 +138,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
-                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { sheet = "scores" } } }
+                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 // Readiness and the next run answer "what should I do today"; the details and what changed sit behind a tap
                 report.readiness?.let { r -> animatedItem(key = "readiness") { ReadinessCard(r) { sheet = "readiness" } } }
                 report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
@@ -178,7 +178,8 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
         }
     }
     when (sheet) {
-        "scores" -> report?.scores?.let { ScoresSheet(it, onDismiss = { sheet = null }) }
+        "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
+            ScoreSheet(if (sheet == "health") "Health" else "Fitness", it, sc.basis, onDismiss = { sheet = null }) } }
         "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(it, r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
             SheetColumn(onDismiss = { sheet = null }) {
@@ -453,19 +454,41 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
 }
 
 
-/** Health and fitness out of 100, judged against your age and sex where a reference exists. Tap for the breakdown. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** Health and fitness out of 100, as two tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
 @Composable
-private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: () -> Unit) {
+private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ScoreRing("Health", s.health, cs.tertiary, Modifier.weight(1f))
-                ScoreRing("Fitness", s.fitness, cs.primary, Modifier.weight(1f))
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        ScoreTile("Health", s.health, cs.tertiary, Modifier.weight(1f)) { onOpen("health") }
+        ScoreTile("Fitness", s.fitness, cs.primary, Modifier.weight(1f)) { onOpen("fitness") }
+    }
+}
+
+@Composable
+private fun ScoreTile(title: String, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color, modifier: Modifier,
+                      onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val v = sc?.score
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            androidx.compose.foundation.layout.Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
+                    val stroke = androidx.compose.ui.graphics.drawscope.Stroke(9.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawArc(cs.surfaceContainerHighest, -90f, 360f, false, style = stroke)
+                    if (v != null) drawArc(color, -90f, 360f * v / 100f, false, style = stroke)
+                }
+                Text(v?.toString() ?: "–", style = MaterialTheme.typography.headlineMedium)
             }
-            Text("For your age (${s.age}) · tap for what's behind each score", style = MaterialTheme.typography.labelMedium,
-                color = cs.onSurfaceVariant)
+            Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
+            val t = sc?.trend
+            Text(when {
+                t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
+                t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
+                t != null -> "Same as 4 weeks ago"
+                sc?.status == "partial" -> "Partial · ${sc.missing.size} part${if (sc.missing.size == 1) "" else "s"} missing"
+                else -> "For your age"
+            }, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
 }
@@ -492,21 +515,18 @@ private fun ScoreRing(title: String, sc: com.bennybar.runnersidekick.data.remote
 }
 
 @Composable
-private fun ScoresSheet(s: com.bennybar.runnersidekick.data.remote.Scores, onDismiss: () -> Unit) {
+private fun ScoreSheet(title: String, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onDismiss: () -> Unit) {
     SheetColumn(onDismiss) {
-        Text("Health and fitness scores", style = MaterialTheme.typography.headlineSmall)
-        listOf("Health" to s.health, "Fitness" to s.fitness).forEach { (t, sc) ->
-            if (sc == null) return@forEach
-            Group(title = "$t ${sc.score?.let { "$it / 100 · ${sc.label}" } ?: "· not enough data"}" +
-                (if (sc.used != null && sc.of != null && sc.used < sc.of) " · based on ${sc.used} of ${sc.of}" else "")) {
-                sc.components.forEach { c ->
-                    row(c.title + (c.value?.let { ": $it" } ?: ""), supporting = c.note,
-                        trailing = { Text(c.points?.let { "$it pts · ${c.weightPct}%" } ?: "—", style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant) })
-                }
-            }
+        Text("$title" + (sc.score?.let { " · $it" } ?: ""), style = MaterialTheme.typography.headlineSmall)
+        Text(listOfNotNull(sc.label, sc.trend?.let { t -> if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta) })
+            .joinToString(" · "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Group {
+            sc.components.forEach { c -> row(c.title, supporting = c.say ?: c.value ?: c.note,
+                trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
         }
-        s.basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (sc.missing.isNotEmpty()) Text("Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

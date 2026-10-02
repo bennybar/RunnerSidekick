@@ -212,6 +212,7 @@ def main(argv=None) -> int:
     with_user(sub.add_parser("revoke-token")).add_argument("name")
     p = with_user(sub.add_parser("sync", help="sync every connected user (or --user)")); p.add_argument("--loop", action="store_true")
     with_user(sub.add_parser("rebuild-reports"))
+    with_user(sub.add_parser("backfill-intensity", help="intensity minutes from stored Garmin day summaries"))
     with_user(sub.add_parser("audit")).add_argument("--out")
     p = sub.add_parser("invite", help="invite-only access by Google email")
     p.add_argument("action", choices=["add", "remove", "list"]); p.add_argument("email", nargs="?")
@@ -275,6 +276,20 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "revoke-token":
         print(f"revoked {revoke_token(cfg.data_dir, args.name, uid)} token(s) named {args.name!r}")
+        return 0
+    if args.cmd == "backfill-intensity":
+        # Garmin's daily summaries are kept as raw payloads; the intensity minutes in them were not stored before
+        from .connectors.base import DayBundle
+        from .connectors.garmin import normalise_user_summary
+        from .store import save_day
+        conn = connect(ucfg.db_name)
+        days = 0
+        for r in conn.raw_payload.find({"kind": "user_summary"}):
+            obs = [o for o in normalise_user_summary(r["source_key"], r["payload"]) if o.metric.startswith("intensity_minutes_")]
+            if obs:
+                save_day(conn, r["source"], DayBundle(local_date=r["source_key"], observations=obs))
+                days += 1
+        print(f"intensity minutes stored for {days} days")
         return 0
     if args.cmd == "rebuild-reports":
         conn = connect(ucfg.db_name)
