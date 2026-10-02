@@ -524,6 +524,14 @@ private fun ScoreSheet(title: String, sc: com.bennybar.runnersidekick.data.remot
             sc.components.forEach { c -> row(c.title, supporting = c.say ?: c.value ?: c.note,
                 trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
         }
+        if (sc.improve.isNotEmpty()) Group(title = "To improve") {
+            sc.improve.forEach { x -> row(x.part, supporting = x.text, trailing = {
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text("+${x.gain}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+            }) }
+        }
         if (sc.missing.isNotEmpty()) Text("Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }

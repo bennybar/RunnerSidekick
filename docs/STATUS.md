@@ -276,7 +276,7 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Fitness age and HRV left the scores (no double counting). Fixed weights; missing parts are listed and marked
   partial; a 4-week trend.
 - Today shows Health and Fitness as two tiles; each opens its own breakdown with a plain line and Good / OK / Low per
-  part.
+  part, plus "To improve": the two calculated steps that would add the most points (v0.25.1).
 
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders

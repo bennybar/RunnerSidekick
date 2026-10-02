@@ -53,3 +53,14 @@ def test_missing_profile_or_too_few_components_is_unavailable():
     assert scores.build(conn, "fixture", ANCHOR)["status"] == "unavailable"
     parts = [{"id": "vo2max", "points": 80}, {"id": "age_grade", "points": None}, {"id": "regularity", "points": None}]
     assert scores.combine(parts, scores.FITNESS_WEIGHTS)["status"] == "unavailable"
+
+
+def test_improvement_steps_are_calculated_ranked_and_capped():
+    s = scores.build(synced(), "fixture", ANCHOR)
+    for k in ("fitness", "health"):
+        steps = s[k]["improve"]
+        assert len(steps) <= scores.IMPROVE_SHOWN and all(x["gain"] >= 1 and x["text"] for x in steps)
+        assert [x["gain"] for x in steps] == sorted((x["gain"] for x in steps), reverse=True)
+        parts = {c["title"]: c for c in s[k]["components"]}
+        for x in steps:  # each step belongs to a part that isn't at full points yet
+            assert parts[x["part"]]["points"] < 100

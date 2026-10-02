@@ -225,7 +225,11 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
                  val components: List<ScoreComponent> = emptyList(), val detail: String? = null, val basis: String? = null,
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
                  @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
-                 val trend: ScoreTrend? = null)
+                 val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList())
+
+/** One calculated step that would lift a score, and roughly how many points it would add. */
+@Serializable
+data class ScoreStep(val part: String, val text: String, val gain: Int)
 
 /** How a score moved: the same calculation [days] ago. */
 @Serializable

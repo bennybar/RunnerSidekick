@@ -325,6 +325,18 @@ Left out on purpose:
 - **HRV against your usual:** a day-to-day recovery signal, used by readiness.
 - **BMI:** the connector doesn't store height, and there are few weigh-ins.
 
+"To improve" lists up to two calculated steps, each from one part's numbers, with the score points it would add
+(the part's weight × the points it would gain):
+- VO₂ max: the next reference percentile value.
+- Age grade: the time over the same distance for +5 percentage points.
+- Regularity: weeks that fell short.
+- Activity: minutes a week to 150, or to 300 if you're already above 150.
+- Sleep: minutes a night to 7 h.
+- Sleep regularity: within ±30 min.
+- Resting HR: only when it's under the 75th percentile.
+
+Steps under one point aren't shown.
+
 These are deterministic summaries of the readings, not medical scores. No language model is involved in any number.
 
 ## Reading notes — `readings.py`

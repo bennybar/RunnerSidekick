@@ -61,9 +61,18 @@ def verdict(points: int | None) -> str:
     return "unknown" if points is None else "good" if points >= 75 else "ok" if points >= 50 else "low"
 
 
-def part(pid: str, title: str, points: float | None, say: str, note: str) -> dict:
+def part(pid: str, title: str, points: float | None, say: str, note: str, improve: tuple[str, float] | None = None) -> dict:
+    """improve: one concrete step worked out from this part's numbers, and the points the part would reach with it."""
     pts = None if points is None else round(clamp(points))
-    return {"id": pid, "title": title, "points": pts, "say": say, "note": note, "verdict": verdict(pts), "value": say if pts is not None else None}
+    out = {"id": pid, "title": title, "points": pts, "say": say, "note": note, "verdict": verdict(pts), "value": say if pts is not None else None}
+    if improve and pts is not None and improve[1] > pts:
+        out["improve"] = {"text": improve[0], "target_points": round(clamp(improve[1]))}
+    return out
+
+
+def clock(sec: float) -> str:
+    t = round(sec)
+    return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
 def vo2_on(conn, source: str, d: date, today: date) -> float | None:
@@ -83,8 +92,12 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str)
         i, _ = nm.band_index(nm.VO2_BANDS, age)
         lo, hi = nm.VO2_BANDS[i]
         pts = vo2_points(sex, age, v)
-        parts.append(part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · better than about {round(pts)}% of {compare.group_label(sex, lo, hi)}"
-                          if 0 < pts < 100 else f"{v:.1f}", "Garmin's VO₂ max as a percentile of your age and sex group (Cooper/ACSM)"))
+        grp = compare.group_label(sex, lo, hi)
+        nxt = next(((t, p) for t, p in zip(nm.VO2[sex][i], nm.VO2_PERCENTILES) if t > v), None)
+        imp = (f"VO₂ max {nxt[0]:.1f} (+{nxt[0] - v:.1f}) would put you above {nxt[1]}% of {grp}; mostly easy running with one "
+               "harder session a week is the usual way up", vo2_points(sex, age, nxt[0])) if nxt else None
+        parts.append(part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · better than about {round(pts)}% of {grp}"
+                          if 0 < pts < 100 else f"{v:.1f}", "Garmin's VO₂ max as a percentile of your age and sex group (Cooper/ACSM)", imp))
     else:
         parts.append(part("vo2max", "VO₂ max for your age", None, "No VO₂ max from Garmin yet", "Needs a recent VO₂ max from Garmin"))
     # Recent age-graded running: the best graded effort of the last 90 days, not an all-time best
@@ -94,10 +107,14 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str)
             if k in compare.DISTANCE_LABELS:
                 ag = compare.age_grade(sex, compare.age_on(birth, date.fromisoformat(a["local_date"])), k, e["elapsed_s"])
                 if ag and (best is None or ag["age_grade_pct"] > best[0]):
-                    best = (ag["age_grade_pct"], ag["class"], compare.DISTANCE_LABELS[k])
+                    best = (ag["age_grade_pct"], ag["class"], compare.DISTANCE_LABELS[k], e["elapsed_s"], ag["standard_s"])
+    imp = None
+    if best:
+        goal = best[0] + 5
+        imp = (f"A {best[2].lower()} in {clock(best[4] * 100 / goal)} (now {clock(best[3])}) would be a {goal:.0f}% age grade", (goal - 40) * 2)
     parts.append(part("age_grade", "Recent running, age-graded", (best[0] - 40) * 2 if best else None,
                       f"{best[0]:.0f}% ({best[1]}) · best {best[2].lower()} effort of the last 90 days" if best else "No 5 km+ effort in 90 days",
-                      "Age grade of your best effort in the last 90 days; 40% scores 0, 90% (world class) scores 100"))
+                      "Age grade of your best effort in the last 90 days; 40% scores 0, 90% (world class) scores 100", imp))
     # Regularity: weeks with a real training stimulus (2+ runs or 75+ minutes), last 8 complete weeks
     ws = rp.week_start(d, rp.first_weekday(conn))
     weeks = [ws - timedelta(days=7 * k) for k in range(1, 9)]
@@ -107,7 +124,8 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str)
         wk = [a for a in runs if w.isoformat() <= a["local_date"] <= (w + timedelta(days=6)).isoformat()]
         good += len(wk) >= 2 or sum(a["moving_s"] or 0 for a in wk) >= 75 * 60
     parts.append(part("regularity", "Training regularity", 100 * good / 8, f"{good} of 8 weeks with 2+ runs or 75+ min",
-                      "Last 8 complete weeks; a week counts with at least 2 runs or 75 minutes of running"))
+                      "Last 8 complete weeks; a week counts with at least 2 runs or 75 minutes of running",
+                      (f"Make every week count: at least 2 runs or 75 minutes. {8 - good} of the last 8 weeks fell short", 100)))
     return parts
 
 
@@ -123,21 +141,27 @@ def health_parts(conn, source: str, d: date, sex: str, birth: str) -> list[dict]
     if len(days) >= 10:
         m = 7 * sum(mod.get(x, 0) + 2 * vig.get(x, 0) for x in days) / len(days)
         pts = 70 * m / 150 if m <= 150 else 70 + 30 * min(1, (m - 150) / 150)
+        goal = 150 if m < 150 else 300
         parts.append(part("activity", "Weekly activity", pts, f"{round(m)} min a week · WHO: 150–300",
                           f"Garmin's intensity minutes, vigorous counted double, weekly average over {len(days)} days with data in the last "
-                          "4 weeks; 150 scores 70, 300 scores 100"))
+                          "4 weeks; 150 scores 70, 300 scores 100",
+                          (f"About {round(goal - m)} more active minutes a week reaches {'the WHO minimum' if goal == 150 else 'the top of the WHO range'} "
+                           f"({goal}); vigorous minutes count double", 70 if goal == 150 else 100)))
     else:
         parts.append(part("activity", "Weekly activity", None, f"Needs 10 days of intensity minutes ({len(days)} so far)",
                           "Garmin's intensity minutes, last 4 weeks"))
     r = compare.rhr_item(conn, source, sex, age, d)
     parts.append(part("resting_hr", "Resting heart rate for your age", r.get("lower_than_pct") if r["status"] == "ok" else None,
                       f"{r['value']} bpm · lower than about {r['lower_than_pct']}% of {r['group']}" if r["status"] == "ok" else "Not enough days yet",
-                      "Your 4-week median against the CDC/NHANES distribution for your age and sex"))
+                      "Your 4-week median against the CDC/NHANES distribution for your age and sex",
+                      ("Resting heart rate usually comes down with regular easy running and enough sleep", 75)
+                      if r["status"] == "ok" and r["lower_than_pct"] < 75 else None))
     nights = [s for k, s in rp.series(conn, source, "sleep_duration", d.isoformat()).items() if k >= (d - timedelta(days=13)).isoformat()]
     if len(nights) >= 5:
         h = median(nights) / 3600
         parts.append(part("sleep_length", "Sleep length", 100 if 7 <= h <= 9 else 100 - 40 * (7 - h) if h < 7 else 100 - 40 * (h - 9),
-                          f"{int(h)} h {round((h % 1) * 60):02d} min a night", "Typical night over two weeks; 7–9 h scores 100, −40 per hour outside"))
+                          f"{int(h)} h {round((h % 1) * 60):02d} min a night", "Typical night over two weeks; 7–9 h scores 100, −40 per hour outside",
+                          (f"About {round((7 - h) * 60)} more minutes of sleep a night reaches 7 hours", 100) if h < 7 else None))
     else:
         parts.append(part("sleep_length", "Sleep length", None, "Needs 5 nights in two weeks", "Typical night over two weeks"))
     # Regularity: how far the middle of your sleep moves from night to night (standard deviation, main sleep only)
@@ -154,10 +178,14 @@ def health_parts(conn, source: str, d: date, sex: str, birth: str) -> list[dict]
     if len(mids) >= 5:
         sd = pstdev(mids)
         parts.append(part("sleep_regularity", "Sleep regularity", 100 if sd <= 30 else 100 - (sd - 30) * 4 / 3,
-                          f"Mid-sleep varies about ±{round(sd)} min", "Spread of your mid-sleep time over two weeks; ±30 min or less scores 100, ±105 scores 0"))
+                          f"Mid-sleep varies about ±{round(sd)} min", "Spread of your mid-sleep time over two weeks; ±30 min or less scores 100, ±105 scores 0",
+                          (f"Keep bed and wake times within about 30 minutes, weekends too (now ±{round(sd)} min)", 100) if sd > 30 else None))
     else:
         parts.append(part("sleep_regularity", "Sleep regularity", None, "Needs 5 nights in two weeks", "Spread of your mid-sleep time"))
     return parts
+
+
+IMPROVE_SHOWN = 2
 
 
 def score(parts: list[dict], weights: dict[str, int]) -> dict:
@@ -166,6 +194,11 @@ def score(parts: list[dict], weights: dict[str, int]) -> dict:
         missing = [p["title"] for p in parts if p["points"] is None]
         if missing:
             out.update(status="partial", missing=missing)
+        # The steps that would lift this score most, each with the points it would add (from the part's weight)
+        steps = [{"part": p["title"], "text": p["improve"]["text"],
+                  "gain": round(p["weight_pct"] * (p["improve"]["target_points"] - p["points"]) / 100)}
+                 for p in parts if p.get("improve") and p["points"] is not None]
+        out["improve"] = sorted((x for x in steps if x["gain"] >= 1), key=lambda x: -x["gain"])[:IMPROVE_SHOWN]
     return out
 
 
