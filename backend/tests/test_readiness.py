@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sidekick import readiness as rd
 
@@ -25,3 +25,21 @@ def test_missing_today_uses_yesterday_only():
 
 def test_labels():
     assert [rd.label(x) for x in (90, 75, 60, 49)] == ["High", "High", "Moderate", "Low"]
+
+
+def test_training_load_fades_and_counts_recent_effort():
+    from datetime import datetime, timezone
+    from sidekick.connectors.fixture import FixtureConnector
+    from sidekick.db import connect, user_db_name
+    from sidekick.sync import run_sync
+    from sidekick import reports as rp
+    anchor = date(2026, 9, 30)
+    conn = connect(user_db_name(1, "fixture"))
+    run_sync(conn, FixtureConnector(anchor), anchor, 45, 3, max_backfill_days=60)
+    zones = rp.hr_zones(conn)
+    last = rp.activities(conn, "fixture", "2026-01-01", anchor.isoformat())[-1]
+    end = datetime.fromisoformat(last["start_utc"].replace("Z", "+00:00"))
+    soon = rd.training_load(conn, "fixture", end + timedelta(hours=14), zones)
+    later = rd.training_load(conn, "fixture", end + timedelta(hours=62), zones)
+    assert soon and later and soon["fatigue"] > later["fatigue"] > 0  # recent effort fades over days
+    assert soon["ratio"] > later["ratio"] and soon["typical"] > 0

@@ -163,6 +163,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   Garmin agreement card is one line. Compare no longer shows an ISO date.
 - Journal: the Check-ins tab only appears for people who logged check-ins before.
 
+## Readiness counts previous training (2026-10-02, v0.18.1)
+- Readiness 1.1: the jumpy "minutes in the last 7 days" and the 2-day "last run" parts are replaced by a training
+  load (heart-rate zones × minutes, fading over 7 vs 28 days) and a recovery part (recent effort fading over about
+  2 days). Backtested against Garmin's readiness on real data: both now drop on the same mornings after runs.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

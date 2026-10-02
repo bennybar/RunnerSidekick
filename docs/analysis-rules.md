@@ -332,18 +332,33 @@ Per-week distance, time and climb, run count, average pace, average HR, longest 
 4–5. Each covers the 28 days to today against the 28 days before, as a % change. Which direction is good is marked
 per item: lower pace, HR and hard share are good. Calculated, never written by AI.
 
-## Training readiness — `readiness.py` (`readiness-1.0`)
+## Training readiness — `readiness.py` (`readiness-1.1`)
 
-Calculated with the same rescaling as the scores (at least two parts). The weakest part caps the total at 50 points
+Calculated with the same rescaling as the scores (at least two parts). The weakest part caps the total at 40 points
 above it. Labels: 75+ high, 50+ moderate, otherwise low. Garmin's training readiness is not used.
 
 | Part (weight) | Points |
 |---|---|
-| HRV vs usual (25) | 100 down to 5% below usual, then −4 per % |
-| Resting HR vs usual (20) | 100 up to +1 bpm, then −12 per bpm |
-| Sleep last night (25) | 100 from 7 h, −30 per hour short |
-| Running, last 7 days (15) | 100 up to 120% of the prior 4-week weekly mean, 0 at 180% |
-| Last run (15) | hard (≥30% in zones 4–5): 40 today, 60 yesterday, 85 two days ago; easy: 75, 90, 100 |
+| HRV vs usual (20) | 100 down to 5% below usual, then −4 per % |
+| Resting HR vs usual (15) | 100 up to +1 bpm, then −12 per bpm |
+| Sleep last night (20) | 100 from 7 h, −40 per hour short |
+| Training load (20) | acute/chronic ratio: 100 up to 1.1, then −160 per 1.0 (1.35 → 60, 1.6 → 20) |
+| Recovery (25) | 100 − 80 × (effort still left from recent runs ÷ a typical run) |
+
+Training load per run follows Edwards' heart-rate-zone method:
+- moving minutes in zones 1–5, times 1–5 (below zone 1 counts half);
+- scaled up to the whole run when heart rate covers part of it;
+- runs without usable heart rate count minutes × 2.
+
+How the loads are combined:
+- **Acute and chronic:** fading daily averages of the loads (Banister-style), with time constants of 7 and 28 days.
+- **Recovery:** the loads fade with a 48-hour time constant, compared with the median run load of the last 28 days.
+- **Moment:** "now" for today, and 08:00 local for earlier days.
+- **Minimum history:** 6 runs and 3 weeks.
+
+Backtest against Garmin's own readiness (Sep 23 – Oct 2, 2026): after each run day both drop, and ours reaches its low
+band on the same mornings (Sep 28: Garmin 15, ours 49; Oct 1: Garmin 18, ours 45). Garmin also uses sleep quality and
+stress, and stays lower overall.
 
 Each part also gets a verdict: good (85+ points), ok (60+) or low. Running more than 120% of usual is never
 "good". The app shows that verdict and a plain line ("Normal for you", "Short (5 h 47 min)").

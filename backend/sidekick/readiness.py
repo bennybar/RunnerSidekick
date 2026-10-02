@@ -5,15 +5,23 @@ pace guide, sized from your own recent runs and Garmin's zones. Garmin's own tra
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from math import exp
+from zoneinfo import ZoneInfo
 from statistics import median
 
 from . import reports as rp
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.0"
-WEIGHTS = {"hrv": 25, "resting_hr": 20, "sleep": 25, "load": 15, "recent": 15}
-CAP_ABOVE_LOWEST = 50  # the score is never more than 50 points above its weakest part
+READINESS_VERSION = "readiness-1.1"
+WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
+# Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
+# averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
+ZONE_WEIGHT = [0.5, 1, 2, 3, 4, 5]
+ACUTE_DAYS, CHRONIC_DAYS, RECOVERY_HOURS = 7, 28, 48
+LOAD_OK, LOAD_SLOPE = 1.1, 160      # acute/chronic up to 1.1 scores 100; 1.35 → 60; 1.6 → 20
+RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining effort / typical run)
+CAP_ABOVE_LOWEST = 40  # the score is never more than 40 points above its weakest part
 HARD_SHARE = 0.3  # a run with at least 30% of its time in zones 4–5 counts as hard
 
 
@@ -55,6 +63,59 @@ def recent_runs(conn, source: str, today: date, zones: dict | None) -> list[dict
     return out
 
 
+_load_cache: dict[tuple, float] = {}
+
+
+def run_load(conn, a: dict, floors: list[float] | None) -> float:
+    """Edwards training load of one run: moving minutes in each heart-rate zone times 1–5. Without usable heart rate,
+    the run's minutes times 2 (a moderate guess)."""
+    key = (a["id"], a.get("moving_s"), tuple(floors or ()))
+    if key in _load_cache:
+        return _load_cache[key]
+    from .analytics import insights as ins
+    from .focus import MIN_HR_COVERAGE
+    mins = (a.get("moving_s") or 0) / 60
+    load = 2 * mins
+    s = rp.samples_for(conn, a["id"]) if floors else None
+    if s is not None:
+        r = ins.RunData(a["source_id"], a["local_date"], datetime.min, None, a["distance_m"], a["moving_s"], None, s, [], "steady")
+        zt = ins.zone_time(r, floors)
+        if sum(zt) and sum(zt) >= MIN_HR_COVERAGE * (a.get("moving_s") or 0):
+            load = sum(w * t / 60 for w, t in zip(ZONE_WEIGHT, zt)) * (a["moving_s"] / sum(zt))
+    _load_cache[key] = load
+    return load
+
+
+def moment(conn, d: date) -> datetime:
+    """When readiness is judged: now for today, 8:00 local for an earlier day."""
+    tz = ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))
+    now = datetime.now(timezone.utc)
+    if d >= now.astimezone(tz).date():
+        return now
+    return datetime.combine(d, time(8), tz).astimezone(timezone.utc)
+
+
+def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict | None:
+    """Acute and chronic load (exponentially fading sums per day) and the effort of recent runs not yet recovered from.
+    None with fewer than 3 weeks of runs."""
+    runs = [a for a in rp.activities(conn, source, (at.date() - timedelta(days=84)).isoformat(), at.date().isoformat())
+            if a.get("start_utc") and a.get("moving_s")]
+    ends = [(datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["moving_s"]), a) for a in runs]
+    ends = [(e, a) for e, a in ends if e <= at]
+    if len(ends) < 6 or (at - ends[0][0]).days < 21:
+        return None
+    floors = zones["floors"] if zones else None
+    loads = [(e, run_load(conn, a, floors)) for e, a in ends]
+    # Fading averages per day (a per-day rate, so acute and chronic are comparable)
+    acute = sum(l * exp(-(at - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS
+    chronic = sum(l * exp(-(at - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS
+    typical = median(l for e, l in loads if (at - e).days < 28) if any((at - e).days < 28 for e, _ in loads) else median(l for _, l in loads)
+    fatigue = sum(l * exp(-(at - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads) / typical if typical else 0
+    days = (at.date() - ends[-1][0].date()).days
+    return {"ratio": acute / chronic if chronic else 1.0, "fatigue": fatigue, "acute": acute, "chronic": chronic, "typical": typical,
+            "last_when": "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago" if days < 7 else None}
+
+
 def build(conn, source: str, today: date, morning: dict) -> dict:
     by = {f["metric"]: f for f in morning["findings"]}
     zones = rp.hr_zones(conn)
@@ -90,40 +151,38 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     if v is not None:
         h = v / 3600
         hm = f"{int(h)} h {round((h % 1) * 60):02d} min"
-        parts.append({"id": "sleep", "title": "Sleep", "value": hm, "points": round(100 if h >= 7 else clamp(100 - 30 * (7 - h))),
+        parts.append({"id": "sleep", "title": "Sleep", "value": hm, "points": round(100 if h >= 7 else clamp(100 - 40 * (7 - h))),
                       "say": f"Enough ({hm})" if h >= 7 else f"Short ({hm})",
-                      "note": "7 h or more scores 100; each hour short costs 30 points" + (f" · {when}" if when else "")})
+                      "note": "7 h or more scores 100; each hour short costs 40 points" + (f" · {when}" if when else "")})
     else:
         parts.append({"id": "sleep", "title": "Sleep", "value": None, "points": None, "say": "Not in yet", "note": "Not in yet"})
 
-    f = by.get("running_moving_time_7d")
-    if f and f.get("comparison", {}).get("value"):
-        ratio = f["observed"]["value"] / f["comparison"]["value"]
-        parts.append({"id": "load", "title": "Running this week", "value": f"{round(100 * ratio)}% of usual",
-                      "points": round(100 if ratio <= 1.2 else clamp(100 - 100 * (ratio - 1.2) / 0.6)),
-                      "say": "A normal amount" if ratio <= 1.2 else f"{'More' if ratio <= 1.5 else 'Much more'} than usual ({round(100 * ratio)}%)",
-                      "note": "Against your weekly average of the 4 weeks before; up to 120% scores 100, 180% scores 0"})
+    at = moment(conn, today)
+    tl = training_load(conn, source, at, zones)
+    if tl:
+        r = tl["ratio"]
+        parts.append({"id": "load", "title": "Training load", "value": f"{round(100 * r)}% of usual",
+                      "points": round(100 if r <= LOAD_OK else clamp(100 - LOAD_SLOPE * (r - LOAD_OK))),
+                      "say": "Normal for you" if r <= LOAD_OK else f"{'Heavier' if r <= 1.4 else 'Much heavier'} than usual ({round(100 * r)}%)",
+                      "note": "Last week's effort (heart-rate zones × minutes, fading over 7 days) against your usual (fading over 28 days)"})
+        f = tl["fatigue"]
+        when = tl["last_when"]
+        parts.append({"id": "recovery", "title": "Recovery", "value": f"{round(100 * f)}% of a typical run",
+                      "points": round(clamp(100 - RECOVERY_SLOPE * f)),
+                      "say": ("Recovered" if f < 0.15 else "Mostly recovered" if f < 0.4 else "Still recovering" if f < 0.8
+                              else "Tired from recent runs") + (f" (last run {when})" if when else ""),
+                      "note": "Effort of recent runs still left after fading over about 2 days, against your typical run"})
     else:
-        parts.append({"id": "load", "title": "Running this week", "value": None, "points": None, "say": "Not known yet",
-                      "note": "Needs 4 weeks of runs"})
-
-    rr = recent_runs(conn, source, today, zones)
-    if rr:
-        r = rr[0]
-        when = ["today", "yesterday", "2 days ago"][r["days_ago"]]
-        pts = (40 if r["days_ago"] == 0 else 60 if r["days_ago"] == 1 else 85) if r["hard"] else (75 if r["days_ago"] == 0 else 90 if r["days_ago"] == 1 else 100)
-        say = (f"Hard, {when}: " + ("still recovering" if r["days_ago"] <= 1 else "mostly recovered")) if r["hard"] else f"Easy, {when}"
-        parts.append({"id": "recent", "title": "Last run", "value": f"{'hard' if r['hard'] else 'easy'}, {when}", "points": pts, "say": say,
-                      "note": "Hard means 30% or more of the time in zones 4–5; points come back over 2–3 days"})
-    else:
-        parts.append({"id": "recent", "title": "Last run", "value": "none in 2 days", "points": 100, "say": "None in 2 days: rested",
-                      "note": "Rested legs"})
+        parts.append({"id": "load", "title": "Training load", "value": None, "points": None, "say": "Not known yet",
+                      "note": "Needs 3 weeks of runs"})
+        parts.append({"id": "recovery", "title": "Recovery", "value": None, "points": None, "say": "Not known yet",
+                      "note": "Needs 3 weeks of runs"})
 
     for p in parts:
         pts = p.get("points")
         p["verdict"] = "unknown" if pts is None else "good" if pts >= 85 else "ok" if pts >= 60 else "low"
-        if p["id"] == "load" and p["verdict"] == "good" and not p["say"].startswith("A normal"):
-            p["verdict"] = "ok"  # "more than usual" never reads as good
+        if p["id"] == "load" and p["verdict"] == "good" and not p["say"].startswith("Normal"):
+            p["verdict"] = "ok"  # "heavier than usual" never reads as good
     out = combine(parts, WEIGHTS)
     if out["status"] == "ok":
         # One very low part (a big jump in running, a short night) limits the whole score
@@ -136,7 +195,7 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         if weak:
             out["held_back_by"] = min(weak, key=lambda p: p["points"])["title"]
     out.update(algorithm_version=READINESS_VERSION,
-               basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 50 points "
+               basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 40 points "
                      "above it. A guide, not a medical score.")
     return out
 
