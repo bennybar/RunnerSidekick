@@ -19,7 +19,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.3"  # 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.4"  # 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -525,6 +525,9 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     vo2_series = series(conn, source, "garmin_vo2max_running", a["local_date"])
     recent_vo2 = [k for k in vo2_series if k >= (d - timedelta(days=7)).isoformat()]
     vo2_day = {"value": vo2_series[max(recent_vo2)], "date": max(recent_vo2)} if recent_vo2 else None
+    # Garmin's training readiness on the morning of the run (that day only)
+    tr = one(conn.daily_observation, {"source": source, "metric": "garmin_training_readiness", "local_date": a["local_date"], "state": "measured"})
+    readiness_day = {"value": tr["value"], "date": a["local_date"], "label": tr.get("label")} if tr and tr.get("value") is not None else None
     week_begin = week_start(d, first_weekday(conn))
     week_acts = activities(conn, source, week_begin.isoformat(), a["local_date"])
     rpe = one(conn.activity_effort, {"activity_source_id": sid})
@@ -541,7 +544,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "garmin_metrics": a["garmin_metrics"],
         # Garmin's headline (smoothed, one decimal) VO2 max as of the run's day; the run's own vO2MaxValue is a separate,
         # whole-number per-run estimate and often differs by a point
-        "garmin_vo2max_day": vo2_day,
+        "garmin_vo2max_day": vo2_day, "garmin_readiness_day": readiness_day,
         "splits": [{**rn.as_dict(s), **{k: v for k, v in dt.items() if k != "idx"}}
                    for s, dt in zip(splits, details or [{}] * len(splits))],
         "story": story, "best_efforts": best_efforts,
@@ -555,7 +558,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
-              "week_first": first_weekday(conn), "vo2_day": vo2_day}
+              "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 

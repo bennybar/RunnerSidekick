@@ -332,6 +332,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Run header (2026-10-04, v0.30.1)
+- Run screen: moving pace sits beside the distance; Garmin's aerobic training effect joins heart rate and VO₂ max;
+  Garmin's training readiness on the morning of the run joins the drift row (report-2.4, `garmin_readiness_day`).
+
 ## LLM export v2, run context (2026-10-04, v0.30.0)
 - Run screen: the "Run type" card opens an optional sheet: what the run was meant to be (recovery, easy, steady
   aerobic, long, tempo, threshold, intervals, race, progression, free run, other), a target, perceived effort, overall

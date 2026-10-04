@@ -373,17 +373,28 @@ private fun RunHero(r: PostRunReport, units: Units) {
     Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             displayName(a.name)?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = on) }
+            // Distance with the moving pace beside it
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(d, style = MaterialTheme.typography.displayLarge, color = on)
                 Text(" $du", style = MaterialTheme.typography.headlineSmall, color = on.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 10.dp))
+                Spacer(Modifier.weight(1f))
+                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 6.dp)) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(Format.pace(r.paceMovingSPerKm, units).substringBefore(" "), style = MaterialTheme.typography.headlineLarge, color = on)
+                        Text(" " + Format.pace(r.paceMovingSPerKm, units).substringAfter(" "), style = MaterialTheme.typography.titleMedium,
+                            color = on.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    Text("moving pace", style = MaterialTheme.typography.labelLarge, color = on.copy(alpha = 0.8f))
+                }
             }
             Row {
-                BigStat(Format.pace(r.paceMovingSPerKm, units).substringBefore(" "), Format.pace(r.paceMovingSPerKm, units).substringAfter(" "), "moving pace", on, Modifier.weight(1f))
                 BigStat(a.avgHr?.roundToInt()?.toString() ?: "—", "bpm", "avg heart rate", on, Modifier.weight(1f))
+                // Garmin's aerobic training effect for this run
+                val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
+                BigStat(te?.let { "%.1f".format(it) } ?: "—", null, "aerobic TE", on, Modifier.weight(1f))
                 // Garmin's VO2 max on the day of the run (as Garmin shows it); the run's own estimate as a fallback
-                (r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"'))?.let { v ->
-                    BigStat(v, null, if (r.garminVo2maxDay != null) "VO₂ max" else "VO₂ max (run)", on, Modifier.weight(0.8f))
-                }
+                BigStat(r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"') ?: "—", null,
+                    if (r.garminVo2maxDay != null || r.garminMetrics["vO2MaxValue"] == null) "VO₂ max" else "VO₂ max (run)", on, Modifier.weight(1f))
             }
             Row {
                 BigStat(Format.duration(a.movingS), null, "moving", on, Modifier.weight(1f))
@@ -392,11 +403,16 @@ private fun RunHero(r: PostRunReport, units: Units) {
             }
             // Decoupling (heart-rate drift) for every run: pace:HR and power:HR, first half against second
             val dc = r.decoupling
-            if (dc.decouplingPct != null) Row {
-                BigStat("%.1f".format(dc.decouplingPct), "%", "drift · pace:HR", on, Modifier.weight(1f))
-                BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
-                    "drift · power:HR", on, Modifier.weight(1f))
-                Spacer(Modifier.weight(1f))
+            val ready = r.garminReadinessDay?.value?.roundToInt()?.toString()
+            if (dc.decouplingPct != null || ready != null) Row {
+                if (dc.decouplingPct != null) {
+                    BigStat("%.1f".format(dc.decouplingPct), "%", "drift · pace:HR", on, Modifier.weight(1f))
+                    BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
+                        "drift · power:HR", on, Modifier.weight(1f))
+                }
+                // Garmin's training readiness on the morning of the run
+                if (ready != null) BigStat(ready, null, "Garmin readiness", on, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
+                if (dc.decouplingPct == null) Spacer(Modifier.weight(2f))
             }
             if (dc.decouplingPct != null && !dc.eligible) Text("Drift is indicative here: " +
                 (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady" else dc.reasons.firstOrNull() ?: "not a steady run") + ".",
