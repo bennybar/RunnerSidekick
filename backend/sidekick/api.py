@@ -58,8 +58,17 @@ class PlanIn(BaseModel):
 
 
 class IntentIn(BaseModel):
-    kind: Literal["easy", "long", "tempo", "intervals", "race", "recovery", "other"]
+    """What the run was meant to be, and optionally how it went in the runner's words. Blank fields are left out."""
+    kind: Literal["recovery", "easy", "steady", "long", "tempo", "threshold", "intervals", "race", "progression", "free", "other"]
     note: str | None = Field(default=None, max_length=500)
+    target: str | None = Field(default=None, max_length=100)
+    effort: Literal["very_easy", "easy", "easy_moderate", "moderate", "moderate_hard", "hard", "very_hard"] | None = None
+    feel: Literal["great", "good", "okay", "poor", "very_poor"] | None = None
+    limiter: Literal["none", "cardio", "breathing", "legs", "feet", "muscular_fatigue", "heat", "humidity", "hills", "illness",
+                     "pain", "gi", "motivation", "other"] | None = None
+    limiter2: Literal["none", "cardio", "breathing", "legs", "feet", "muscular_fatigue", "heat", "humidity", "hills", "illness",
+                      "pain", "gi", "motivation", "other"] | None = None
+    health: Literal["normal", "recovering", "mild_symptoms", "poor_sleep", "fatigued", "sore", "other"] | None = None
     client_updated_at: str
 
 
@@ -364,7 +373,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if not rp.activity_by_source_id(conn, cfg.source, sid):
             raise HTTPException(404)
         put_if_newer(conn.run_intent, {"activity_source_id": sid},
-                     {"kind": body.kind, "note": body.note, "source": "user", "client_updated_at": body.client_updated_at})
+                     {"kind": body.kind, "note": body.note, "source": "user", "client_updated_at": body.client_updated_at,
+                      **{k: (getattr(body, k) or "").strip() or None for k in rp.CONTEXT_FIELDS}})
         with lock_reports:
             return rp.build_post_run(conn, cfg.source, sid, synthetic)
 
@@ -628,11 +638,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"status": "pending"}
 
     @api.get("/v1/activities/{sid}/export.md")
-    def export_run(sid: str, conn=Depends(db)):
-        """The run as one Markdown file (summary, analysis, splits, minute-by-minute data and the AI input)."""
+    def export_run(sid: str, v: str | None = Query(default=None, max_length=20), conn=Depends(db)):
+        """The run as one Markdown file for reading or for a language model (Runner Sidekick LLM Export v2). `v`: the app's
+        version, written into the file."""
         from fastapi.responses import PlainTextResponse
         from . import run_export
-        out = run_export.markdown(conn, cfg.source, sid)
+        out = run_export.markdown(conn, cfg.source, sid, app_version=v, now=datetime.now(tz(conn)))
         if out is None:
             raise HTTPException(404)
         name, text = out
@@ -713,7 +724,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
-                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
         for t in tables:
             conn[t].delete_many({})

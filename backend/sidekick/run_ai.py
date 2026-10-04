@@ -18,7 +18,7 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "run-ai-1.1"
+PROMPT_VERSION = "run-ai-1.2"
 MAX_POINTS = 3
 # Written automatically after a sync, only for new runs: never for history pulled in by a first sync or a backfill
 AUTO_WINDOW_H = 36        # the run started within the last 36 hours
@@ -51,6 +51,10 @@ analysis and its context. Write:
 - next_time: one concrete suggestion for a coming run, with a direction (easier, same or harder than this run). When
   today:advice has intensity_held_back true, the direction can't be harder.
 
+When meant_to_be_source is "user", the runner said what the run was for: judge the run against that, never against
+data_based_type. run:athlete, when present, is the runner's own report (effort, feel, what limited them, how they were);
+take it at face value and weigh it with the data.
+
 Hard rules:
 - Use only the bundle. Cite the evidence ids each point relies on, only in "evidence_ids"; never write ids in text.
 - Never write digits or numbers in words. For any number use a placeholder {fact:<id>} with an id from "facts".
@@ -79,9 +83,18 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
     b.item("run:this", "run", weekday=local.strftime("%A"), time_of_day="morning" if local.hour < 12 else "afternoon" if local.hour < 17 else "evening",
            days_ago=(today - date.fromisoformat(a["local_date"])).days, meant_to_be=intent.get("kind"),
            meant_to_be_source=intent.get("source"), effort_type=(r.get("classification") or {}).get("kind"),
+           data_based_type=(r.get("classified") or {}).get("kind"),
            story=r.get("story", []), next_focus=r.get("next_focus"), has_heart_rate=bool(a.get("avg_hr")),
            new_bests=[e["label"] for e in (r.get("best_efforts") or {}).values() if e.get("is_best")],
            findings=[f["statement"] for f in r.get("findings", []) if f.get("statement")])
+    # The runner's own report, as words from fixed lists; free text (target, notes) is never sent
+    # (in words the coach's wording checks allow)
+    plain_words = {"illness": "feeling unwell", "recovering": "recovering from being unwell", "gi": "stomach"}
+    said = {k: plain_words.get(intent[k], intent[k].replace("_", " ")) for k in ("effort", "feel", "limiter", "limiter2", "health")
+            if intent.get(k)}
+    if said:
+        b.item("run:athlete", "athlete_report", perceived_effort=said.get("effort"), overall_feel=said.get("feel"),
+               primary_limiter=said.get("limiter"), secondary_limiter=said.get("limiter2"), health_status=said.get("health"))
     b.fact("distance", "distance", f"{(a['distance_m'] or 0) / 1000:.2f} km", a["distance_m"])
     b.fact("moving_time", "moving time", rp.fmt_duration(a["moving_s"]) if a.get("moving_s") else "unknown", a["moving_s"])
     if pace:

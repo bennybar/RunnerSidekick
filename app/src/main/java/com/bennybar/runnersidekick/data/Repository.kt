@@ -16,6 +16,7 @@ import com.bennybar.runnersidekick.data.remote.CoachView
 import com.bennybar.runnersidekick.data.remote.DayPlanIn
 import com.bennybar.runnersidekick.data.remote.Fitness
 import com.bennybar.runnersidekick.data.remote.FocusState
+import com.bennybar.runnersidekick.data.remote.RunIntent
 import com.bennybar.runnersidekick.data.remote.RunIntentIn
 import com.bennybar.runnersidekick.data.remote.GoogleSignInBody
 import com.bennybar.runnersidekick.data.remote.InsightsReport
@@ -119,8 +120,10 @@ class Repository(
         cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, body)
     }
 
-    suspend fun setIntent(activityId: String, kind: String, note: String?) {
-        api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(kind, note?.takeIf { it.isNotBlank() }, Instant.now().toString())))
+    suspend fun setIntent(activityId: String, i: RunIntent) {
+        val text = { s: String? -> s?.trim()?.takeIf { it.isNotEmpty() } }
+        api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(i.kind, text(i.note), text(i.target), i.effort, i.feel,
+            i.limiter, i.limiter2, i.health, Instant.now().toString())))
         refreshActivity(activityId)
         refreshFocus()
         // The AI input was written for the old type: refresh its state so "Update AI input" shows straight away
@@ -305,7 +308,7 @@ class Repository(
     suspend fun refreshActivity(id: String) = put("activity:$id", api.getRaw("/v1/activities/$id"))
 
     /** The run as one Markdown file (built by the backend), for saving to Downloads. */
-    suspend fun exportRun(id: String): String = api.getRaw("/v1/activities/$id/export.md")
+    suspend fun exportRun(id: String): String = api.getRaw("/v1/activities/$id/export.md?v=${com.bennybar.runnersidekick.BuildConfig.VERSION_NAME}")
 
     fun runAi(id: String): Flow<Cached<com.bennybar.runnersidekick.data.remote.RunAi>?> =
         observe("runai:$id") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(it) }

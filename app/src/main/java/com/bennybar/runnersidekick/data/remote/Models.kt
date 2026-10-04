@@ -124,11 +124,18 @@ data class DayPlan(val kind: String, val minutes: Int? = null)
 @Serializable
 data class DayPlanIn(val kind: String, val minutes: Int?, @SerialName("client_updated_at") val clientUpdatedAt: String)
 
+/** What a run was meant to be (stated, from the plan or inferred) and, when stated, the runner's own report on it. */
 @Serializable
-data class RunIntent(val kind: String, val note: String? = null, val source: String = "user")
+data class RunIntent(
+    val kind: String, val note: String? = null, val source: String = "user", val target: String? = null, val effort: String? = null,
+    val feel: String? = null, val limiter: String? = null, val limiter2: String? = null, val health: String? = null,
+)
 
 @Serializable
-data class RunIntentIn(val kind: String, val note: String?, @SerialName("client_updated_at") val clientUpdatedAt: String)
+data class RunIntentIn(
+    val kind: String, val note: String?, val target: String?, val effort: String?, val feel: String?, val limiter: String?,
+    val limiter2: String?, val health: String?, @SerialName("client_updated_at") val clientUpdatedAt: String,
+)
 
 @Serializable
 data class FocusRun(val date: String, @SerialName("source_id") val sourceId: String? = null, val value: Double? = null, val met: Boolean = false)

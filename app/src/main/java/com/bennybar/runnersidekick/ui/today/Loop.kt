@@ -9,6 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.EventNote
@@ -128,36 +133,81 @@ fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String)
     }
 }
 
-val INTENT_KINDS = listOf("easy" to "Easy", "recovery" to "Recovery", "long" to "Long", "tempo" to "Tempo", "intervals" to "Intervals",
-    "race" to "Race", "other" to "Other")
+val INTENT_KINDS = listOf("recovery" to "Recovery", "easy" to "Easy", "steady" to "Steady aerobic", "long" to "Long run",
+    "tempo" to "Tempo", "threshold" to "Threshold", "intervals" to "Intervals", "race" to "Race", "progression" to "Progression",
+    "free" to "Free run", "other" to "Other")
+private val EFFORTS = listOf("very_easy" to "Very easy", "easy" to "Easy", "easy_moderate" to "Easy-moderate", "moderate" to "Moderate",
+    "moderate_hard" to "Moderate-hard", "hard" to "Hard", "very_hard" to "Very hard")
+private val FEELS = listOf("great" to "Great", "good" to "Good", "okay" to "Okay", "poor" to "Poor", "very_poor" to "Very poor")
+private val LIMITERS = listOf("none" to "None", "cardio" to "Cardio", "breathing" to "Breathing", "legs" to "Legs", "feet" to "Feet",
+    "muscular_fatigue" to "Muscular fatigue", "heat" to "Heat", "humidity" to "Humidity", "hills" to "Hills", "illness" to "Illness",
+    "pain" to "Pain", "gi" to "Stomach", "motivation" to "Motivation", "other" to "Other")
+private val HEALTH = listOf("normal" to "Normal", "recovering" to "Recovering from illness", "mild_symptoms" to "Mild symptoms",
+    "poor_sleep" to "Poor sleep", "fatigued" to "Fatigued", "sore" to "Sore", "other" to "Other")
 
-/** "What was this run meant to be?" plus a private note (never sent to AI). */
+private fun label(options: List<Pair<String, String>>, key: String?) = options.firstOrNull { it.first == key }?.second ?: key
+
+/** The run's type as one line; tapping opens an optional sheet for what it was meant to be and how it went. Never asked for. */
 @Composable
-fun IntentPicker(intent: RunIntent?, onSave: (String, String?) -> Unit) {
-    var note by remember(intent?.note) { mutableStateOf(intent?.note ?: "") }
-    var kind by remember(intent?.kind) { mutableStateOf(intent?.kind) }
-    // An inferred kind needs no answer; it stays a one-line summary unless the runner wants to correct it
-    var open by remember(intent?.source) { mutableStateOf(intent?.source != "inferred") }
-    if (!open) {
-        Group(title = "Run type") {
-            row("Looks like: ${INTENT_KINDS.firstOrNull { it.first == intent?.kind }?.second ?: intent?.kind}",
-                supporting = "Inferred from pace and heart rate · tap to change", onClick = { open = true })
-        }
-        return
+fun IntentPicker(intent: RunIntent?, onSave: (RunIntent) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val stated = intent?.source == "user"
+    val said = if (stated) listOfNotNull(intent?.feel?.let { "felt ${label(FEELS, it)?.lowercase()}" },
+        intent?.limiter?.takeIf { it != "none" }?.let { "limited by ${label(LIMITERS, it)?.lowercase()}" }) else emptyList()
+    Group(title = "Run type") {
+        row(if (intent == null) "Not set" else (if (stated) "" else "Looks like: ") + label(INTENT_KINDS, intent.kind),
+            supporting = when (intent?.source) {
+                "user" -> (said.joinToString(" · ").replaceFirstChar { it.uppercase() }.ifEmpty { "Your run type" }) + " · tap to edit"
+                "plan" -> "From today's plan · tap to change or add how it went"
+                else -> "Inferred from pace and heart rate · tap to set it or add how it went"
+            }, onClick = { open = true })
     }
-    Group(title = "What was this run meant to be?") {
-        custom {
-            if (intent?.source == "plan") Text("Pre-filled from today's plan. Change it if it was something else.",
+    if (open) RunContextSheet(intent, onDismiss = { open = false }) { onSave(it); open = false }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RunContextSheet(intent: RunIntent?, onDismiss: () -> Unit, onSave: (RunIntent) -> Unit) {
+    val stated = intent?.source == "user"
+    var kind by remember { mutableStateOf(intent?.kind) }
+    var target by remember { mutableStateOf(if (stated) intent?.target ?: "" else "") }
+    var effort by remember { mutableStateOf(if (stated) intent?.effort else null) }
+    var feel by remember { mutableStateOf(if (stated) intent?.feel else null) }
+    var limiter by remember { mutableStateOf(if (stated) intent?.limiter else null) }
+    var limiter2 by remember { mutableStateOf(if (stated) intent?.limiter2 else null) }
+    var health by remember { mutableStateOf(if (stated) intent?.health else null) }
+    var note by remember { mutableStateOf(if (stated) intent?.note ?: "" else "") }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("This run", style = MaterialTheme.typography.headlineSmall)
+            Text("All optional. What you say here comes first in the run's advice, AI input and export; blanks are left out.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(top = 4.dp)) {
-                INTENT_KINDS.forEach { (k, l) -> FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(l) }) }
-            }
-            OutlinedTextField(note, { note = it }, label = { Text("Note (private, never sent to AI)") }, maxLines = 3,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            val changed = kind != null && (kind != intent?.kind || note != (intent?.note ?: "") || intent?.source in setOf("plan", "inferred"))
-            FilledTonalButton(onClick = { kind?.let { onSave(it, note) } }, enabled = changed, modifier = Modifier.padding(top = 8.dp)) {
-                Text(if (intent?.source == "user" && !changed) "Saved" else "Save")
+            Choice("Meant to be", INTENT_KINDS, kind, optional = false) { kind = it }
+            OutlinedTextField(target, { target = it.take(100) }, label = { Text("Target (e.g. HR ≤ 160, 5:30 /km)") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth())
+            Choice("Perceived effort", EFFORTS, effort) { effort = it }
+            Choice("Overall feel", FEELS, feel) { feel = it }
+            Choice("What limited you", LIMITERS, limiter) { limiter = it }
+            if (limiter != null && limiter != "none") Choice("Anything else", LIMITERS.filter { it.first != limiter }, limiter2) { limiter2 = it }
+            Choice("Health", HEALTH, health) { health = it }
+            OutlinedTextField(note, { note = it.take(500) }, label = { Text("Notes (private, never sent to AI)") }, maxLines = 4,
+                modifier = Modifier.fillMaxWidth())
+            FilledTonalButton(onClick = {
+                kind?.let { onSave(RunIntent(it, note, "user", target, effort, feel, limiter, limiter2.takeIf { limiter != null && limiter != "none" }, health)) }
+            }, enabled = kind != null) { Text("Save") }
+        }
+    }
+}
+
+/** One labelled row of chips; tapping the selected chip again clears an optional answer. */
+@Composable
+private fun Choice(title: String, options: List<Pair<String, String>>, selected: String?, optional: Boolean = true, onPick: (String?) -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+            options.forEach { (k, l) ->
+                FilterChip(selected = selected == k, onClick = { onPick(if (selected == k && optional) null else k) }, label = { Text(l) })
             }
         }
     }

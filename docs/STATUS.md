@@ -332,6 +332,23 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## LLM export v2, run context (2026-10-04, v0.30.0)
+- Run screen: the "Run type" card opens an optional sheet: what the run was meant to be (recovery, easy, steady
+  aerobic, long, tempo, threshold, intervals, race, progression, free run, other), a target, perceived effort, overall
+  feel, primary and secondary limiter, health and private notes. Never asked for; blanks are left out.
+- A stated intent wins everywhere: next focus (an HR cap in the target is checked against the run; steady kinds get
+  no "start slower" advice; fade is hill-adjusted), the run checks (steady aerobic is judged on its own), the run AI
+  (run-ai-1.2: judged against the intent; effort, feel, limiters and health go as fixed words, never target or notes)
+  and the export. The data-based type is kept beside it with a confidence and the reason (report-2.3).
+- Export (Runner Sidekick LLM Export v2): athlete context, data-based classification, not-moving time, Open-Meteo
+  weather (start position rounded to about 1 km, labelled as an estimate), descent per km, hilliest km, the
+  first/second-half table behind decoupling, running dynamics (Garmin averages plus halves from the samples), recovery
+  context from that morning, similar runs with deltas against their median, the fitness trend, AI input as intent /
+  subjective report / objective highlights / context / questions, the app's AI interpretation in its own section,
+  minute-by-minute folded in `<details>`, data provenance, schema, app version and an ISO timestamp.
+- Samples now keep ground contact time, stride length, vertical oscillation and ratio, and body battery; Garmin's
+  per-run averages (power, normalized power, dynamics) are kept too. `backfill-samples` re-reads both.
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

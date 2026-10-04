@@ -10,7 +10,8 @@ from . import reports as rp
 
 EASY_KINDS = {"easy", "long", "recovery"}
 EASY_SHARE = 0.7  # as in the weekly focus: an easy run spends at least 70% of its time below zone 3
-HARD_KINDS = {"tempo", "intervals", "race"}
+HARD_KINDS = {"tempo", "threshold", "intervals", "race"}
+STEADY_HARD_MAX = 0.3  # a steady aerobic run spends at most 30% of its time in zones 4–5
 # Garmin's own wording for its training effect scale
 TE_LABELS = [(1.0, "No effect"), (2.0, "Minor"), (3.0, "Maintaining"), (4.0, "Improving"), (5.0, "Highly improving"), (99, "Overreaching")]
 
@@ -28,10 +29,12 @@ def build(conn, source: str, report: dict) -> list[dict]:
     splits = [s for s in report.get("splits", []) if s.get("complete") and s.get("pace_s_per_km")]
     kind = (report.get("intent") or {}).get("kind")
 
-    # Pacing: second half against the first, on complete kilometres
+    # Pacing: second half against the first, on complete kilometres, hill-adjusted where the samples allow it so a late
+    # climb doesn't read as slowing
     if len(splits) >= 4:
         h = len(splits) // 2
-        fade = mean(s["pace_s_per_km"] for s in splits[-h:]) - mean(s["pace_s_per_km"] for s in splits[:h])
+        p = [s.get("gap_pace_s_per_km") or s["pace_s_per_km"] for s in splits]
+        fade = mean(p[-h:]) - mean(p[:h])
         if fade <= -3:
             out.append(check("pacing", "Pacing", f"Faster second half ({round(-fade)} s/km quicker)", "good"))
         elif fade <= 5:
@@ -54,6 +57,9 @@ def build(conn, source: str, report: dict) -> list[dict]:
                 v = "good" if z["easy"] >= EASY_SHARE else "ok" if z["easy"] >= 0.5 and z["hard"] <= 0.1 else "low"
                 say = f"Easy, as meant ({easy}% below zone 3)" if v == "good" else \
                     f"Harder than an easy run ({easy}% below zone 3, {hard}% in zones 4–5)"
+            elif kind == "steady":
+                v = "good" if z["hard"] <= STEADY_HARD_MAX else "ok" if z["hard"] <= 0.5 else "low"
+                say = f"Steady, as meant ({hard}% in zones 4–5)" if v == "good" else f"Harder than steady aerobic ({hard}% in zones 4–5)"
             elif kind in HARD_KINDS:
                 v = "good" if z["hard"] >= 0.3 else "ok"
                 say = f"Hard, as a {kind} should be ({hard}% in zones 4–5)" if v == "good" else f"Easier than a {kind} ({hard}% in zones 4–5)"

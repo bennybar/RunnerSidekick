@@ -474,3 +474,22 @@ The verdict needs two signals with a direction, otherwise it's "not enough evide
 when more signals point that way, otherwise stable. Confidence is high when 3 agree, medium with 2, low otherwise. The
 summary leads with the verdict and names any signal that disagrees. Terrain, heat and watch changes affect efficiency
 and drift.
+
+## Run intent and athlete context — `reports.py` (`report-2.3`)
+
+Order of precedence: the runner's stated intent, then the day's plan, then inference from the data. Inference is kept
+beside a stated intent ("classified"), never in its place: intervals when laps alternate work and rest (high) or pace
+varies more than 15% (medium); long when at least 60 min and 1.3× the 6-week median (medium); easy when 70%+ of moving
+time is below zone 3 (high at 85%+); tempo when under 40% is (high when 60%+ is in zones 4–5); otherwise mixed (low).
+
+Next focus with a stated intent: easy or recovery with half the kilometres in zone 4+ gets the zone-3 ceiling; a
+heart-rate cap found in the target ("HR ≤ 160", "below 150", "155 bpm") is checked against the average heart rate
+(within 2 bpm counts as kept); steady kinds (easy, recovery, steady aerobic, long) get "pace follows effort" instead of
+pacing advice. Fades are measured on hill-adjusted pace, here and in the pacing check. Steady aerobic passes the effort
+check with at most 30% in zones 4–5.
+
+## Weather — `weather.py`
+
+Open-Meteo, looked up on export only: the start position rounded to 0.01° and the hour nearest the run's middle. The
+forecast API for the last 30 days, the historical (reanalysis) API before that. Kept with the run; a failed lookup is
+retried after a day. Always labelled as an estimate, never as watch data.

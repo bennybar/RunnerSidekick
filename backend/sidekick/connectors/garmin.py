@@ -251,7 +251,10 @@ def normalise_activity(a: dict, splits: dict | None, details: dict | None) -> Ac
     local_date = (local or gmt).date().isoformat()
     garmin_metrics = {k: a[k] for k in (
         "aerobicTrainingEffect", "anaerobicTrainingEffect", "trainingEffectLabel", "activityTrainingLoad",
-        "vO2MaxValue", "averageSpeed", "maxSpeed", "calories") if a.get(k) is not None}
+        "vO2MaxValue", "averageSpeed", "maxSpeed", "calories",
+        # running dynamics, Garmin's per-run averages: W, cm, ms, %
+        "avgPower", "maxPower", "normPower", "maxRunningCadenceInStepsPerMinute", "avgStrideLength", "avgVerticalOscillation",
+        "avgGroundContactTime", "avgVerticalRatio") if a.get(k) is not None}
     laps = []
     for i, lap in enumerate((splits or {}).get("lapDTOs") or []):
         lg = parse_garmin_ts(lap.get("startTimeGMT"))
@@ -306,9 +309,14 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
         return None
     pick = lambda xs: [xs[i] for i in keep]  # noqa: E731
     cadence = col("directDoubleCadence") if "directDoubleCadence" in idx else [None] * len(rows)
+    dyn = {}
+    for key, name, scale in (("directGroundContactTime", "gct", 1), ("directStrideLength", "stride", 0.01),
+                             ("directVerticalOscillation", "vo", 1), ("directVerticalRatio", "vr", 1), ("directBodyBattery", "bb", 1)):
+        if key in idx:
+            dyn[name] = [round(v * scale, 3) if v else None for v in pick(col(key))]  # 0 means not measured
     return Samples(t=[round(t[i], 1) for i in keep], hr=pick(col("directHeartRate")), speed=pick(col("directSpeed")),
                    dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence),
-                   power=pick(col("directPower")) if "directPower" in idx else None)
+                   power=pick(col("directPower")) if "directPower" in idx else None, dyn=dyn or None)
 
 
 # ---------------------------------------------------------------- connector

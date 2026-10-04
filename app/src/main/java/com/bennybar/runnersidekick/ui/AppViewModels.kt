@@ -215,7 +215,7 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
             }
         }
     }
-    fun setIntent(kind: String, note: String?) = launchIo { repo.setIntent(id, kind, note) }
+    fun setIntent(i: com.bennybar.runnersidekick.data.remote.RunIntent) = launchIo { repo.setIntent(id, i) }
 }
 
 class JournalVm(repo: Repository) : BaseVm(repo) {

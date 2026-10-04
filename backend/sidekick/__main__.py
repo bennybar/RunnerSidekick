@@ -293,9 +293,10 @@ def main(argv=None) -> int:
         print(f"intensity minutes stored for {days} days")
         return 0
     if args.cmd == "backfill-samples":
-        # Runs' sample streams from the stored raw details, with fields added since they were first read (power)
+        # Runs' sample streams from the stored raw details, and Garmin's per-run numbers from the stored summaries, with
+        # fields added since they were first read (power, running dynamics)
         from datetime import datetime
-        from .connectors.garmin import normalise_samples
+        from .connectors.garmin import normalise_activity, normalise_samples
         from .db import utc_now
         conn = connect(ucfg.db_name)
         n = 0
@@ -307,7 +308,9 @@ def main(argv=None) -> int:
             if s is None:
                 continue
             conn.activity_samples.update_one({"activity_id": a["id"]}, {"$set": {"samples": s.to_json()}}, upsert=True)
-            conn.activity.update_one({"id": a["id"]}, {"$set": {"updated_at": utc_now()}})  # cached analyses recompute
+            summ = conn.raw_payload.find_one({"kind": "activity_summary", "source_key": raw["source_key"]})
+            gm = normalise_activity(summ["payload"], None, None).garmin_metrics if summ else a.get("garmin_metrics")
+            conn.activity.update_one({"id": a["id"]}, {"$set": {"updated_at": utc_now(), "garmin_metrics": gm}})  # cached analyses recompute
             n += 1
         print(f"samples re-read for {n} runs")
         return 0

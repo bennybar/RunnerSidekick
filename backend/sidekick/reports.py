@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, timedelta
 from statistics import median, pstdev
 
@@ -18,7 +19,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.2"  # 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.3"  # 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -547,8 +548,10 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "classification": an["classification"], "decoupling": dc,
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_begin.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
-        "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None),
-        "intent": intent, "narrative": None,
+        "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None, a.get("avg_hr")),
+        # What the data alone says, kept beside a stated intent (never in its place)
+        "intent": intent, "classified": intent if intent and intent["source"] == "inferred" else infer_intent(conn, a),
+        "narrative": None,
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
@@ -556,11 +559,15 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 
+CONTEXT_FIELDS = ("target", "effort", "feel", "limiter", "limiter2", "health")  # the runner's own report on a run, all optional
+
+
 def run_intent(conn, a: dict) -> dict | None:
-    """User-stated intent, else pre-filled from the day's plan (marked as such)."""
+    """User-stated intent (with whatever the runner added about the run), else pre-filled from the day's plan (marked as
+    such), else inferred from the data. Explicit intent always wins: nothing downstream re-infers over it."""
     r = one(conn.run_intent, {"activity_source_id": a["source_id"]})
     if r:
-        return {"kind": r["kind"], "note": r["note"], "source": r["source"]}
+        return {"kind": r["kind"], "note": r["note"], "source": r["source"], **{k: r[k] for k in CONTEXT_FIELDS if r.get(k)}}
     p = one(conn.day_plan, {"local_date": a["local_date"]})
     if p and p["kind"] != "rest":
         return {"kind": "easy" if p["kind"] == "easy" else p["kind"], "note": None, "source": "plan"}
@@ -568,48 +575,85 @@ def run_intent(conn, a: dict) -> dict | None:
 
 
 def infer_intent(conn, a: dict) -> dict | None:
-    """What the run looks like from the data alone (labelled 'inferred'; never used to flag 'meant to be easy')."""
+    """What the run looks like from the data alone (labelled 'inferred', with a confidence and the reason; never used to
+    flag 'meant to be easy')."""
     zones = hr_zones(conn)
     an = run_analysis(conn, a)
     cls = an["classification"]
-    if "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15:
-        return {"kind": "intervals", "note": None, "source": "inferred"}
+    out = lambda kind, conf, why: {"kind": kind, "note": None, "source": "inferred", "confidence": conf, "reason": why}  # noqa: E731
+    if "rest/recovery" in cls.get("reason", ""):
+        return out("intervals", "high", "laps alternate work and rest")
+    if (cls.get("speed_cv") or 0) > 0.15:
+        return out("intervals", "medium", f"pace varied a lot (variation {100 * cls['speed_cv']:.0f}%)")
     recent = [x["moving_s"] for x in activities(conn, a["source"], (date.fromisoformat(a["local_date"]) - timedelta(days=42)).isoformat(),
                                                    a["local_date"]) if x["moving_s"]]
     if a["moving_s"] and recent and a["moving_s"] >= max(3600, 1.3 * median(recent)):
-        return {"kind": "long", "note": None, "source": "inferred"}
+        return out("long", "medium", f"{a['moving_s'] / 60:.0f} min, well above your usual {median(recent) / 60:.0f} min")
     if zones:
-        from .focus import easy_share
-        es = easy_share(conn, a, zones["floors"])
-        if es is not None:
-            return {"kind": "easy" if es >= 0.7 else "tempo" if es < 0.4 else "other", "note": None, "source": "inferred"}
+        from .focus import zone_shares
+        z = zone_shares(conn, a, zones["floors"])
+        if z is not None:
+            easy, hard = round(100 * z["easy"]), round(100 * z["hard"])
+            if z["easy"] >= 0.7:
+                return out("easy", "high" if z["easy"] >= 0.85 else "medium", f"{easy}% of moving time below Garmin HR zone 3")
+            if z["easy"] < 0.4:
+                return out("tempo", "high" if z["hard"] >= 0.6 else "medium", f"{hard}% of moving time in Garmin HR zones 4–5")
+            return out("other", "low", f"mixed: {easy}% below zone 3, {hard}% in zones 4–5")
     return None
 
 
+STEADY_KINDS = {"easy", "recovery", "steady", "long"}  # explicit intents where pace is meant to follow effort, not lead it
+
+
+def hr_cap(target: str | None) -> int | None:
+    """A heart-rate cap from the runner's target text ("HR <= 160", "below 150 bpm"), or None."""
+    m = re.search(r"(?:hr|heart|bpm|≤|<=|<|below|under)\D{0,12}(\d{3})|(\d{3})\s*bpm", (target or "").lower())
+    v = int(m.group(1) or m.group(2)) if m else None
+    return v if v and 100 <= v <= 210 else None
+
+
 def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent: dict | None = None,
-               easy_ceiling: float | None = None) -> str:
-    """One practical focus from this run, most specific first. No pace or HR prescriptions beyond the run's own numbers."""
-    full = [s for s in (splits or []) if s.complete and s.pace_s_per_km]
+               easy_ceiling: float | None = None, avg_hr: float | None = None) -> str:
+    """One practical focus from this run, most specific first, judged against what the runner meant the run to be when
+    they said so. No pace or HR prescriptions beyond the run's own numbers and the runner's own target."""
+    pairs = [(s, d) for s, d in zip(splits or [], details or [{}] * len(splits or [])) if s.complete and s.pace_s_per_km]
     zones = [d.get("zone") for d in (details or []) if d.get("zone") is not None]
     hard_share = (sum(1 for z in zones if z >= 4) / len(zones)) if zones else 0
-    if intent and intent["kind"] in ("easy", "recovery") and intent["source"] != "inferred" and hard_share >= 0.5 and easy_ceiling:
+    said = intent if intent and intent.get("source") != "inferred" else None  # the runner's (or the plan's) intent
+    kind = said["kind"] if said else None
+    if kind in ("easy", "recovery") and hard_share >= 0.5 and easy_ceiling:
         return f"This was meant to be easy. Next time, keep heart rate below {round(easy_ceiling)} bpm, even if that means a slower pace."
-    if intent and intent["kind"] == "intervals":
+    if kind == "intervals":
         return "Interval session: compare the repeated efforts with each other rather than with steady runs."
+    cap = hr_cap(said.get("target")) if said else None
+    if cap and avg_hr:
+        if avg_hr <= cap + 2:
+            return (f"The heart-rate cap worked ({round(avg_hr)} bpm average against {cap}). Keep heart rate as the governor on "
+                    "hills and let pace vary; on the next comparable run, watch whether the same heart rate gives a faster pace "
+                    "or lower drift.")
+        return (f"Heart rate averaged {round(avg_hr)} bpm, above your {cap} bpm cap. Next time, start slower and let pace drop "
+                "on the climbs to stay under it.")
     cls = an["classification"]
-    structured = "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15 or bool(intent and intent["kind"] == "intervals")
+    structured = "rest/recovery" in cls.get("reason", "") or (cls.get("speed_cv") or 0) > 0.15
     if cls["kind"] == "variable" and structured:
         return "Interval-style session: drift analysis doesn't apply. Compare the repeated efforts with each other instead."
     if dc.get("eligible") and dc["decoupling_pct"] > 5:
         return "See whether heart-rate drift repeats on your next comparable steady run before reading much into it."
-    if len(full) >= 4:
-        h = len(full) // 2
-        first = sum(s.pace_s_per_km for s in full[:h]) / h
-        fade = sum(s.pace_s_per_km for s in full[h:]) / (len(full) - h) - first
+    if kind in STEADY_KINDS:
+        return ("Pace follows effort on a run like this. On the next comparable run, watch whether the same heart rate gives "
+                "a faster pace or lower drift.")
+    if len(pairs) >= 4 and kind not in ("progression",):
+        # Hill-adjusted pace where the samples allow it, so a climb late in the run doesn't read as a fade
+        paces = [d.get("gap_pace_s_per_km") or s.pace_s_per_km for s, d in pairs]
+        h = len(paces) // 2
+        first = sum(paces[:h]) / h
+        fade = sum(paces[h:]) / (len(paces) - h) - first
         if fade > 8:
-            return (f"You faded by about {fade:.0f} s/km. Next time, try starting about 10 s/km slower than {fmt_pace(first)} "
-                    "and see if the second half holds.")
+            return (f"You faded by about {fade:.0f} s/km (hill-adjusted). Next time, try starting 5–10 s/km slower than "
+                    f"{fmt_pace(first)} and see if the second half holds.")
     if zones and sum(1 for z in zones if z >= 4) >= 0.8 * len(zones):
+        if kind in ("tempo", "threshold", "race"):
+            return "Hard all the way, as a run like this should be. Compare it with your next one of the same kind."
         return "Almost the whole run was in zone 4 or higher. If it was meant to be easy, it wasn't; if it was a hard run, that fits."
     if cls["kind"] == "variable":
         return "Pace was uneven enough that drift and similar-run comparisons were skipped. A steadier effort makes them possible."

@@ -43,6 +43,7 @@ USER_INDEXES = {
     "ai_call": [(("id",), U), (("created_at",), N)],
     "section_summary": [(("id",), U), (("kind", "local_date", "input_hash"), N)],
     "run_ai": [(("id",), U), (("source_id", "input_hash"), N)],
+    "run_weather": [(("source_id",), U)],
 }
 APP_INDEXES = {
     "users": [(("id",), U)],

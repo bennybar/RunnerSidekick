@@ -254,7 +254,7 @@ def gap_speeds(s: Samples) -> list[float | None]:
 
 
 def with_gap(s: Samples) -> Samples:
-    return Samples(s.t, s.hr, gap_speeds(s), s.dist, s.elev, s.cad, s.power)
+    return Samples(s.t, s.hr, gap_speeds(s), s.dist, s.elev, s.cad, s.power, s.dyn)
 
 
 # ---------------------------------------------------------------- best efforts
@@ -322,7 +322,8 @@ def split_details(s: Samples | None, laps: list[dict], floors: list[float] | Non
                     zt[sum(1 for f in floors if h >= f)] += w[i]
             zone = max(range(6), key=lambda k: zt[k]) if sum(zt) else None
         out.append({"idx": lap["idx"], "gap_pace_s_per_km": round(1000.0 / gsp, 1) if gsp else None,
-                    "cadence_spm": round(sum(cads) / len(cads)) if cads else None, "zone": zone})
+                    "cadence_spm": round(sum(cads) / len(cads)) if cads else None, "zone": zone,
+                    "elevation_loss_m": lap.get("elevation_loss_m")})
         t_start = t_end
     return out
 
