@@ -37,6 +37,9 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material.icons.outlined.Info
+import kotlinx.coroutines.launch
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialShapes
@@ -401,23 +404,52 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 BigStat(Format.duration(a.elapsedS), null, "elapsed", on, Modifier.weight(1f))
                 BigStat("+${Format.elevation(a.elevationGainM, units)}", null, "climb", on, Modifier.weight(1f))
             }
-            // Decoupling (heart-rate drift) for every run: pace:HR and power:HR, first half against second
+            // Aerobic decoupling for every run: pace:HR and power:HR, first half against second
             val dc = r.decoupling
             val ready = r.garminReadinessDay?.value?.roundToInt()?.toString()
-            if (dc.decouplingPct != null || ready != null) Row {
-                if (dc.decouplingPct != null) {
-                    BigStat("%.1f".format(dc.decouplingPct), "%", "drift · pace:HR", on, Modifier.weight(1f))
-                    BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
-                        "drift · power:HR", on, Modifier.weight(1f))
-                }
+            if (dc.decouplingPct != null || ready != null) Row(verticalAlignment = Alignment.Bottom) {
+                if (dc.decouplingPct != null) Column(Modifier.weight(2f)) {
+                    DecouplingTitle(on)
+                    Row {
+                        BigStat("%.1f".format(dc.decouplingPct), "%", "pace:HR", on, Modifier.weight(1f))
+                        BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
+                            "power:HR", on, Modifier.weight(1f))
+                    }
+                } else Spacer(Modifier.weight(2f))
                 // Garmin's training readiness on the morning of the run
                 if (ready != null) BigStat(ready, null, "Garmin readiness", on, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
-                if (dc.decouplingPct == null) Spacer(Modifier.weight(2f))
             }
-            if (dc.decouplingPct != null && !dc.eligible) Text("Drift is indicative here: " +
+            if (dc.decouplingPct != null && !dc.eligible) Text("Decoupling is indicative here: " +
                 (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady" else dc.reasons.firstOrNull() ?: "not a steady run") + ".",
                 style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
             Text("Pace uses moving time (stops excluded). Elapsed includes stops.", style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
+        }
+    }
+}
+
+/** "Aerobic decoupling" with an info button whose tooltip says how to read it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DecouplingTitle(color: Color) {
+    val tip = androidx.compose.material3.rememberTooltipState(isPersistent = true)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Aerobic decoupling", style = MaterialTheme.typography.titleSmall, color = color)
+        androidx.compose.material3.TooltipBox(
+            positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(
+                androidx.compose.material3.TooltipAnchorPosition.Above),
+            tooltip = {
+                PlainTooltip {
+                    Text("How much heart rate rose against pace (or power) from the first half to the second, after a "
+                        + "10-minute warm-up. Lower is better; under 5% means the effort held steady. On hilly runs, power:HR is "
+                        + "the better read.")
+                }
+            },
+            state = tip,
+        ) {
+            androidx.compose.material3.IconButton(onClick = { scope.launch { tip.show() } }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.Info, contentDescription = "About aerobic decoupling", tint = color.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
+            }
         }
     }
 }

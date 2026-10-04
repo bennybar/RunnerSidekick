@@ -353,7 +353,10 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
     now_v = next((p.get("vo2") for p in fitness.get("components", []) if p["id"] == "vo2max"), None)
     old_v = next((p.get("vo2") for p in old_fit.get("components", []) if p["id"] == "vo2max"), None)
     if fitness.get("trend") and now_v and old_v:
-        fitness["trend"]["detail"] = f"VO₂ max {old_v:.1f} → {now_v:.1f}"
+        fitness["trend"]["detail"] = f"Garmin VO₂ estimate {old_v:.1f} → {now_v:.1f}"
+        if now_v < old_v:
+            fitness["trend"]["note"] = ("A device estimate trend, not a measured decline: heat, hills, fatigue or easy weeks can "
+                                        "lower Garmin's estimate for a while.")
     if fitness.get("status") != "unavailable":
         from . import progress
         fitness["progress"] = progress.build(conn, source, today)

@@ -424,7 +424,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("| Signal | Direction | Numbers |")
         add("|---|---|---|")
         for x in pg["signals"]:
-            add(f"| {x['title']} | {x['direction'] or 'not enough data'} | {x['say']} |")
+            dirn = "dipped (device estimate)" if x["id"] == "vo2" and x["direction"] == "declining" else x["direction"] or "not enough data"
+            add(f"| {x['title']} | {dirn} | {x['say']} |")
         add("")
 
     # 15. Garmin's numbers

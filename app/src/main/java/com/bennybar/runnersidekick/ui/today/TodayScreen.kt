@@ -491,7 +491,8 @@ private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnerside
                 Text(listOfNotNull(
                     when {
                         t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
-                        t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks"
+                        // A lower Fitness number comes from Garmin's VO2 estimate: labelled as such, not as lost fitness
+                        t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks" + if (t.note != null) " · estimate" else ""
                         t != null -> "Same as 4 weeks ago"
                         else -> null
                     },
@@ -530,6 +531,7 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
         Text(listOfNotNull(sc.label, sc.trend?.let { t -> (if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta)) +
                 (t.detail?.let { " ($it)" } ?: "") }, if (sc.stale) "based on an old VO₂ max" else null)
             .joinToString(" · "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        sc.trend?.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         sc.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
         Group {
             sc.components.filter { !it.context }.forEach { c ->
@@ -546,8 +548,10 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
                     (p.confidence?.let { " · $it confidence" } ?: "")) {
                 p.summary?.let { custom { Text(it, style = MaterialTheme.typography.bodyMedium) } }
                 p.signals.forEach { g -> row(g.title, supporting = g.say + if (how) "\n" + (g.note ?: "") else "", trailing = {
-                    com.bennybar.runnersidekick.ui.components.VerdictChip(when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
-                        label = when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; else -> null })
+                    // Garmin's VO2 max is a device estimate: a dip is an estimate trend, not a decline
+                    val dip = g.id == "vo2" && g.direction == "declining"
+                    com.bennybar.runnersidekick.ui.components.VerdictChip(if (dip) "ok" else when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
+                        label = if (dip) "Estimate dipped" else when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; else -> null })
                 }) }
             }
         }

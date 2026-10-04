@@ -332,6 +332,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Wording: VO₂ estimate, aerobic decoupling (2026-10-04, v0.30.2)
+- Garmin's VO₂ max is called a device estimate everywhere it trends: the progress signal is "Garmin VO₂ estimate", a
+  dip shows as "Estimate dipped" (not "Declining"), and the Fitness trend says it's an estimate trend, not a measured
+  decline. A VO₂ dip on its own can no longer make the progress verdict "declining" (progress-1.1).
+- Run screen: "drift" is now "Aerobic decoupling" (pace:HR and power:HR) with an info tooltip: lower is better, under
+  5% held steady, power:HR is the better read on hilly runs.
+
 ## Run header (2026-10-04, v0.30.1)
 - Run screen: moving pace sits beside the distance; Garmin's aerobic training effect joins heart rate and VO₂ max;
   Garmin's training readiness on the morning of the run joins the drift row (report-2.4, `garmin_readiness_day`).

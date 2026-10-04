@@ -256,7 +256,7 @@ data class ScoreStep(val part: String, val text: String, val gain: Int, val hori
 
 /** How a score moved: the same calculation [days] ago. */
 @Serializable
-data class ScoreTrend(val delta: Int, val days: Int = 28, val detail: String? = null)
+data class ScoreTrend(val delta: Int, val days: Int = 28, val detail: String? = null, val note: String? = null)
 
 /** The next run, calculated from readiness, recent runs and Garmin's zones. */
 @Serializable

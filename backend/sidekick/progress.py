@@ -10,7 +10,7 @@ from statistics import median
 
 from . import reports as rp
 
-PROGRESS_VERSION = "progress-1.0"
+PROGRESS_VERSION = "progress-1.1"  # 1.1: a VO2 estimate dip alone never makes "declining"
 EFFICIENCY_S_PER_MONTH = 3.0   # a pace change smaller than this at the same heart rate is "stable"
 EFFICIENCY_MIN_RUNS = 6
 EFFICIENCY_MAX_AGE_DAYS = 45   # the trend must reach into the last 6 weeks
@@ -27,12 +27,15 @@ def signal(sid: str, title: str, direction: str | None, say: str, note: str) -> 
 def vo2_signal(conn, source: str, today: date) -> dict:
     from .scores import vo2_on
     now, then = vo2_on(conn, source, today, today), vo2_on(conn, source, today - timedelta(days=28), today)
-    note = "Garmin's VO₂ max now against 4 weeks ago; a change under 0.5 counts as stable"
+    note = ("Garmin's VO₂ max estimate now against 4 weeks ago; a change under 0.5 counts as stable. A device estimate "
+            "trend: heat, hills, fatigue or a run of easy weeks can lower it for a while without any loss of fitness")
+    title = "Garmin VO₂ estimate"
     if not now or not then:
-        return signal("vo2", "Aerobic estimate", None, "Needs two VO₂ max readings 4 weeks apart", note)
+        return signal("vo2", title, None, "Needs two VO₂ max readings 4 weeks apart", note)
     d = now[0] - then[0]
     direction = "improving" if d >= VO2_STEP else "declining" if d <= -VO2_STEP else "stable"
-    return signal("vo2", "Aerobic estimate", direction, f"VO₂ max {then[0]:.1f} → {now[0]:.1f} in 4 weeks", note)
+    say = f"Estimate {then[0]:.1f} → {now[0]:.1f} in 4 weeks" + (" (a device estimate dip, not a measured decline)" if direction == "declining" else "")
+    return signal("vo2", title, direction, say, note)
 
 
 def efficiency_signal(conn, source: str, today: date) -> dict:
@@ -85,21 +88,25 @@ def build(conn, source: str, today: date) -> dict:
     if len(known) < 2:
         verdict, confidence = "insufficient", None
     else:
-        verdict = "improving" if up > down and up >= 1 else "declining" if down > up and down >= 1 else "stable"
+        # A dip in Garmin's VO2 estimate alone isn't a fitness decline: declining needs a measured signal to decline too
+        measured_down = sum(s["direction"] == "declining" for s in known if s["id"] != "vo2")
+        verdict = "improving" if up > down and up >= 1 else "declining" if down > up and measured_down >= 1 else "stable"
         agree = sum(s["direction"] == verdict for s in known)
         confidence = "high" if agree >= 3 else "medium" if agree == 2 else "low"
     # One plain line: the agreement, or the tension between the signals
-    names = {"vo2": "your aerobic estimate", "efficiency": "efficiency", "drift": "durability"}
+    names = {"vo2": "Garmin's VO₂ estimate", "efficiency": "efficiency", "drift": "durability"}
+    verb = lambda s: "dipped" if s["id"] == "vo2" and s["direction"] == "declining" else s["direction"]  # noqa: E731
     if verdict == "insufficient":
         summary = "Not enough comparable runs yet to say whether you're improving."
     elif up and down:
         ups = " and ".join(names[s["id"]] for s in known if s["direction"] == "improving")
-        downs = " and ".join(names[s["id"]] for s in known if s["direction"] == "declining")
+        downs = " and ".join(names[s["id"]] + (" (a device estimate)" if s["id"] == "vo2" else "")
+                             for s in known if s["direction"] == "declining")
         lead = {"improving": "Getting fitter", "declining": "Slipping", "stable": "Mixed"}[verdict]
-        summary = f"{lead}: {ups} improving, though {downs} slipped."
+        summary = f"{lead}: {ups} improving, though {downs} dipped."
     else:
         summary = {"improving": "You're getting fitter", "declining": "Fitness is slipping", "stable": "Holding steady"}[verdict] + \
-                  " (" + ", ".join(f"{names[s['id']]} {s['direction']}" for s in known) + ")."
+                  " (" + ", ".join(f"{names[s['id']]} {verb(s)}" for s in known) + ")."
     return {"verdict": verdict, "confidence": confidence, "summary": summary, "signals": sigs,
             "basis": "Three separate signals from different data; not averaged into the fitness number. Terrain, heat and watch "
                      "changes affect efficiency and drift.", "algorithm_version": PROGRESS_VERSION}
