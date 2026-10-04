@@ -14,7 +14,7 @@ def test_verdict_needs_two_signals_and_confidence_counts_agreement(monkeypatch):
     assert fake(monkeypatch, "improving", None, None)["verdict"] == "insufficient"
     p = fake(monkeypatch, "declining", "improving", "improving")
     assert p["verdict"] == "improving" and p["confidence"] == "medium" and p["summary"].startswith("Getting fitter")
-    assert "Garmin's VO₂ estimate (a device estimate) dipped" in p["summary"] and "slipped" not in p["summary"]
+    assert "Garmin's VO₂ estimate dipped" in p["summary"] and "slipped" not in p["summary"]
     p = fake(monkeypatch, "stable", "stable", "stable")
     assert p["verdict"] == "stable" and p["confidence"] == "high"
     assert fake(monkeypatch, "declining", "declining", None)["verdict"] == "declining"

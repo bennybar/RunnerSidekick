@@ -100,8 +100,7 @@ def build(conn, source: str, today: date) -> dict:
         summary = "Not enough comparable runs yet to say whether you're improving."
     elif up and down:
         ups = " and ".join(names[s["id"]] for s in known if s["direction"] == "improving")
-        downs = " and ".join(names[s["id"]] + (" (a device estimate)" if s["id"] == "vo2" else "")
-                             for s in known if s["direction"] == "declining")
+        downs = " and ".join(names[s["id"]] for s in known if s["direction"] == "declining")
         lead = {"improving": "Getting fitter", "declining": "Slipping", "stable": "Mixed"}[verdict]
         summary = f"{lead}: {ups} improving, though {downs} dipped."
     else:
