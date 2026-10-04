@@ -107,7 +107,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None) -> tup
         add("| Check | Result | Verdict |")
         add("|---|---|---|")
         for c in checks:
-            add(f"| {c['title']} | {c['say']} | {c['verdict'].title() if c['verdict'] != 'info' else 'Info'} |")
+            add(f"| {c['title']} | {c['say']} | {dict(good='Good', ok='OK', low='Low').get(c['verdict'], 'Info')} |")
         add("")
 
     zt = zone_table(conn, a)
@@ -191,7 +191,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None) -> tup
     wk = r.get("calendar_week") or {}
     if wk:
         add("## The week")
-        add(f"{wk.get('start')} to {wk.get('end')}: **{wk.get('runs', 0)} runs**, "
+        add(f"{wk.get('start')} to {wk.get('end')}: **{wk.get('runs', 0)} run{'' if wk.get('runs') == 1 else 's'}**, "
             f"{num((wk.get('distance_m') or 0) / 1000, '{:.1f}', ' km')}, {clock(wk.get('moving_s'))} moving, "
             f"+{num(wk.get('elevation_gain_m'), unit=' m')} climb.")
         add("")
