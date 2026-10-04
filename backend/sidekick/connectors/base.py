@@ -137,13 +137,17 @@ class Samples:
     dist: list[float | None]
     elev: list[float | None]
     cad: list[float | None]
+    power: list[float | None] | None = None  # running power (W), when the watch records it
 
     def to_json(self) -> dict:
-        return {"t": self.t, "hr": self.hr, "speed": self.speed, "dist": self.dist, "elev": self.elev, "cad": self.cad}
+        out = {"t": self.t, "hr": self.hr, "speed": self.speed, "dist": self.dist, "elev": self.elev, "cad": self.cad}
+        if self.power is not None:
+            out["power"] = self.power
+        return out
 
     @staticmethod
     def from_json(d: dict) -> "Samples":
-        return Samples(d["t"], d["hr"], d["speed"], d["dist"], d["elev"], d["cad"])
+        return Samples(d["t"], d["hr"], d["speed"], d["dist"], d["elev"], d["cad"], d.get("power"))
 
 
 @dataclass

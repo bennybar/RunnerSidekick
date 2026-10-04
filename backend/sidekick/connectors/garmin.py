@@ -307,7 +307,8 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
     pick = lambda xs: [xs[i] for i in keep]  # noqa: E731
     cadence = col("directDoubleCadence") if "directDoubleCadence" in idx else [None] * len(rows)
     return Samples(t=[round(t[i], 1) for i in keep], hr=pick(col("directHeartRate")), speed=pick(col("directSpeed")),
-                   dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence))
+                   dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence),
+                   power=pick(col("directPower")) if "directPower" in idx else None)
 
 
 # ---------------------------------------------------------------- connector

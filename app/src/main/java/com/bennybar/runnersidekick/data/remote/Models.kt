@@ -356,6 +356,9 @@ data class Decoupling(
     val eligible: Boolean,
     val reasons: List<String> = emptyList(),
     @SerialName("decoupling_pct") val decouplingPct: Double? = null,
+    /** Power:HR decoupling on the same halves, when the watch records running power */
+    @SerialName("power_decoupling_pct") val powerDecouplingPct: Double? = null,
+    @SerialName("grade_adjusted") val gradeAdjusted: Boolean = false,
     @SerialName("first_half") val firstHalf: Half? = null,
     @SerialName("second_half") val secondHalf: Half? = null,
     @SerialName("segment_moving_s") val segmentMovingS: Double? = null,

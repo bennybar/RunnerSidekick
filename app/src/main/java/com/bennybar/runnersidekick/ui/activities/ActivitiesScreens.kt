@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick.ui.activities
 
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Download
 
 import androidx.compose.animation.animateContentSize
 
@@ -222,6 +223,9 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
     val snackbar = remember { SnackbarHostState() }
     var evidence by remember { mutableStateOf<Finding?>(null) }
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
+    val notice by vm.notice.collectAsStateWithLifecycle()
+    LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); vm.clearNotice() } }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val r = detail?.value?.report
     Scaffold(
         topBar = {
@@ -230,6 +234,11 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
                 actions = {
                     if (r?.synthetic == true) DemoBadge()
+                    // The whole run (analysis, splits, minute-by-minute data, AI input) as one Markdown file in Downloads
+                    if (r != null) IconButton(onClick = {
+                        val start = java.time.Instant.parse(r.activity.startUtc).atOffset(java.time.ZoneOffset.ofTotalSeconds(r.activity.utcOffsetS ?: 0))
+                        vm.export(context, start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")) + "-running.md")
+                    }) { Icon(Icons.Outlined.Download, "Export run to Downloads") }
                     // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
                     if (r != null) {
                         // Any finished AI input for this run counts (also one kept from before the run's data was refreshed)
@@ -381,6 +390,17 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 BigStat(Format.duration(a.elapsedS), null, "elapsed", on, Modifier.weight(1f))
                 BigStat("+${Format.elevation(a.elevationGainM, units)}", null, "climb", on, Modifier.weight(1f))
             }
+            // Decoupling (heart-rate drift) for every run: pace:HR and power:HR, first half against second
+            val dc = r.decoupling
+            if (dc.decouplingPct != null) Row {
+                BigStat("%.1f".format(dc.decouplingPct), "%", "drift · pace:HR", on, Modifier.weight(1f))
+                BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
+                    "drift · power:HR", on, Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
+            }
+            if (dc.decouplingPct != null && !dc.eligible) Text("Drift is indicative here: " +
+                (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady" else dc.reasons.firstOrNull() ?: "not a steady run") + ".",
+                style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
             Text("Pace uses moving time (stops excluded). Elapsed includes stops.", style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
         }
     }

@@ -304,6 +304,9 @@ class Repository(
 
     suspend fun refreshActivity(id: String) = put("activity:$id", api.getRaw("/v1/activities/$id"))
 
+    /** The run as one Markdown file (built by the backend), for saving to Downloads. */
+    suspend fun exportRun(id: String): String = api.getRaw("/v1/activities/$id/export.md")
+
     fun runAi(id: String): Flow<Cached<com.bennybar.runnersidekick.data.remote.RunAi>?> =
         observe("runai:$id") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(it) }
 

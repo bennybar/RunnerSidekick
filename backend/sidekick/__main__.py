@@ -213,6 +213,7 @@ def main(argv=None) -> int:
     p = with_user(sub.add_parser("sync", help="sync every connected user (or --user)")); p.add_argument("--loop", action="store_true")
     with_user(sub.add_parser("rebuild-reports"))
     with_user(sub.add_parser("backfill-intensity", help="intensity minutes from stored Garmin day summaries"))
+    with_user(sub.add_parser("backfill-samples", help="re-read run samples (e.g. running power) from stored Garmin details"))
     with_user(sub.add_parser("audit")).add_argument("--out")
     p = sub.add_parser("invite", help="invite-only access by Google email")
     p.add_argument("action", choices=["add", "remove", "list"]); p.add_argument("email", nargs="?")
@@ -290,6 +291,25 @@ def main(argv=None) -> int:
                 save_day(conn, r["source"], DayBundle(local_date=r["source_key"], observations=obs))
                 days += 1
         print(f"intensity minutes stored for {days} days")
+        return 0
+    if args.cmd == "backfill-samples":
+        # Runs' sample streams from the stored raw details, with fields added since they were first read (power)
+        from datetime import datetime
+        from .connectors.garmin import normalise_samples
+        from .db import utc_now
+        conn = connect(ucfg.db_name)
+        n = 0
+        for raw in conn.raw_payload.find({"kind": "activity_details"}):
+            a = conn.activity.find_one({"source_id": raw["source_key"]})
+            if not a or not a.get("start_utc"):
+                continue
+            s = normalise_samples(raw["payload"], datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")))
+            if s is None:
+                continue
+            conn.activity_samples.update_one({"activity_id": a["id"]}, {"$set": {"samples": s.to_json()}}, upsert=True)
+            conn.activity.update_one({"id": a["id"]}, {"$set": {"updated_at": utc_now()}})  # cached analyses recompute
+            n += 1
+        print(f"samples re-read for {n} runs")
         return 0
     if args.cmd == "rebuild-reports":
         conn = connect(ucfg.db_name)

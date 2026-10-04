@@ -321,6 +321,17 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   the usual range and its limits.
 - The Health and Fitness rings and their lines are centred in the tiles.
 
+## Run export, power, decoupling for every run (2026-10-04, v0.29.0)
+- Run screen: an Export button saves the run as one Markdown file in the phone's Downloads folder (MediaStore). It
+  contains the summary, how it went, heart-rate zones, pace and splits, best efforts, decoupling, similar runs,
+  Garmin's numbers, the week, next focus, a minute-by-minute table and the AI input at the end. Built by the backend
+  (`/v1/activities/{id}/export.md`, `run_export.py`).
+- Running power is now stored with each run's samples (Garmin `directPower`). `backfill-samples` re-reads stored runs
+  from the raw details.
+- Decoupling is calculated for every run with enough heart rate: pace:HR (hill-adjusted) and power:HR on the same
+  halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
+  other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
+
 ## Multi-user phase (in progress, 2026-10-01)
 - Done (backend): `data/app.db` holding users, invites, sessions and OAuth state; per-user data folders
   `data/users/<id>/`; automatic migration of the single-user layout (owner = user 1, old tokens kept). Invite-only

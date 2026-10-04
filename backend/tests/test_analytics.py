@@ -96,6 +96,23 @@ def test_decoupling_hand_calculated():
     assert r["segment_moving_s"] == 3600
 
 
+def test_power_decoupling_on_the_same_halves():
+    # Same 250 W throughout, HR 150 -> 156: EF falls by the same 3.846% as pace:HR
+    s = steady_samples(150.0, 156.0)
+    s.power = [250.0] * len(s.t)
+    r = rn.decoupling(s, [], 12600.0, 10.0)
+    assert r["power_decoupling_pct"] == pytest.approx(3.85, abs=0.01) and r["power_first_half_w"] == 250
+    assert "power_decoupling_pct" not in rn.decoupling(steady_samples(150.0, 156.0), [], 12600.0, 10.0)  # no power recorded
+
+
+def test_unsteady_run_still_gets_numbers_marked_not_eligible():
+    s = steady_samples(150.0, 156.0)
+    for i in range(len(s.speed)):  # alternate fast and slow minutes: intervals
+        s.speed[i] = 4.0 if (s.t[i] // 60) % 2 else 2.0
+    r = rn.decoupling(s, [], 12600.0, 10.0)
+    assert r["eligible"] is False and r["decoupling_pct"] is not None and "not steady" in r["reasons"][0]
+
+
 def test_decoupling_ignores_paused_samples_and_long_gaps():
     s = steady_samples(150.0, 150.0)
     # a 2-minute stop with elevated HR, and a 60 s recording gap: neither may carry weight

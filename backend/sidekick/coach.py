@@ -217,7 +217,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
                "afternoon" if local.hour < 17 else "evening", distance=f"{(a['distance_m'] or 0) / 1000:.1f} km",
                moving_pace=rp.fmt_pace(pace) if pace else None, avg_hr=round(a["avg_hr"]) if a["avg_hr"] else None,
                intended=intent.get("kind"), effort_type=(body.get("classification") or {}).get("kind"),
-               drift_pct=(body.get("decoupling") or {}).get("decoupling_pct"),
+               drift_pct=(body.get("decoupling") or {}).get("decoupling_pct") if (body.get("decoupling") or {}).get("eligible") else None,
                new_bests=[e["label"] for e in (body.get("best_efforts") or {}).values() if e.get("is_best")],
                story=body.get("story", []), perceived_effort_of_10=rpes.get(a["source_id"]), next_focus=body.get("next_focus"))
         if n == 1 and pace:

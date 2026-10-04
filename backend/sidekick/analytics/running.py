@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.2"  # 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments
+RUNNING_VERSION = "running-1.3"  # 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -87,11 +87,13 @@ def classify(s: Samples | None, laps: list[dict]) -> dict:
 
 
 def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, gain_m: float | None) -> dict:
-    """Pace:HR decoupling = 100 * (EF1 - EF2) / EF1 on the eligible steady segment.
+    """Decoupling = 100 * (EF1 - EF2) / EF1, first half against second half of the run after a 10-minute warm-up.
 
-    EF = time-weighted mean speed / time-weighted mean HR. Halves split by moving time.
-    Speed is grade-adjusted (Minetti) when elevation is recorded, so hills don't masquerade as drift.
-    Returns {"eligible": False, "reasons": [...]} when prerequisites are not met.
+    Pace:HR uses EF = time-weighted mean speed / mean HR (grade-adjusted speed, Minetti, when elevation is recorded,
+    so hills don't masquerade as drift). Power:HR uses EF = mean power / mean HR, when the watch records power.
+    Calculated for every run with enough heart-rate data; "eligible" is True only for steady, not-too-hilly runs, the
+    only ones whose drift means aerobic durability (trends and checks use those). Others get the numbers marked
+    indicative, with the reasons.
     """
     reasons = []
     graded = s is not None and any(e is not None for e in s.elev)
@@ -116,30 +118,33 @@ def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, ga
     seg_time = sum(w[i] for i in seg)
     hr_ok = [i for i in seg if s.hr[i] is not None and HR_VALID[0] <= s.hr[i] <= HR_VALID[1]]
     coverage = (sum(w[i] for i in hr_ok) / seg_time) if seg_time else 0.0
+    blocking = []  # without these, no number at all
     if seg_time < MIN_SEGMENT_S:
-        reasons.append(f"eligible segment {seg_time / 60:.0f} min < {MIN_SEGMENT_S / 60:.0f} min after warm-up")
+        blocking.append(f"eligible segment {seg_time / 60:.0f} min < {MIN_SEGMENT_S / 60:.0f} min after warm-up")
     if coverage < MIN_HR_COVERAGE:
-        reasons.append(f"heart-rate coverage {coverage:.0%} < {MIN_HR_COVERAGE:.0%}")
-    if reasons:
-        return {"eligible": False, "reasons": reasons, "classification": cls, "hr_coverage": round(coverage, 3)}
+        blocking.append(f"heart-rate coverage {coverage:.0%} < {MIN_HR_COVERAGE:.0%}")
+    if blocking:
+        return {"eligible": False, "reasons": reasons + blocking, "classification": cls, "hr_coverage": round(coverage, 3)}
     half = seg_time / 2.0
     acc, first, second = 0.0, [], []
     for i in seg:
         (first if acc < half else second).append(i)
         acc += w[i]
-
-    def ef(idx: list[int]) -> tuple[float, float, float]:
-        valid = [i for i in idx if i in hr_set]
-        tw = sum(w[i] for i in valid)
-        sp = sum(w[i] * s.speed[i] for i in valid) / tw
-        hr = sum(w[i] * s.hr[i] for i in valid) / tw
-        return sp / hr, sp, hr
-
     hr_set = set(hr_ok)
-    ef1, sp1, hr1 = ef(first)
-    ef2, sp2, hr2 = ef(second)
-    return {
-        "eligible": True, "decoupling_pct": round(100.0 * (ef1 - ef2) / ef1, 2),
+
+    def ef(idx: list[int], values: list) -> tuple[float, float, float] | None:
+        valid = [i for i in idx if i in hr_set and values[i] is not None]
+        tw = sum(w[i] for i in valid)
+        if not tw:
+            return None
+        v = sum(w[i] * values[i] for i in valid) / tw
+        hr = sum(w[i] * s.hr[i] for i in valid) / tw
+        return v / hr, v, hr
+
+    ef1, sp1, hr1 = ef(first, s.speed)
+    ef2, sp2, hr2 = ef(second, s.speed)
+    out = {
+        "eligible": not reasons, "reasons": reasons, "decoupling_pct": round(100.0 * (ef1 - ef2) / ef1, 2),
         "first_half": {"mean_speed_mps": round(sp1, 4), "mean_hr": round(hr1, 1), "ef": round(ef1, 6)},
         "second_half": {"mean_speed_mps": round(sp2, 4), "mean_hr": round(hr2, 1), "ef": round(ef2, 6)},
         "segment_moving_s": round(seg_time), "hr_coverage": round(coverage, 3), "classification": cls,
@@ -147,6 +152,14 @@ def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, ga
         "method": ("grade-adjusted speed (Minetti), " if graded else "") +
                   "time-weighted, warm-up 10 min excluded, stopped samples and gaps > 10 s excluded",
     }
+    # Power:HR on the same halves, when power covers most of the segment
+    if s.power is not None:
+        pw_cov = sum(w[i] for i in seg if s.power[i] is not None and s.power[i] > 0) / seg_time
+        p1, p2 = ef(first, s.power), ef(second, s.power)
+        if pw_cov >= MIN_HR_COVERAGE and p1 and p2:
+            out["power_decoupling_pct"] = round(100.0 * (p1[0] - p2[0]) / p1[0], 2)
+            out["power_first_half_w"], out["power_second_half_w"] = round(p1[1]), round(p2[1])
+    return out
 
 
 def moving_pace(distance_m: float | None, moving_s: float | None) -> float | None:
@@ -241,7 +254,7 @@ def gap_speeds(s: Samples) -> list[float | None]:
 
 
 def with_gap(s: Samples) -> Samples:
-    return Samples(s.t, s.hr, gap_speeds(s), s.dist, s.elev, s.cad)
+    return Samples(s.t, s.hr, gap_speeds(s), s.dist, s.elev, s.cad, s.power)
 
 
 # ---------------------------------------------------------------- best efforts

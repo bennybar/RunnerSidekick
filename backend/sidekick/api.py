@@ -627,6 +627,18 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                          daemon=True).start()
         return {"status": "pending"}
 
+    @api.get("/v1/activities/{sid}/export.md")
+    def export_run(sid: str, conn=Depends(db)):
+        """The run as one Markdown file (summary, analysis, splits, minute-by-minute data and the AI input)."""
+        from fastapi.responses import PlainTextResponse
+        from . import run_export
+        out = run_export.markdown(conn, cfg.source, sid)
+        if out is None:
+            raise HTTPException(404)
+        name, text = out
+        return PlainTextResponse(text, media_type="text/markdown; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     @api.get("/v1/activities/{sid}/ai")
     def get_run_ai(sid: str, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
         return run_ai_state(conn, sid, x_openai_key, start=False)

@@ -191,6 +191,20 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     init { refresh() }
     fun refresh() = launchIo { repo.refreshActivity(id); runCatching { repo.refreshRunAi(id) } }
 
+    private val _notice = MutableStateFlow<String?>(null)
+    /** One-off confirmation, e.g. where an export was saved. */
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+    fun clearNotice() { _notice.value = null }
+
+    /** Saves the run as one Markdown file in the phone's Downloads folder (not the app's own folder). */
+    fun export(context: android.content.Context, fileName: String) = launchIo {
+        val text = repo.exportRun(id)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.bennybar.runnersidekick.data.Downloads.saveText(context.applicationContext, fileName, "text/markdown", text)
+        }
+        _notice.value = "Saved to Downloads: $fileName"
+    }
+
     /** Asks for the AI input, then follows it (bounded) while it is written in the background. */
     fun askAi() = launchIo {
         if (repo.refreshRunAi(id, request = true) != "pending") return@launchIo
