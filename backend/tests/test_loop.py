@@ -108,6 +108,12 @@ def test_loop_endpoints(tmp_path):
     acts = client.get("/v1/activities", headers=h).json()
     ir = client.put(f"/v1/activities/{acts[0]['source_id']}/intent", json={"kind": "tempo", "note": "felt strong", "client_updated_at": "z"}, headers=h)
     assert ir.json()["intent"]["kind"] == "tempo" and ir.json()["intent"]["source"] == "user"
+    ir = client.put(f"/v1/activities/{acts[0]['source_id']}/intent", headers=h, json={
+        "kind": "steady", "target": " HR <= 160 ", "feel": "good", "limiter": "feet", "health": None, "note": "", "client_updated_at": "zz"})
+    it = ir.json()["intent"]
+    assert it["kind"] == "steady" and it["target"] == "HR <= 160" and it["limiter"] == "feet" and "health" not in it and not it["note"]
+    assert client.put(f"/v1/activities/{acts[0]['source_id']}/intent", headers=h,
+                      json={"kind": "steady", "feel": "meh", "client_updated_at": "zzz"}).status_code == 422
     f = client.put("/v1/focus", json={"kind": "easy_runs"}, headers=h).json()
     assert f["current"]["kind"] == "easy_runs" and f["options"]
     assert client.put("/v1/focus", json={"kind": "nonsense"}, headers=h).status_code == 422
