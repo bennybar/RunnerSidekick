@@ -19,7 +19,7 @@ def test_one_decision_reaches_today_the_coach_and_run_ai():
     add_checkin(conn, "p", ANCHOR.isoformat(), pain=True)  # pain: rest, intensity held back everywhere
     m = rp.build_morning(conn, "fixture", ANCHOR, False)
     d = decide(conn, "fixture", ANCHOR, m)
-    assert d["hold_back"] and d["hold_reason"] == "you reported pain or illness"
+    assert d["hold_back"] and d["hold_reason"] == "you said you're not feeling well"
     assert d["readiness"]["status"] != "ok" or d["readiness"]["score"] <= 35
     coach_today = ch.build_bundle(conn, "fixture", ANCHOR).items["plan:today"]
     assert coach_today["intensity_held_back"] is True and coach_today["held_back_because"] == d["hold_reason"]

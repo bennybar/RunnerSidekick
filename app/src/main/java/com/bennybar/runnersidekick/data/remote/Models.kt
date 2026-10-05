@@ -275,7 +275,11 @@ data class NextRun(val date: String, @SerialName("day_label") val dayLabel: Stri
                    @SerialName("distance_km") val distanceKm: Double? = null, val minutes: Int? = null, val hr: NextRunHr? = null,
                    val pace: String? = null, @SerialName("pace_s_per_km") val paceSPerKm: Double? = null,
                    /** "or_slower" (easy and long runs) or "around" (race pace) */
-                   @SerialName("pace_way") val paceWay: String? = null, val why: List<String> = emptyList(), val basis: String? = null)
+                   @SerialName("pace_way") val paceWay: String? = null, val why: List<String> = emptyList(), val basis: String? = null,
+                   /** An optional session (the week's target already met) */
+                   val optional: Boolean = false,
+                   /** Race day while today allows only easy or rest: what to keep in mind */
+                   val caution: String? = null)
 
 @Serializable
 data class Scores(val status: String, val age: Int? = null, val fitness: Score? = null, val health: Score? = null, val basis: String? = null,

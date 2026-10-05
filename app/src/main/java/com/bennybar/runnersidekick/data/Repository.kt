@@ -394,8 +394,8 @@ class Repository(
      *  else; tapping again clears it. */
     suspend fun setUnwell(date: String, on: Boolean) {
         saveCheckin(date, null, null, null, pain = false, illness = on, notes = null, tags = if (on) listOf("unwell") else emptyList())
-        pushPendingCheckins()
-        refreshToday()
+        // Saved on the phone first (Today applies it straight away); upload and refresh when the server can be reached
+        runCatching { pushPendingCheckins(); refreshToday() }
     }
 
     suspend fun pushPendingCheckins() {

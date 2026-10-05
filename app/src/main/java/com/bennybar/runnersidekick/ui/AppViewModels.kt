@@ -93,7 +93,8 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     }
     fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
     val checkins = repo.checkins.state(emptyList())
-    fun setUnwell(date: String, on: Boolean) = launchIo { repo.setUnwell(date, on) }
+    // The coach's advice was written before this: ask again so it can't sit next to a changed recommendation
+    fun setUnwell(date: String, on: Boolean) = launchIo { repo.setUnwell(date, on); updateCoach() }
 }
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {

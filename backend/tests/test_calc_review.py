@@ -223,3 +223,36 @@ def test_one_improving_signal_is_an_early_sign(monkeypatch):
     assert p["summary"].startswith("Early signs of improvement") and p["agreement"] == "1 of 3 signals"
     p = fake(monkeypatch, "improving", "improving", "stable")
     assert p["summary"].startswith("You're getting fitter") and p["agreement"] == "2 of 3 signals"
+
+
+def plan_week(sessions, done=0, target=60):
+    return {"label": "City Half", "date": "2026-11-30", "phase": "build", "distance": "half",
+            "week": {"week_start": "2026-09-28", "sessions": sessions, "done_minutes": done, "target_minutes": target}}
+
+
+def next_run_with(monkeypatch, race_status, score=70, allowed="steady", hold=None):
+    from sidekick import readiness as rd
+    conn = synced()
+    conn.activity.delete_many({"local_date": ANCHOR.isoformat()})  # today's session not run yet
+    m = rp.build_morning(conn, "fixture", ANCHOR, False)
+    ready = {"status": "ok", "score": score, "label": "Moderate", "components": []}
+    return rd.next_run(conn, "fixture", ANCHOR, m, ready, race_status, hold=hold, allowed=allowed)
+
+
+def test_a_tempo_turned_steady_keeps_the_plans_duration(monkeypatch):
+    s = [{"date": ANCHOR.isoformat(), "kind": "tempo", "minutes": 10, "status": "today", "optional": False}]
+    nr = next_run_with(monkeypatch, plan_week(s))
+    assert nr["kind"] == "steady" and nr["minutes"] <= 10  # not the typical 60-minute run
+
+
+def test_race_day_while_easy_only_says_so(monkeypatch):
+    rs = plan_week([{"date": ANCHOR.isoformat(), "kind": "race", "minutes": None, "status": "today", "optional": False}])
+    rs["date"] = ANCHOR.isoformat()
+    nr = next_run_with(monkeypatch, rs, allowed="easy", hold="Garmin's recovery timer still shows about 49 h")
+    assert nr["kind"] == "race" and "easy only" in nr["caution"] and "49 h" in nr["caution"]
+
+
+def test_an_optional_session_stays_optional_in_the_next_run(monkeypatch):
+    s = [{"date": ANCHOR.isoformat(), "kind": "easy", "minutes": 10, "status": "today", "optional": True}]
+    nr = next_run_with(monkeypatch, plan_week(s, done=70, target=60), score=85, allowed="hard")
+    assert nr["optional"] is True and any("target is already met" in w for w in nr["why"])

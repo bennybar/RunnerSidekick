@@ -307,7 +307,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     planned = next((s for s in (race or {}).get("week", {}).get("sessions", []) if s["date"] == day.isoformat()), None) if race else None
     if day == today and rec["rule_id"] == "R0":
         kind = "rest"
-        why.append("you reported pain or illness")
+        why.append("you said you're not feeling well")
     elif day == today and score is not None and score < 40:
         kind = "rest"
         why.append("readiness is very low today")
@@ -362,6 +362,11 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
               "long": min(longest * 1.1, max(longest, typical * 1.3))}.get(kind, typical)
         km = max(1.0, round(km * 2) / 2)  # half-km steps; no larger floor, so "shorter" stays shorter
         minutes = round(km * pace_s / 60 / 5) * 5 if pace_s else None
+    # A session turned easier (held back, or steady instead of tempo) never grows past the plan's duration: the week's
+    # budget still holds
+    if planned and planned.get("minutes") and kind not in ("rest", "race") and minutes and minutes > planned["minutes"]:
+        minutes = planned["minutes"]
+        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else km
     hr = None
     if zones:
         f = [round(x) for x in zones["floors"]]
@@ -374,7 +379,18 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
                         (race["target_pace_s_per_km"], "around") if kind in ("race", "race_pace") and race and race.get("target_pace_s_per_km")
                         else (None, None))
     pace = (f"about {rp.fmt_pace(pace_s)} or slower" if pace_way == "or_slower" else f"around {rp.fmt_pace(pace_s)}" if pace_way else None)
+    # Race day while today allows only easy (or rest): the race stays the day's event, and says so plainly
+    caution = None
+    if kind == "race" and day == today and allowed in ("easy", "rest"):
+        caution = (f"Readiness says {'rest' if allowed == 'rest' else 'easy only'} today ({hold or 'readiness is low'}). "
+                   "If you race, run it easy or start well below your target pace.")
+    # An optional session (the week's target already reached) stays optional here too
+    optional = bool(planned and planned.get("optional") and kind not in ("race", "rest"))
+    if optional:
+        why.append("optional: this week's target is already met" if (race.get("week") or {}).get("done_minutes", 0) >=
+                   ((race.get("week") or {}).get("target_minutes") or 1e9) else "optional this week")
     return {"date": day.isoformat(), "day_label": day_label(day, today), "kind": kind, "title": KIND_TITLE[kind],
+            "optional": optional, "caution": caution,
             "distance_km": km, "minutes": minutes, "hr": hr, "pace": pace,
             "pace_s_per_km": round(pace_s) if pace_s else None, "pace_way": pace_way, "why": why, "algorithm_version": READINESS_VERSION,
             "basis": "Sized from your runs of the last 4 weeks (typical distance, longest run), Garmin's heart-rate zones and "

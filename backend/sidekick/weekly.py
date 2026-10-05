@@ -163,7 +163,7 @@ def weekly_headline(runs: int, ratio: float | None, hard: float | None) -> str:
 def next_week_focus(flagged_days: list[str], ratio: float | None, hard: float | None, zones: dict | None, runs: int) -> dict:
     """Small conservative rule table; one focus, with the rule that produced it."""
     if flagged_days:
-        return {"rule": "F1", "text": "You reported pain or illness this week. Let that guide next week. If it persists, get it checked."}
+        return {"rule": "F1", "text": "You said you weren't feeling well this week. Let that guide next week. If it persists, get it checked."}
     if ratio is not None and ratio > 1.5:
         return {"rule": "F2", "text": "This week was a clear jump in volume. Keeping next week similar, rather than adding more, gives it time to settle."}
     if hard is not None and hard >= 0.7 and zones:

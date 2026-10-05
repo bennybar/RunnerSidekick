@@ -30,7 +30,7 @@ def hold_reason(rec: dict, ready: dict) -> str | None:
     """Why intensity is held back today, or None when it isn't."""
     score = ready.get("score")
     if rec["rule_id"] == "R0":
-        return "you reported pain or illness"
+        return "you said you're not feeling well"
     if rec["state"] == "consider_easier":
         return "several recovery signals point the same way"
     if score is None:

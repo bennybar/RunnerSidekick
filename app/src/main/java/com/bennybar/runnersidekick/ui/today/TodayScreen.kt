@@ -146,10 +146,19 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
                 // "How am I and what do I do today" first (readiness, then the next run), then the slower health and fitness scores
-                val unwell = checkins.any { it.localDate == report.localDate && it.illness }
+                // "Not feeling well" is for the phone's today, whatever day the cached briefing is from. Until the server has
+                // it (offline, or still syncing), the phone applies it itself: rest, said as pending.
+                val todayDate = LocalDate.now().toString()
+                val mark = checkins.firstOrNull { it.localDate == todayDate }
+                val unwell = mark?.illness == true
+                val pending = unwell && (report.localDate != todayDate || report.recommendation.ruleId != "R0")
                 report.readiness?.let { r -> animatedItem(key = "readiness") {
-                    ReadinessCard(r, unwell, onUnwell = { vm.setUnwell(report.localDate, !unwell) }) { sheet = "readiness" } } }
-                report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
+                    val shown = if (pending) r.copy(score = null, label = "Low", headline = "Take it easy or rest", holdReason = "you're not feeling well", allows = "rest") else r
+                    ReadinessCard(shown, unwell, pending, onUnwell = { vm.setUnwell(todayDate, !unwell) }) { sheet = "readiness" } } }
+                report.nextRun?.let { n -> animatedItem(key = "nextrun") {
+                    NextRunCard(if (pending) n.copy(date = todayDate, dayLabel = "Today", kind = "rest", title = "Rest or a short walk", distanceKm = null,
+                        minutes = null, hr = null, pace = null, paceSPerKm = null, optional = false, caution = null,
+                        why = listOf("you're not feeling well")) else n, units) } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
@@ -566,7 +575,7 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
  *  what holds it back. Tap for the breakdown. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwell: Boolean, onUnwell: () -> Unit, onOpen: () -> Unit) {
+private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwell: Boolean, pending: Boolean, onUnwell: () -> Unit, onOpen: () -> Unit) {
     val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
     Surface(onClick = onOpen, shape = RoundedCornerShape(36.dp), color = hero.container, contentColor = hero.content, modifier = Modifier.fillMaxWidth()
         .semantics(mergeDescendants = true) { contentDescription = "Training readiness ${s.score ?: "not available"}. ${s.headline ?: s.label ?: ""}" }) {
@@ -592,6 +601,8 @@ private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwe
                     Text(if (unwell) "Not feeling well today · undo" else "Not feeling well?", style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                 }
+                if (pending) Text("Saved on your phone; the score updates once it syncs.", style = MaterialTheme.typography.labelSmall,
+                    color = hero.content.copy(alpha = 0.75f))
             }
         }
     }
@@ -630,6 +641,10 @@ private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, unit
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Next run", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (n.optional) Surface(shape = CircleShape, color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer,
+                    modifier = Modifier.padding(end = 8.dp)) {
+                    Text("Optional", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                }
                 Surface(shape = CircleShape, color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
                     Text(n.dayLabel, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
@@ -644,6 +659,11 @@ private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, unit
                     Surface(shape = RoundedCornerShape(16.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
                         Text(c, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
+                }
+            }
+            n.caution?.let {
+                Surface(shape = RoundedCornerShape(16.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                 }
             }
             if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)

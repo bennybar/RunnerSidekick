@@ -332,6 +332,17 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Plan → readiness → next run, end to end (2026-10-05, v0.35.2)
+From the v0.35.1 review, with tests that follow a session from the week plan to the next run:
+- A session made easier (held back, or steady instead of tempo) keeps the plan's duration at most; it no longer falls
+  back to a typical run's length (a 10-minute tempo had become a 60-minute steady run).
+- Race day while today allows only easy or rest: the race stays the day's event, with a caution on the card and in the
+  notification ("Readiness says easy only… run it easy or start well below your target pace").
+- An optional session (the week's target met) is marked optional on the next run, with the reason, and in the
+  notification.
+- "Not feeling well": uses the phone's date, applies on the phone straight away (rest, no score shown) and says
+  it's pending until the server has it; the AI coach is asked again. Wording matches the button everywhere.
+
 ## Run screen alignment (2026-10-05, v0.35.1)
 - Run header: every tile label takes two lines, so all six tiles are the same height. Aerobic decoupling: one-line
   labels and equal-height tiles; the "power:HR on hills" note moved to the line below.
