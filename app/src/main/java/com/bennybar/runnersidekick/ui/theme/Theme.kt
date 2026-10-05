@@ -47,6 +47,34 @@ private val Dark = darkColorScheme(
     outline = Color(0xFF8A948C), outlineVariant = Color(0xFF404943),
 )
 
+/** The colour themes in Settings: Forest (design B, hand-tuned), four seeds expanded into full Material 3 schemes, and
+ *  the phone's own wallpaper colours (Material You). */
+enum class ThemeChoice(val label: String, val seed: Color?) {
+    FOREST("Forest", Color(0xFF1F5F4A)), OCEAN("Ocean", Color(0xFF1F5C8A)), PLUM("Plum", Color(0xFF6A3FA0)),
+    CORAL("Coral", Color(0xFFB8432A)), GRAPHITE("Graphite", Color(0xFF4A5560)), DYNAMIC("Dynamic", null);
+
+    companion object {
+        fun of(name: String?) = entries.firstOrNull { it.name == name } ?: FOREST
+    }
+}
+
+/** Light, dark, or following the phone. */
+enum class Appearance(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark");
+    companion object { fun of(name: String?) = entries.firstOrNull { it.name == name } ?: SYSTEM }
+}
+
+/** A seeded or wallpaper scheme laid out like design B: white cards on a tinted ground in light, as Material in dark. */
+private fun asB(s: ColorScheme, dark: Boolean): ColorScheme = if (dark) s else s.copy(
+    background = s.surfaceContainer, surface = s.surfaceContainer, surfaceContainerLow = s.surfaceContainerLowest,
+    surfaceContainer = s.surfaceContainerLowest, surfaceContainerHigh = s.surfaceContainerLowest, surfaceContainerHighest = s.surfaceContainerHigh,
+)
+
+/** The two score tiles' colours: Health and Fitness. */
+@Immutable
+data class ScoreColors(val health: Accent, val fitness: Accent)
+
+val LocalScoreColors = staticCompositionLocalOf { ScoreColors(Accent(Color(0xFFE0E0FF), Color(0xFF2F3A8C)), Accent(Color(0xFFFFE1D6), Color(0xFF4A1606))) }
+
 /** The deep green hero cards (readiness, the run's header) and their content: the same in light and dark. */
 @Immutable
 data class Hero(val container: Color, val content: Color, val tile: Color)
@@ -146,16 +174,25 @@ private val AppShapes = Shapes(
 )
 
 @Composable
-fun RunnerTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
+fun RunnerTheme(theme: ThemeChoice = ThemeChoice.FOREST, appearance: Appearance = Appearance.SYSTEM, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    val cs = when {
-        dynamic && dark -> dynamicDarkColorScheme(ctx)
-        dynamic -> dynamicLightColorScheme(ctx)
-        dark -> Dark
-        else -> Light
+    val dark = when (appearance) { Appearance.SYSTEM -> isSystemInDarkTheme(); Appearance.LIGHT -> false; Appearance.DARK -> true }
+    val cs = when (theme) {
+        ThemeChoice.FOREST -> if (dark) Dark else Light
+        ThemeChoice.DYNAMIC -> asB(if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx), dark)
+        else -> asB(com.materialkolor.dynamicColorScheme(seedColor = theme.seed!!, isDark = dark, style = com.materialkolor.PaletteStyle.TonalSpot), dark)
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides if (dark) DarkAccents else LightAccents,
-        LocalHero provides if (dark) DarkHero else LightHero) {
+    // Forest keeps its own hero green and the blue/coral score tiles; other themes take them from their scheme
+    val hero = when {
+        theme == ThemeChoice.FOREST -> if (dark) DarkHero else LightHero
+        dark -> Hero(cs.primaryContainer, cs.onPrimaryContainer, cs.onPrimaryContainer.copy(alpha = 0.12f))
+        else -> Hero(cs.primary, cs.onPrimary, cs.onPrimary.copy(alpha = 0.14f))
+    }
+    val accents = if (dark) DarkAccents else LightAccents
+    val scores = if (theme == ThemeChoice.FOREST) ScoreColors(accents.sleep, Accent(cs.tertiaryContainer, cs.onTertiaryContainer))
+        else ScoreColors(Accent(cs.primaryContainer, cs.onPrimaryContainer), Accent(cs.tertiaryContainer, cs.onTertiaryContainer))
+    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides accents,
+        LocalHero provides hero, LocalScoreColors provides scores) {
         @OptIn(ExperimentalMaterial3ExpressiveApi::class)
         MaterialExpressiveTheme(colorScheme = cs, typography = AppTypography, shapes = AppShapes,
             motionScheme = MotionScheme.expressive(), content = content)

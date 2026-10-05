@@ -332,6 +332,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Themes (2026-10-05, v0.33.0)
+- Settings › Display › Theme: Forest (design B, hand-tuned), Ocean, Plum, Coral, Graphite, each expanded from its seed into
+  a full Material 3 tonal scheme (MaterialKolor, a port of material-color-utilities; TonalSpot), and Dynamic (the phone's
+  wallpaper colours, Material You). Appearance: System, Light or Dark. Stored on the phone.
+- Every theme keeps B's layout: in light, white cards on the scheme's tinted ground; the hero cards take the primary
+  colour (primary container in dark); Health and Fitness tiles take primary and tertiary containers (Forest keeps its
+  blue and coral).
+
 ## Remaining review items (2026-10-05, v0.32.1)
 - Compare uses the same dated VO₂ reading as the Fitness score (`scores.vo2_on`), not Garmin's raw snapshot.
 - Race-week baseline: weeks before synced history are left out; a week with no running after that counts as a break.

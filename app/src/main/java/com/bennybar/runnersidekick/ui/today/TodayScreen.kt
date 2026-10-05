@@ -452,13 +452,12 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
 /** Health and fitness out of 100, as two tonal tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
 @Composable
 private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val sleep = com.bennybar.runnersidekick.ui.theme.LocalAccents.current.sleep
+    val sc = com.bennybar.runnersidekick.ui.theme.LocalScoreColors.current
     // Equal heights, and a fixed two-line subtitle, so both numbers and bars line up
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-        ScoreTile("Health", s.scope["health"], s.health, sleep.container, sleep.content,
+        ScoreTile("Health", s.scope["health"], s.health, sc.health.container, sc.health.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), Modifier.weight(1f)) { onOpen("health") }
-        ScoreTile("Fitness", s.scope["fitness"], s.fitness, cs.tertiaryContainer, cs.onTertiaryContainer,
+        ScoreTile("Fitness", s.scope["fitness"], s.fitness, sc.fitness.container, sc.fitness.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 8.dp, 28.dp), Modifier.weight(1f)) { onOpen("fitness") }
     }
 }

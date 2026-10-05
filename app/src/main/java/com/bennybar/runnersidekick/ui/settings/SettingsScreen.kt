@@ -1,6 +1,13 @@
 package com.bennybar.runnersidekick.ui.settings
 
 import android.Manifest
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.Icon
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -113,6 +120,8 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
     }
 
     fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }
+    fun setTheme(t: com.bennybar.runnersidekick.ui.theme.ThemeChoice) = viewModelScope.launch { repo.settings.setTheme(t.name) }
+    fun setAppearance(a: com.bennybar.runnersidekick.ui.theme.Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }
     fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }
     fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }
 
@@ -225,6 +234,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
             }
             item {
                 Group(title = "Display") {
+                    custom { ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
                     custom {
                         Text("Units", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -456,5 +466,43 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
+    }
+}
+
+
+/** Colour theme as swatches (each drawn from its own scheme), and light, dark or system. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ThemePicker(theme: String?, appearance: String?, onTheme: (com.bennybar.runnersidekick.ui.theme.ThemeChoice) -> Unit,
+                        onAppearance: (com.bennybar.runnersidekick.ui.theme.Appearance) -> Unit) {
+    val current = com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(theme)
+    val cs = MaterialTheme.colorScheme
+    Text("Theme", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 10.dp))
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        com.bennybar.runnersidekick.ui.theme.ThemeChoice.entries.forEach { c ->
+            val selected = c == current
+            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                modifier = Modifier.width(56.dp).selectable(selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onTheme(c) }) {
+                androidx.compose.foundation.layout.Box(Modifier.size(52.dp)
+                    .border(if (selected) 3.dp else 0.dp, if (selected) cs.onSurface else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.CircleShape)
+                    .padding(5.dp)
+                    .background(c.seed?.let { androidx.compose.ui.graphics.Brush.linearGradient(listOf(it, it.copy(alpha = 0.55f))) }
+                        ?: androidx.compose.ui.graphics.Brush.sweepGradient(listOf(cs.primary, cs.tertiary, cs.secondary, cs.primary)),
+                        androidx.compose.foundation.shape.CircleShape),
+                    contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    if (selected) Icon(Icons.Outlined.Check, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(22.dp))
+                }
+                Text(c.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+    if (current == com.bennybar.runnersidekick.ui.theme.ThemeChoice.DYNAMIC) Text("Uses your wallpaper's colours (Material You).",
+        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+    Text("Appearance", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+    val now = com.bennybar.runnersidekick.ui.theme.Appearance.of(appearance)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        com.bennybar.runnersidekick.ui.theme.Appearance.entries.forEachIndexed { i, a ->
+            SegmentedButton(now == a, { onAppearance(a) }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(a.label) }
+        }
     }
 }

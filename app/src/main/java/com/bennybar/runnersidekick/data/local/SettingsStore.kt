@@ -34,6 +34,9 @@ data class LocalSettings(
     val hasOwnAiKey: Boolean = false,
     /** Keep the phone's copy fresh in the background even with notifications off (every few hours). */
     val backgroundRefresh: Boolean = false,
+    /** Colour theme and light/dark: names of ui.theme.ThemeChoice and Appearance. */
+    val theme: String? = null,
+    val appearance: String? = null,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -55,6 +58,8 @@ class SettingsStore(private val context: Context) {
     private val kRunsSeen = stringSetPreferencesKey("notified_runs")
     private val kRunsSeeded = booleanPreferencesKey("notified_runs_seeded")
     private val kWeekly = stringPreferencesKey("notified_weekly_week")
+    private val kTheme = stringPreferencesKey("theme")
+    private val kAppearance = stringPreferencesKey("appearance")
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -66,6 +71,8 @@ class SettingsStore(private val context: Context) {
             account = p[kAccount],
             hasOwnAiKey = p[kAiKey] != null,
             backgroundRefresh = p[kBackground] ?: false,
+            theme = p[kTheme],
+            appearance = p[kAppearance],
         )
     }
 
@@ -99,6 +106,9 @@ class SettingsStore(private val context: Context) {
             if (!token.isNullOrBlank()) p[kToken] = encrypt(token.trim())
         }
     }
+
+    suspend fun setTheme(theme: String) = context.dataStore.edit { it[kTheme] = theme }
+    suspend fun setAppearance(appearance: String) = context.dataStore.edit { it[kAppearance] = appearance }
 
     suspend fun setUnits(units: Units) = context.dataStore.edit { it[kImperial] = units == Units.IMPERIAL }
 
