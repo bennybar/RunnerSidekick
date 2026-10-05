@@ -104,8 +104,13 @@ def test_durability_uses_only_each_runs_newest_revision():
     rows = [{"subject_key": "a", "revision": 2, "body": {"local_date": "2026-10-01", "decoupling": {"eligible": False, "decoupling_pct": 9.0}}},
             {"subject_key": "a", "revision": 1, "body": {"local_date": "2026-10-01", "decoupling": {"eligible": True, "decoupling_pct": 2.0}}}]
 
+    class NoWeather:
+        def find(self, *a, **k):
+            return []
+
     class Conn:
         report = Reports(rows)
+        run_weather = NoWeather()
     s = progress.drift_signal(Conn(), "x", today)
     assert "(0 so far)" in s["say"]  # the older eligible revision doesn't come back
 
@@ -497,7 +502,7 @@ def test_strain_needs_two_signals(monkeypatch):
     monkeypatch.setattr("sidekick.readiness.training_load", lambda conn, s, at, z: {"ratio": 1.0})
     monkeypatch.setattr("sidekick.readiness.moment", lambda conn, d: None)
     monkeypatch.setattr("sidekick.readiness.run_load", lambda conn, a, floors: a["load"])
-    monkeypatch.setattr(strain.wx, "stored", lambda conn, sid: None)
+    monkeypatch.setattr(strain.wx, "unusually_hot", lambda conn: set())
 
     class C:
         class _C:
@@ -509,3 +514,13 @@ def test_strain_needs_two_signals(monkeypatch):
         out = strain.build(C(), "x", today)
         assert (out and {s["id"] for s in out["signals"]}) == (want or None)  # one signal alone is never a warning
     assert "Consider an easier day" in out["text"] and "injur" not in out["text"].lower()
+
+
+def test_trends_leave_out_only_runs_hotter_than_your_usual():
+    from sidekick import weather
+    from sidekick.db import connect, user_db_name
+    conn = connect(user_db_name(33, "fixture"))
+    conn.run_weather.drop()
+    for i, dew in enumerate([19, 20, 19, 21, 20, 19, 25]):  # a humid summer: 19–21 is normal here, 25 isn't
+        conn.run_weather.insert_one({"source_id": f"r{i}", "checked_at": utc_now(), "weather": {"temperature_2m": 27.0, "dew_point_2m": float(dew)}})
+    assert weather.unusually_hot(conn) == {"r6"}

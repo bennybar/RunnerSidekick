@@ -692,15 +692,16 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
 
     acts = activities(conn, source, (today - timedelta(days=120)).isoformat(), today.isoformat())
     runs, drifts = [], []
+    from .weather import unusually_hot
+    too_hot = unusually_hot(conn)
     for a in acts:
         an = run_analysis(conn, a)
         local = _dt.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["utc_offset_s"] or 0)
         runs.append(ins.RunData(a["source_id"], a["local_date"], local.replace(tzinfo=None), a.get("device_id"), a["distance_m"],
                                 a["moving_s"], (a["garmin_metrics"] or {}).get("activityTrainingLoad"),
                                 samples_for(conn, a["id"]), rn.splits_from_laps(laps_for(conn, a["id"])), an["classification"]["kind"]))
-        # Hot runs (high dew point or feels-like) are left out: heat raises drift, so they'd read as lost durability
-        from . import weather as wx
-        if an["decoupling"]["eligible"] and not (wx.heat(wx.stored(conn, a["source_id"])) or {}).get("hot"):
+        # Runs clearly hotter than your usual are left out: heat raises drift, so they'd read as lost durability
+        if an["decoupling"]["eligible"] and a["source_id"] not in too_hot:
             drifts.append((a["local_date"], a["source_id"], an["decoupling"]["decoupling_pct"]))
     since = (today - timedelta(days=120)).isoformat()
     obs: dict[str, dict[str, float]] = {}

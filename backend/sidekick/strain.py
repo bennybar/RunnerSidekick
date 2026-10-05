@@ -79,7 +79,8 @@ def build(conn, source: str, today: date) -> dict | None:
     if cad is not None and cad <= -CADENCE_DROP_SPM:
         signals.append({"id": "cadence", "say": f"cadence {abs(cad):.0f} spm lower at your usual paces"})
 
-    cool = lambda xs: [a for a in xs if not (wx.heat(wx.stored(conn, a["source_id"])) or {}).get("hot")]  # noqa: E731
+    too_hot = wx.unusually_hot(conn)
+    cool = lambda xs: [a for a in xs if a["source_id"] not in too_hot]  # noqa: E731  (like with like)
     hr = same_pace_shift(cool(recent), cool(before), "avg_hr")
     if hr is not None and hr >= HR_RISE_BPM:
         signals.append({"id": "heart_rate", "say": f"heart rate {hr:.0f} bpm higher at your usual paces"})

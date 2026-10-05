@@ -67,7 +67,9 @@ def efficiency_signal(conn, source: str, today: date) -> dict:
 
 def drift_signal(conn, source: str, today: date) -> dict:
     note = (f"Heart-rate drift (pace:HR decoupling) on steady runs, last 6 weeks against the 6 before; {DRIFT_MIN_RUNS}+ runs in "
-            f"each; under {DRIFT_PP:.0f} point counts as stable. Hot, humid runs are left out. Lower drift = efficiency that holds up")
+            f"each; under {DRIFT_PP:.0f} point counts as stable. Runs clearly hotter than your usual are left out. Lower drift = efficiency that holds up")
+    from .weather import unusually_hot
+    too_hot = unusually_hot(conn)
     latest: dict[str, tuple[str, float]] = {}
     seen: set[str] = set()
     for r in conn.report.find({"type": "post_run", "body.local_date": {"$gte": (today - timedelta(days=84)).isoformat()}},
@@ -76,8 +78,8 @@ def drift_signal(conn, source: str, today: date) -> dict:
             continue  # the newest revision of each run only, eligible or not
         seen.add(r["subject_key"])
         dc = r["body"].get("decoupling") or {}
-        if (r["body"].get("heat") or {}).get("hot"):
-            continue  # heat raises drift: hot runs would read as lost durability
+        if r["subject_key"] in too_hot:
+            continue  # clearly hotter than your usual: heat raises drift, so it would read as lost durability
         if dc.get("eligible") and dc.get("decoupling_pct") is not None:
             latest[r["subject_key"]] = (r["body"]["local_date"], dc["decoupling_pct"])
     cut = (today - timedelta(days=42)).isoformat()

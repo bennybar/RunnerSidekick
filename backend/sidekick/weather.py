@@ -3,7 +3,9 @@ position rounded to 0.01° (about 1 km) and the date go to Open-Meteo. Looked up
 export), then kept with the run; a failed lookup is tried again after a day. Indoor runs and runs without GPS get none.
 
 Heat: a dew point of 18 °C or more, or a feels-like temperature of 27 °C or more, raises heart rate at the same effort
-noticeably. Such runs are marked hot: their drift and fade verdicts say so, and they're left out of the durability trend."""
+noticeably. Such runs are marked hot and their drift and fade verdicts say so. Trends compare like with like instead:
+only runs clearly hotter than your own usual (dew point 3 °C above your median) are left out, so a runner in a humid
+climate still has a trend."""
 
 from __future__ import annotations
 
@@ -91,3 +93,17 @@ def for_new_runs(conn, source: str, sids: list[str], fetch=httpx.get) -> None:
                 for_run(conn, a, fetch)
             except Exception as e:  # weather is a nicety: never a failed sync
                 log.warning("weather for %s: %s", sid, e)
+
+
+UNUSUAL_DEW_ABOVE_C = 3.0
+
+
+def unusually_hot(conn) -> set[str]:
+    """Runs whose dew point is 3 °C or more above this runner's median: left out of trends (like with like)."""
+    rows = [(r["source_id"], r["weather"]["dew_point_2m"]) for r in conn.run_weather.find({"weather.dew_point_2m": {"$ne": None}},
+                                                                                            {"source_id": 1, "weather.dew_point_2m": 1})]
+    if len(rows) < 5:
+        return set()
+    from statistics import median
+    usual = median(d for _, d in rows)
+    return {sid for sid, d in rows if d >= usual + UNUSUAL_DEW_ABOVE_C}

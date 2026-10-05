@@ -509,8 +509,9 @@ morning training readiness, counted down to now) isn't in the score; at 24 h or 
 ## Heat — `weather.py`
 
 Hot = dew point ≥ 18 °C or feels-like ≥ 27 °C (Open-Meteo estimate for the run's start area and middle hour). Hot runs:
-drift above 5% reads "expected more on a warm, humid day" (ok, not low); a fade is marked as a warm day; excluded from
-the durability trend and insight. Pace and drift are never numerically "heat-corrected".
+drift above 5% reads "expected more on a warm, humid day" (ok, not low); a fade is marked as a warm day. Trends
+(durability, the durability insight, strain's heart-rate signal) leave out only runs whose dew point is 3 °C or more
+above the runner's median. Pace and drift are never numerically "heat-corrected".
 
 ## Strain — `strain.py` (`strain-1.0`)
 

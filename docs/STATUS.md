@@ -336,8 +336,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Weather for every new run: looked up during sync (Open-Meteo estimate, start area to about 1 km), before the run's
   report; `backfill-weather` for runs of the last 120 days. Each run's checks show the conditions.
 - Heat: a dew point of 18 °C+ or feels-like 27 °C+ marks a run hot. Its drift and fade verdicts say so and aren't read
-  as poor durability; next focus says heat raises heart rate; hot runs are left out of the durability trend and the
-  durability insight (report-2.6). No numeric "heat correction": the models are rough, so the app says it instead.
+  as poor durability; next focus says heat raises heart rate. Trends compare like with like: only runs clearly hotter
+  than your usual (dew point 3 °C above your median) are left out of the durability trend, the durability insight and
+  the strain check, so a humid climate (29 of 32 live runs have a dew point of 18 °C+) still has a trend (report-2.6).
+  No numeric "heat correction": the models are rough, so the app says it instead.
 - Strain warning (`strain.py`): two or more of a load jump (1.3×), the same load every day (monotony 2+ in a heavier
   week), cadence 3+ spm lower or heart rate 5+ bpm higher at your usual paces (hot runs left out), runs feeling hard
   while heart rate stayed easy. Shown first in "Stands out"; a nudge toward an easier day, never a diagnosis.
