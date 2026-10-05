@@ -250,6 +250,26 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     }
                 }
             }
+            remote?.let { r ->
+                item {
+                    Group(title = "Training") {
+                        row("Training", supporting = listOfNotNull(
+                                r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
+                                GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
+                                r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
+                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { open = "training" })
+                        row("Race", supporting = r.raceDate?.let { d ->
+                                listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
+                                    r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
+                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { open = "race" })
+                        row("About you", supporting = listOfNotNull(
+                                (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
+                                (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
+                                if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
+                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { open = "about" })
+                    }
+                }
+            }
             item {
                 Group(title = "Notifications") {
                     row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
@@ -275,24 +295,6 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                 }
             }
             remote?.let { r ->
-                item {
-                    Group(title = "Training") {
-                        row("Training", supporting = listOfNotNull(
-                                r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
-                                GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
-                                r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
-                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { open = "training" })
-                        row("Race", supporting = r.raceDate?.let { d ->
-                                listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
-                                    r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
-                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { open = "race" })
-                        row("About you", supporting = listOfNotNull(
-                                (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
-                                (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
-                                if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
-                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { open = "about" })
-                    }
-                }
                 item {
                     val ownKey = local?.hasOwnAiKey == true
                     Group(title = "AI coach (optional)") {
