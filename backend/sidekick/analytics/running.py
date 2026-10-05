@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.4"  # 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.5"  # 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -58,19 +58,12 @@ def _weights(s: Samples) -> list[float]:
     return w
 
 
-def classify(s: Samples | None, laps: list[dict]) -> dict:
-    """steady | variable | unknown, with the evidence used."""
-    # Only rest/recovery laps indicate structure. Garmin labels every lap INTERVAL on some devices, even for
-    # auto-laps on an ordinary run (observed in live data 2026-10-01), so that label alone carries no signal.
-    intensities = {(l.get("intensity") or "").upper() for l in laps}
-    if intensities & {"REST", "RECOVERY"}:
-        return {"kind": "variable", "reason": "source laps include rest/recovery laps"}
-    if s is None or len(s.t) < 10:
-        return {"kind": "unknown", "reason": "no sample data"}
+def speed_cv(s: Samples) -> float | None:
+    """Coefficient of variation of 1-minute moving speed blocks, the first and last tenth (warm-up, cool-down) left out."""
     w = _weights(s)
     blocks, acc_t, acc_d = [], 0.0, 0.0
     for i, wi in enumerate(w):
-        if wi <= 0:
+        if wi <= 0 or s.speed[i] is None:
             continue
         acc_t += wi
         acc_d += wi * s.speed[i]
@@ -78,10 +71,26 @@ def classify(s: Samples | None, laps: list[dict]) -> dict:
             blocks.append(acc_d / acc_t)
             acc_t = acc_d = 0.0
     if len(blocks) < 10:
-        return {"kind": "unknown", "reason": "fewer than 10 minutes of moving data"}
-    # Ignore warm-up/cool-down blocks so an easy start does not mask a steady run
+        return None
     core = blocks[len(blocks) // 10: len(blocks) - len(blocks) // 10] or blocks
-    cv = pstdev(core) / (sum(core) / len(core))
+    return pstdev(core) / (sum(core) / len(core))
+
+
+def classify(s: Samples | None, laps: list[dict], raw: Samples | None = None) -> dict:
+    """steady | variable | unknown, with the evidence used. `s` may be grade-adjusted; with `raw` (the recorded speed)
+    too, the run is steady when either was: an even pace on the flat, or an even effort over hills. Grade-adjusted speed
+    alone reads noisy elevation as uneven running (live data: pace CV 0.04–0.06, grade-adjusted 0.08–0.14)."""
+    # Only rest/recovery laps indicate structure. Garmin labels every lap INTERVAL on some devices, even for
+    # auto-laps on an ordinary run (observed in live data 2026-10-01), so that label alone carries no signal.
+    intensities = {(l.get("intensity") or "").upper() for l in laps}
+    if intensities & {"REST", "RECOVERY"}:
+        return {"kind": "variable", "reason": "source laps include rest/recovery laps"}
+    if s is None or len(s.t) < 10:
+        return {"kind": "unknown", "reason": "no sample data"}
+    cvs = [c for c in (speed_cv(s), speed_cv(raw) if raw is not None and raw is not s else None) if c is not None]
+    if not cvs:
+        return {"kind": "unknown", "reason": "fewer than 10 minutes of moving data"}
+    cv = min(cvs)
     return {"kind": "steady" if cv <= STEADY_MAX_CV else "variable", "reason": f"1-min speed CV {cv:.3f}",
             "speed_cv": round(cv, 4), "threshold": STEADY_MAX_CV}
 
@@ -97,9 +106,10 @@ def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, ga
     """
     reasons = []
     graded = s is not None and any(e is not None for e in s.elev)
+    raw = s
     if graded:
         s = with_gap(s)
-    cls = classify(s, laps)
+    cls = classify(s, laps, raw)
     if cls["kind"] != "steady":
         reasons.append(f"run is not steady ({cls['reason']})")
     if distance_m and gain_m is not None and distance_m > 0 and gain_m / (distance_m / 1000.0) > MAX_GAIN_PER_KM:

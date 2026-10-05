@@ -108,3 +108,21 @@ def test_durability_uses_only_each_runs_newest_revision():
         report = Reports(rows)
     s = progress.drift_signal(Conn(), "x", today)
     assert "(0 so far)" in s["say"]  # the older eligible revision doesn't come back
+
+
+def test_an_even_pace_over_noisy_elevation_is_steady():
+    # 45 minutes at an even 3 m/s on flat ground, with recorded elevation drifting ±3 m every 30 s (barometer noise):
+    # the hill-adjusted speed swings, the run doesn't
+    import random
+    rnd = random.Random(7)
+    t = [float(i) for i in range(0, 2700, 2)]
+    elev, e = [], 30.0
+    for i in range(len(t)):
+        if i % 15 == 0:
+            e = 30.0 + rnd.choice((-3.0, 0.0, 3.0))
+        elev.append(e)
+    s = Samples(t, [150.0] * len(t), [3.0 + 0.05 * rnd.random() for _ in t], [3.0 * x for x in t], elev, [170.0] * len(t))
+    graded = rn.with_gap(s)
+    assert rn.speed_cv(graded) > rn.STEADY_MAX_CV  # what made runs "not steady" before
+    assert rn.classify(graded, [], s)["kind"] == "steady"
+    assert rn.decoupling(s, [], 8100.0, 20.0)["eligible"]

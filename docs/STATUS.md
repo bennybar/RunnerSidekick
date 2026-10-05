@@ -345,6 +345,9 @@ From the v0.30.2 review, each reproduced first (`tests/test_calc_review.py`, `te
 - Consistency insight: weeks before the first synced run are unknown, not zero.
 - Four-week pace: only runs with both distance and moving time.
 - Best efforts: end-anchored segments are tried too, so the fastest one is found (running-1.4).
+- "Steady" runs: steady when either the recorded pace or the hill-adjusted pace is even (1-minute CV ≤ 0.08). Live runs
+  had pace CV 0.04–0.06 but hill-adjusted CV 0.08–0.14 from elevation noise, so almost none counted for drift and
+  durability (running-1.5). Hilly runs still have their own check.
 
 ## Wording: VO₂ estimate, aerobic decoupling (2026-10-04, v0.30.2)
 - Garmin's VO₂ max is called a device estimate everywhere it trends: the progress signal is "Garmin VO₂ estimate", a
