@@ -481,6 +481,7 @@ data class SettingsDto(
     @SerialName("hr_zone_source") val hrZoneSource: String = "garmin",
     @SerialName("goal_type") val goalType: String? = null,
     @SerialName("ai_enabled") val aiEnabled: Boolean = false,
+    @SerialName("weather_enabled") val weatherEnabled: Boolean = true,
     @SerialName("ai_model") val aiModel: String = "gpt-6.1-sol",
     @SerialName("ai_available") val aiAvailable: Boolean = false,
     @SerialName("morning_window_start") val morningWindowStart: String = "06:00",

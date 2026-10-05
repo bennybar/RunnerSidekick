@@ -9,7 +9,7 @@ needs two together. It's a nudge toward an easier day or two, not a prediction a
 - Heart rate up at the same pace: recent runs 5+ bpm higher than earlier runs within 10 s/km of their pace (hot runs
   left out: heat alone raises it).
 - Felt harder than measured: 2 or more of the last 10 days' rated runs felt moderately hard or harder while under 20% of
-  their time was in zones 4–5 (needs 3 rated runs)."""
+  their time was in zones 4–5 (needs 3 rated runs; runs meant to be hard aren't counted)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from . import reports as rp
 from . import weather as wx
 from .db import one
 
-STRAIN_VERSION = "strain-1.0"
+STRAIN_VERSION = "strain-1.1"  # 1.1: hard runs don't count as "felt harder"; a week of identical loads is monotonous
 LOAD_JUMP = 1.3
 MONOTONY = 2.0
 CADENCE_DROP_SPM = 3.0
@@ -29,6 +29,7 @@ PACE_MATCH_S = 10.0
 FELT_HARD = 6  # on a 1–10 scale: "moderate-hard" and up
 FELT_MIN_RATED = 3
 NEEDS = 2      # signals that must agree
+HARD_INTENT = {"tempo", "threshold", "intervals", "race"}
 EFFORT_WORDS = {"very_easy": 2, "easy": 3, "easy_moderate": 4, "moderate": 5, "moderate_hard": 6, "hard": 7, "very_hard": 9}
 
 
@@ -72,8 +73,10 @@ def build(conn, source: str, today: date) -> dict | None:
     week = [daily.get((today - timedelta(days=k)).isoformat(), 0.0) for k in range(7)]
     sd = pstdev(week)
     four_weeks = sum(v for d, v in daily.items() if d < cut) / 4
-    if sd > 0 and sum(week) / 7 / sd >= MONOTONY and sum(week) > four_weeks:
-        signals.append({"id": "monotony", "say": f"much the same load every day (monotony {sum(week) / 7 / sd:.1f}) in a heavier week"})
+    mono = sum(week) / 7 / sd if sd > 0 else (float("inf") if sum(week) > 0 else 0.0)  # identical days: as monotonous as it gets
+    if mono >= MONOTONY and sum(week) > four_weeks:
+        signals.append({"id": "monotony", "say": "the same load every day in a heavier week" if mono == float("inf") else
+                        f"much the same load every day (monotony {mono:.1f}) in a heavier week"})
 
     cad = same_pace_shift(recent, before, "avg_cadence_spm")
     if cad is not None and cad <= -CADENCE_DROP_SPM:
@@ -88,6 +91,8 @@ def build(conn, source: str, today: date) -> dict | None:
     rated = []
     for a in [a for a in runs if a["local_date"] >= (today - timedelta(days=9)).isoformat()]:
         intent = one(conn.run_intent, {"activity_source_id": a["source_id"]}) or {}
+        if intent.get("kind") in HARD_INTENT:  # a hard session is meant to feel hard, whatever heart rate did
+            continue
         rpe = (one(conn.activity_effort, {"activity_source_id": a["source_id"]}) or {}).get("rpe") or EFFORT_WORDS.get(intent.get("effort"))
         if rpe is not None:
             z = zone_shares(conn, a, zones["floors"]) if zones else None

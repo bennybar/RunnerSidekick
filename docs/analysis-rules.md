@@ -492,7 +492,9 @@ check with at most 30% in zones 4–5.
 
 ## Weather — `weather.py`
 
-Open-Meteo, looked up on export only: the start position rounded to 0.01° and the hour nearest the run's middle. The
+Open-Meteo, looked up during sync (up to 30 runs: the sync's own, then runs from the last 30 days still without it;
+those runs' reports are rebuilt) and on export: the start position rounded to 0.01° and the hour nearest the run's
+middle. A per-user switch (`weather_enabled`, on by default) stops all lookups; kept estimates stay. The
 forecast API for the last 30 days, the historical (reanalysis) API before that. Kept with the run; a failed lookup is
 retried after a day. Always labelled as an estimate, never as watch data.
 
@@ -509,13 +511,26 @@ morning training readiness, counted down to now) isn't in the score; at 24 h or 
 ## Heat — `weather.py`
 
 Hot = dew point ≥ 18 °C or feels-like ≥ 27 °C (Open-Meteo estimate for the run's start area and middle hour). Hot runs:
-drift above 5% reads "expected more on a warm, humid day" (ok, not low); a fade is marked as a warm day. Trends
-(durability, the durability insight, strain's heart-rate signal) leave out only runs whose dew point is 3 °C or more
-above the runner's median. Pace and drift are never numerically "heat-corrected".
+looser bars, not none: decoupling good ≤ 8%, ok ≤ 13% (otherwise 5 / 10); a fade ok up to 25 s/km (otherwise 15).
+Trends (durability, the durability insight, strain's heart-rate signal) leave out only runs both humid (dew point
+≥ 18 °C) and 3 °C or more above the runner's median dew point. Pace and drift are never numerically "heat-corrected".
 
-## Strain — `strain.py` (`strain-1.0`)
+## Strain — `strain.py` (`strain-1.1`)
 
 Last 7 days against the 4 weeks before; a warning only when 2+ of: acute/chronic load ≥ 1.3; Foster monotony
 (mean/sd of daily load over 7 days) ≥ 2.0 in a week heavier than the 4-week average; cadence ≥ 3 spm lower or heart
 rate ≥ 5 bpm higher (hot runs excluded) than earlier runs within 10 s/km of the same pace (2+ runs each); 2+ of the
-last 10 days' rated runs (3+ rated) felt moderately hard or harder (6/10) with under 20% in zones 4–5.
+last 10 days' rated runs (3+ rated) felt moderately hard or harder (6/10) with under 20% in zones 4–5 (runs meant to be tempo, threshold, intervals or a race left out). A week of identical
+daily loads (sd 0) counts as monotonous.
+
+## Readiness 1.7 — `readiness.py`
+
+One weak part alone floors the score: 50 for an overnight reading; recovery 55 when the leftover effort is at most
+1.25× the median for this weekday and time over the last 4 weeks (routine: the morning after the weekly long run),
+45 when it's more (still easy, not rest). HRV scores 100 down to 10% below usual, then 3 points per %; resting HR
+100 up to +3 bpm, then 10 points per bpm.
+
+## Pacing on out-and-backs — `running.py` (`running-1.10`)
+
+When one half of the complete splits descends by more than 1% net and the halves' net grades differ by more than 1.5
+points, the halves aren't compared: the pacing check is "info", and neither the focus nor the run story reads a fade.

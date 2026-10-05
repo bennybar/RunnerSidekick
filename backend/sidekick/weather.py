@@ -4,7 +4,8 @@ export), then kept with the run; a failed lookup is tried again after a day. Ind
 
 Heat: a dew point of 18 °C or more, or a feels-like temperature of 27 °C or more, raises heart rate at the same effort
 noticeably. Such runs are marked hot and their drift and fade verdicts say so. Trends compare like with like instead:
-only runs clearly hotter than your own usual (dew point 3 °C above your median) are left out, so a runner in a humid
+only runs both humid (dew point 18 °C or more) and clearly hotter than your own usual (3 °C above your median dew point)
+are left out, so a runner in a humid
 climate still has a trend."""
 
 from __future__ import annotations
@@ -45,10 +46,17 @@ def lookup(lat: float, lon: float, hour: datetime, fetch=httpx.get) -> dict | No
             "source": "Open-Meteo " + ("historical weather (reanalysis)" if url == ARCHIVE else "forecast model, past hours")}
 
 
+def enabled(conn) -> bool:
+    from .reports import get_setting
+    return get_setting(conn, "weather_enabled", True)
+
+
 def for_run(conn, a: dict, fetch=httpx.get) -> dict | None:
     if a.get("sport") == "treadmill_running":
         return None
     kept = one(conn.run_weather, {"source_id": a["source_id"]})
+    if not enabled(conn):  # switched off: nothing is sent; estimates kept from before stay with their runs
+        return (kept or {}).get("weather")
     if kept and (kept["weather"] or kept["checked_at"] > (datetime.now(timezone.utc) - RETRY_AFTER).strftime("%Y-%m-%dT%H:%M:%SZ")):
         return kept["weather"]
     raw = one(conn.raw_payload, {"kind": "activity_summary", "source_key": a["source_id"]})
@@ -64,7 +72,8 @@ def for_run(conn, a: dict, fetch=httpx.get) -> dict | None:
 
 HOT_DEW_POINT_C = 18.0
 HOT_FEELS_LIKE_C = 27.0
-SYNC_LOOKUPS = 10  # at most this many lookups per sync
+SYNC_LOOKUPS = 30   # at most this many lookups per sync
+CATCH_UP_DAYS = 30  # recent runs still without weather are tried too, after the sync's own
 
 
 def heat(w: dict | None) -> dict | None:
@@ -83,27 +92,37 @@ def stored(conn, source_id: str) -> dict | None:
     return (r or {}).get("weather")
 
 
-def for_new_runs(conn, source: str, sids: list[str], fetch=httpx.get) -> None:
-    """Looks up weather for a sync's new or changed runs, before their reports are built."""
+def for_new_runs(conn, source: str, sids: list[str], fetch=httpx.get) -> list[str]:
+    """Looks up weather for a sync's new or changed runs, then recent runs still without it, before reports are built.
+    Returns the runs that gained an estimate, so their reports are rebuilt with it."""
     from . import reports as rp
-    for sid in sids[:SYNC_LOOKUPS]:
+    if not enabled(conn):
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(days=CATCH_UP_DAYS)).strftime("%Y-%m-%d")
+    have = {r["source_id"] for r in conn.run_weather.find({"weather": {"$ne": None}}, {"source_id": 1})}
+    recent = [a["source_id"] for a in rp.activities(conn, source, since, "9999-12-31") if a["source_id"] not in have]
+    got = []
+    for sid in list(dict.fromkeys([s for s in sids if s not in have] + recent))[:SYNC_LOOKUPS]:
         a = rp.activity_by_source_id(conn, source, sid)
         if a:
             try:
-                for_run(conn, a, fetch)
+                if for_run(conn, a, fetch):
+                    got.append(sid)
             except Exception as e:  # weather is a nicety: never a failed sync
                 log.warning("weather for %s: %s", sid, e)
+    return got
 
 
 UNUSUAL_DEW_ABOVE_C = 3.0
 
 
 def unusually_hot(conn) -> set[str]:
-    """Runs whose dew point is 3 °C or more above this runner's median: left out of trends (like with like)."""
+    """Runs both humid enough to matter (dew point 18 °C or more) and 3 °C or more above this runner's median dew point:
+    left out of trends (like with like). The absolute bar keeps a temperate runner's warmer summer days in."""
     rows = [(r["source_id"], r["weather"]["dew_point_2m"]) for r in conn.run_weather.find({"weather.dew_point_2m": {"$ne": None}},
                                                                                             {"source_id": 1, "weather.dew_point_2m": 1})]
     if len(rows) < 5:
         return set()
     from statistics import median
     usual = median(d for _, d in rows)
-    return {sid for sid, d in rows if d >= usual + UNUSUAL_DEW_ABOVE_C}
+    return {sid for sid, d in rows if d >= max(usual + UNUSUAL_DEW_ABOVE_C, HOT_DEW_POINT_C)}

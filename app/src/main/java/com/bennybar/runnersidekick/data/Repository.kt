@@ -178,6 +178,17 @@ class Repository(
         settings.clearToken()
     }
 
+    /** Shown once on the sign-in screen after the server ended this session (expired or signed out elsewhere). */
+    val signInNote = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** The server rejected the token: back to sign-in with a note. Unsent check-ins stay on this phone. */
+    suspend fun sessionExpired() {
+        if (settings.settings.first().hasToken.not()) return
+        signInNote.value = "Your session has ended. Please sign in again."
+        clearLocal(includeCheckins = false)
+        settings.clearToken()
+    }
+
     suspend fun signOut() {
         runCatching { api.post("/v1/auth/logout") }  // the token stops working on the server too (offline: just this phone)
         clearLocal(includeCheckins = false)
@@ -267,7 +278,11 @@ class Repository(
         val mode = settings.settings.first().currentMode ?: return
         // Unchanged content isn't rewritten: no disk write and no needless refresh of every screen observing it
         val existing = db.cache().get(key)
-        if (existing != null && existing.mode == mode && existing.json == body) return
+        if (existing != null && existing.mode == mode && existing.json == body) {
+            // ...but its age is refreshed now and then, so a copy still in use isn't pruned as old
+            if (System.currentTimeMillis() - existing.fetchedAt > 86_400_000L) db.cache().touch(key, System.currentTimeMillis())
+            return
+        }
         db.cache().put(CachedBlob(key, mode, body, System.currentTimeMillis()))
     }
 

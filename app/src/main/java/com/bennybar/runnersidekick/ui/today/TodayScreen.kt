@@ -437,7 +437,7 @@ private val SESSION_NAMES = mapOf("easy" to "Easy run", "long" to "Long run", "t
 fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
                          onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Group(title = "This week toward ${race.title ?: race.headline} · ${race.phase.replace('_', ' ')}") {
+    Group(title = "This week toward ${race.title ?: race.headline} · ${w.phase.replace('_', ' ')}") {
         custom {
             Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
                 style = MaterialTheme.typography.titleMedium)
@@ -722,7 +722,7 @@ private fun RaceWeekStrip(race: com.bennybar.runnersidekick.data.remote.RaceStat
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("This week · ${race.phase.replace('_', ' ')}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    Text("This week · ${w.phase.replace('_', ' ')}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                     Text(race.title ?: race.headline, style = MaterialTheme.typography.titleMedium)
                 }
                 Text(race.daysToGo.let { if (it > 0) "$it days" else if (it == 0) "Today" else "Done" }, style = MaterialTheme.typography.labelLarge,

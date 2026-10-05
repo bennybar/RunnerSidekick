@@ -458,7 +458,13 @@ class GarminConnector:
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []
-        return [summarise_activity(a) for a in acts]
+        out = []
+        for a in acts:  # one entry Garmin sends in an odd shape (no activityId, say) is skipped, not fatal
+            try:
+                out.append(summarise_activity(a))
+            except (KeyError, TypeError, ValueError) as e:
+                log.warning("skipped an activity list entry: %s", e)
+        return out
 
     def read_activity(self, summary: dict) -> Activity:
         a = summary["payload"]

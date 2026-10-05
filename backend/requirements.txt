@@ -4,5 +4,6 @@ fastapi==0.142.2
 uvicorn==0.54.0
 openai==3.22.1
 google-auth==2.59.1
+requests==2.34.2  # google-auth's transport for verifying Google sign-in tokens
 httpx==0.28.1
 pymongo==4.18.2

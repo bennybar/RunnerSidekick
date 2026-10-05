@@ -93,6 +93,7 @@ class SettingsIn(BaseModel):
     hr_zone_source: Literal["garmin", "none"] | None = None
     goal_type: Literal["consistency", "distance", "performance", "health"] | None = None
     ai_enabled: bool | None = None
+    weather_enabled: bool | None = None
     ai_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._:\-]{1,64}$")
     morning_window_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     morning_window_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -209,23 +210,27 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @app.middleware("http")
     async def rate(request, call_next):
-        import hashlib
         import time as _time
-        if rate_limit:
-            auth = request.headers.get("authorization") or ""
-            key = ("t:" + hashlib.sha256(auth.encode()).hexdigest()[:16]) if auth else ("ip:" + (request.client.host if request.client else "?"))
-            limit = rate_limit if auth else max(10, rate_limit // 10)
-            now = _time.monotonic()
-            hits = [h for h in rate_hits.get(key, []) if now - h < 60]
-            if len(hits) >= limit:
-                from fastapi.responses import JSONResponse
-                return JSONResponse({"detail": "too many requests"}, status_code=429, headers={"Retry-After": "30"})
-            hits.append(now)
-            rate_hits[key] = hits
-            if len(rate_hits) > 10000:  # forget idle clients
-                for k in [k for k, v in rate_hits.items() if now - v[-1] > 60]:
-                    rate_hits.pop(k, None)
-        return await call_next(request)
+        if not rate_limit:
+            return await call_next(request)
+        from fastapi.responses import JSONResponse
+        ip = request.client.host if request.client else "?"
+        now = _time.monotonic()
+
+        def recent(key):
+            return [h for h in rate_hits.get(key, []) if now - h < 60]
+        # Per address, whatever the token says (junk tokens get no bucket of their own); requests turned away for a bad
+        # or missing token fill a much smaller bucket, so guessing or hammering sign-in stops quickly
+        if len(recent("ip:" + ip)) >= rate_limit or len(recent("bad:" + ip)) >= max(10, rate_limit // 10):
+            return JSONResponse({"detail": "too many requests"}, status_code=429, headers={"Retry-After": "30"})
+        rate_hits["ip:" + ip] = recent("ip:" + ip) + [now]
+        resp = await call_next(request)
+        if resp.status_code in (401, 403):
+            rate_hits["bad:" + ip] = recent("bad:" + ip) + [now]
+        if len(rate_hits) > 10000:  # forget idle clients
+            for k in [k for k, v in rate_hits.items() if not v or now - v[-1] > 60]:
+                rate_hits.pop(k, None)
+        return resp
 
     @app.middleware("http")
     async def etag(request, call_next):
@@ -251,9 +256,9 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 from .sync import report_progress
                 if not synthetic:
                     from . import weather
-                    weather.for_new_runs(conn, c.source, res.changed_activities)
+                    res.changed_activities = list(dict.fromkeys(res.changed_activities + weather.for_new_runs(conn, c.source, res.changed_activities)))
                 report_progress(conn, res.job_id, 0.92, "Updating your reports")
-                with lock_reports:
+                with report_lock(conn):
                     rp.regenerate(conn, c.source, synthetic, res.changed_dates, res.changed_activities, today(conn))
                 report_progress(conn, res.job_id, 1.0, "Done")
                 auto_run_ai(conn, res.changed_activities)
@@ -265,7 +270,13 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             finally:
                 running.discard(user_id)
 
-    lock_reports = threading.RLock()
+    report_locks: dict[str, threading.RLock] = {}
+    report_locks_guard = threading.Lock()
+
+    def report_lock(conn) -> threading.RLock:
+        """One lock per user's database: building one user's reports never waits on another's."""
+        with report_locks_guard:
+            return report_locks.setdefault(conn.name, threading.RLock())
     inflight: set[tuple] = set()
 
     def ai_config(conn, own_key: str | None = None) -> nv.AiConfig:
@@ -355,7 +366,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             d = parse_day(day, conn) if day else today(conn)
         except ValueError as e:
             raise HTTPException(422, str(e))
-        with lock_reports:
+        with report_lock(conn):
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         body = with_narrative(conn, body)
         if body is not None and d == today(conn):
@@ -388,7 +399,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.get("/v1/weekly/latest")
     def latest_weekly(conn=Depends(db)):
         from .weekly import regenerate_weeklies
-        with lock_reports:
+        with report_lock(conn):
             regenerate_weeklies(conn, cfg.source, today(conn), synthetic)
         r = one(conn.report, {"type": "weekly"}, sort=[("subject_key", -1), ("revision", -1)])
         if not r:
@@ -415,7 +426,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         except ValueError as e:
             raise HTTPException(422, str(e))
         put_if_newer(conn.day_plan, {"local_date": day}, {"kind": body.kind, "minutes": body.minutes, "client_updated_at": body.client_updated_at})
-        with lock_reports:
+        with report_lock(conn):
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
 
     @api.delete("/v1/plan/{day}")
@@ -425,7 +436,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         except ValueError as e:
             raise HTTPException(422, str(e))
         conn.day_plan.delete_one({"local_date": day})
-        with lock_reports:
+        with report_lock(conn):
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
 
     @api.put("/v1/activities/{sid}/intent")
@@ -435,7 +446,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         put_if_newer(conn.run_intent, {"activity_source_id": sid},
                      {"kind": body.kind, "note": body.note, "source": "user", "client_updated_at": body.client_updated_at,
                       **{k: (getattr(body, k) or "").strip() or None for k in rp.CONTEXT_FIELDS}})
-        with lock_reports:
+        with report_lock(conn):
             return rp.build_post_run(conn, cfg.source, sid, synthetic)
 
     @api.get("/v1/focus")
@@ -458,7 +469,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             cur = rp.latest_body(conn, "insights")
             verdict = next((i["verdict"] for i in cur["insights"] if i["id"] == insight_id), None) if cur else None
             put(conn.insight_state, {"insight_id": insight_id}, {"state": body.state, "verdict_at_dismissal": verdict, "updated_at": utc_now()})
-        with lock_reports:
+        with report_lock(conn):
             return rp.build_insights(conn, cfg.source, today(conn), synthetic)
 
     # ---------------------------------------------------------------- AI coach
@@ -498,7 +509,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                        (datetime.now(timezone.utc) - datetime.fromisoformat(last["created_at"].replace("Z", "+00:00"))).total_seconds() < 1800)
         if db_path not in coach_inflight and not cooling:
             coach_inflight.add(db_path)
-            threading.Thread(target=coach_bg, args=(db_path, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
+            threading.Thread(target=coach_bg, args=(db_path, ai.model, key, "user" if (x_openai_key or "").strip() else "server", ai.max_calls_per_day),
                              daemon=True).start()
         prev = ch.latest(conn, ok_only=True)
         out = {"status": "pending", "previous": ch.view(prev) if prev else None}
@@ -563,7 +574,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.get("/v1/insights")
     def get_insights(conn=Depends(db)):
         from . import stats
-        with lock_reports:
+        with report_lock(conn):
             body = dict(rp.build_insights(conn, cfg.source, today(conn), synthetic))
         body["stats"] = stats.four_weeks(conn, cfg.source, today(conn))
         return body
@@ -617,6 +628,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/activities")
     def list_activities(start: str | None = Query(default=None, alias="from"), end: str | None = Query(default=None, alias="to"), conn=Depends(db)):
+        try:
+            for v in (start, end):
+                if v:
+                    parse_day(v, conn)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         end = end or today(conn).isoformat()
         start = start or (date.fromisoformat(end) - timedelta(days=cfg.backfill_days)).isoformat()
         rows = many(conn.activity, {"source": cfg.source, "local_date": {"$gte": start, "$lte": end}}, sort=[("start_utc", -1)])
@@ -629,7 +646,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         a = rp.activity_by_source_id(conn, cfg.source, sid)
         if not a:
             raise HTTPException(404)
-        with lock_reports:
+        with report_lock(conn):
             report = rp.build_post_run(conn, cfg.source, sid, synthetic)
         s = rp.samples_for(conn, a["id"])
         from . import run_checks
@@ -693,7 +710,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             stale = bool(prev and intent and (intent.get("client_updated_at") or "") > prev["created_at"])
             return {"status": "none", "previous": run_ai.view(prev) if prev and prev["status"] == "ok" else None, "stale": stale}
         run_ai_inflight.add((conn.name, sid))
-        threading.Thread(target=run_ai_bg, args=(conn.name, sid, b, ai.model, key, "user" if x_openai_key else "server", ai.max_calls_per_day),
+        threading.Thread(target=run_ai_bg, args=(conn.name, sid, b, ai.model, key, "user" if (x_openai_key or "").strip() else "server", ai.max_calls_per_day),
                          daemon=True).start()
         return {"status": "pending"}
 
@@ -743,6 +760,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "hr_zone_source": rp.get_setting(conn, "hr_zone_source", "garmin"),
                 "goal_type": rp.get_setting(conn, "goal_type", None),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
+                "weather_enabled": rp.get_setting(conn, "weather_enabled", True),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
                 "ai_models": sorted(nv.server_models()),  # what the server's key may run; your own key may use any
                 "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,

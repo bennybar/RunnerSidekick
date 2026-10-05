@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.9"  # 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.10"  # 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -394,6 +394,26 @@ def fade(paces: list[float]) -> float | None:
     return hv[1] - hv[0] if hv else None
 
 
+def uneven_halves(splits: list[dict]) -> tuple[float, float] | None:
+    """The halves' net grades (as fractions) when they can't be compared for a fade: an out-and-back on a hill, where one
+    half descends by more than 1% and the other differs by over 1.5 points. Hill-adjusted pace credits a descent least
+    reliably, so a "fade" there may only be the climb home. Splits as dicts with distance and elevation gain/loss."""
+    h = len(splits) // 2
+    if h == 0:
+        return None
+
+    def net(part):
+        d = sum(s.get("distance_m") or 0 for s in part)
+        if not d or any(s.get("elevation_gain_m") is None or s.get("elevation_loss_m") is None for s in part):
+            return None
+        return sum(s["elevation_gain_m"] - s["elevation_loss_m"] for s in part) / d
+
+    g1, g2 = net(splits[:h]), net(splits[-h:])
+    if g1 is None or g2 is None:
+        return None
+    return (g1, g2) if abs(g1 - g2) > HALF_GRADE_DIFF and min(g1, g2) < -0.01 else None
+
+
 def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     """A few deterministic sentences describing how the run unfolded. Complete splits only."""
     full = [(s, d) for s, d in zip(splits, details or [{}] * len(splits)) if s.complete and s.pace_s_per_km]
@@ -410,7 +430,10 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
                f"({fmt_pace(slowest.pace_s_per_km)}).")
     h = len(paces) // 2
     f = fade(adj)
-    if f > FADE_S_PER_KM:
+    if uneven_halves([{"distance_m": s.distance_m, "elevation_gain_m": s.elevation_gain_m,
+                       "elevation_loss_m": d.get("elevation_loss_m")} for s, d in full]):
+        out.append("The two halves climb differently (out and back on a hill), so their paces aren't compared.")
+    elif f > FADE_S_PER_KM:
         mean_first = halves(adj)[0]
         k = next((s.idx for (s, _), p in zip(full[h:], adj[h:]) if p > mean_first + FADE_S_PER_KM), None)
         out.append(f"You faded by about {f:.0f} s/km in the second half" + (f", from {unit} #{k + 1}." if k is not None else "."))

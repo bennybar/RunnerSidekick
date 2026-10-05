@@ -14,7 +14,8 @@ import java.util.concurrent.TimeUnit
 sealed class ApiException(message: String) : Exception(message) {
     class NotConfigured : ApiException("Backend URL or device token not set")
     class Unauthorized : ApiException("Device token rejected by the backend")
-    class Http(val code: Int) : ApiException("Backend returned HTTP $code")
+    /** [detail]: the server's own explanation ({"detail": "..."}), when it gave one. */
+    class Http(val code: Int, val detail: String? = null) : ApiException(detail ?: "Backend returned HTTP $code")
     class Network(cause: IOException) : ApiException("Backend unreachable: ${cause.message}")
     /** The backend answered, but the Garmin sync itself didn't finish well (or is still running). */
     class Sync(val detail: String) : ApiException(detail)
@@ -98,7 +99,10 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
                     when {
                         resp.code == 304 && known != null -> known.second
                         resp.code == 401 -> throw ApiException.Unauthorized()
-                        !resp.isSuccessful -> throw ApiException.Http(resp.code)
+                        !resp.isSuccessful -> throw ApiException.Http(resp.code, runCatching {
+                            (json.parseToJsonElement(resp.body.string()) as kotlinx.serialization.json.JsonObject)["detail"]
+                                ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content }
+                        }.getOrNull())
                         else -> resp.body.string().also { text ->
                             if (method == "GET") resp.header("ETag")?.let { etags[key] = it to text } ?: etags.remove(key)
                         }

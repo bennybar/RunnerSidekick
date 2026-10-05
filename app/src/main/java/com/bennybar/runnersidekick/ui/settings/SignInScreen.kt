@@ -68,7 +68,7 @@ fun SignInScreen() {
     val repo = (ctx.applicationContext as RunnerApp).repository
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf(repo.signInNote.value.also { repo.signInNote.value = null }) }
     var manual by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(BuildConfig.DEFAULT_BACKEND_URL) }
     var token by remember { mutableStateOf("") }

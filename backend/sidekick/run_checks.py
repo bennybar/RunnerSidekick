@@ -12,6 +12,9 @@ EASY_KINDS = {"easy", "long", "recovery"}
 EASY_SHARE = 0.7  # as in the weekly focus: an easy run spends at least 70% of its time below zone 3
 HARD_KINDS = {"tempo", "threshold", "intervals", "race"}
 STEADY_HARD_MAX = 0.3  # a steady aerobic run spends at most 30% of its time in zones 4–5
+FADE_OK, HOT_FADE_OK = 15, 25        # s/km a second half may slow and still read "ok"; looser on a warm, humid day
+DRIFT_GOOD, DRIFT_OK = 5, 10         # aerobic decoupling, %
+HOT_DRIFT_GOOD, HOT_DRIFT_OK = 8, 13  # heat adds a few points at the same effort
 # Garmin's own wording for its training effect scale
 TE_LABELS = [(1.0, "No effect"), (2.0, "Minor"), (3.0, "Maintaining"), (4.0, "Improving"), (5.0, "Highly improving"), (99, "Overreaching")]
 
@@ -34,14 +37,19 @@ def build(conn, source: str, report: dict) -> list[dict]:
     if len(splits) >= 4:
         from .analytics import running as rn
         fade = rn.fade([s.get("gap_pace_s_per_km") or s["pace_s_per_km"] for s in splits])
-        if fade < -rn.FADE_S_PER_KM:
+        odd = rn.uneven_halves(splits)
+        if odd:
+            out.append(check("pacing", "Pacing", f"Halves not comparable: they climb differently ({100 * odd[0]:+.1f}% vs "
+                                                 f"{100 * odd[1]:+.1f}% net grade)", "info"))
+        elif fade < -rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", f"Faster second half ({round(-fade)} s/km quicker)", "good"))
         elif fade <= rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", "Even all the way", "good"))
         else:
             hot = (report.get("heat") or {}).get("hot")
+            # Heat slows the same effort: on a warm, humid day the bar is looser, not gone
             out.append(check("pacing", "Pacing", f"Slowed {round(fade)} s/km in the second half" + (" (a warm, humid day)" if hot else ""),
-                             "ok" if fade <= 15 or hot else "low"))
+                             "ok" if fade <= (HOT_FADE_OK if hot else FADE_OK) else "low"))
 
     # Effort against what the run was meant to be
     zones = rp.hr_zones(conn)
@@ -80,13 +88,12 @@ def build(conn, source: str, report: dict) -> list[dict]:
     dc = report.get("decoupling") or {}
     if dc.get("eligible") and dc.get("decoupling_pct") is not None:
         d = dc["decoupling_pct"]
-        v = "good" if d <= 5 else "ok" if d <= 10 else "low"
         hot = (report.get("heat") or {}).get("hot")
-        if hot and v != "good":
-            # Heat raises heart rate at the same effort: on a hot, humid day drift isn't read as poor durability
-            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% (rose as you went; expected more on a warm, humid day)", "ok"))
-        else:
-            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'})", v))
+        # Heat raises heart rate at the same effort: on a hot, humid day the bars are looser, not gone
+        good, ok = (HOT_DRIFT_GOOD, HOT_DRIFT_OK) if hot else (DRIFT_GOOD, DRIFT_OK)
+        v = "good" if d <= good else "ok" if d <= ok else "low"
+        out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'}"
+                                                        f"{'; a warm, humid day raises it' if hot and d > DRIFT_GOOD else ''})", v))
 
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0

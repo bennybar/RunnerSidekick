@@ -332,6 +332,32 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Third review round (2026-10-05, v0.43.0)
+- Weather: on by default with a Settings switch (Settings → Weather). Off means nothing is sent to Open-Meteo; estimates
+  already kept stay. Each sync now looks up to 30 runs, the sync's own first and then recent runs (30 days) still
+  without weather, and the runs that gain weather get their reports rebuilt.
+- Heat loosens the bars instead of switching verdicts off: decoupling good ≤ 8% / ok ≤ 13% on a hot day (5 / 10
+  otherwise), a second-half fade ok up to 25 s/km (15). Trends leave out a run only when it's both humid (dew point
+  ≥ 18 °C) and 3 °C above your median, so a temperate runner's warm summer days stay in.
+- Out-and-back on a hill: when one half descends by more than 1% and the halves' net grades differ by over 1.5 points,
+  pacing says "halves not comparable" and neither the focus nor the run story calls it a fade (running-1.10).
+- Readiness (1.7): recovery on its own floors at 55 when the leftover is what this weekday usually leaves (the
+  morning after your weekly long run), 45 when it's more than that (still easy, not rest); the recovery line says
+  which. HRV scores 100 down to 10% below usual (then 3 points per %), resting HR up to +3 bpm (then 10 per bpm).
+  The basis text names the floors.
+- Strain (1.1): runs meant to be hard don't count as "felt harder"; a week of identical daily loads counts as
+  monotonous. Race: in the taper the long run comes down with the week instead of being held at your longest.
+- Server: report building locks per user, not globally; an activity list entry in an odd shape is skipped, not fatal;
+  activity date ranges are validated; a blank own-key header counts as the server's key. Rate limit: per address,
+  with a small bucket for rejected tokens, so junk tokens don't get buckets of their own. Garmin linking refuses when
+  Garmin doesn't say which account it is and turns network errors into a message. nginx no longer logs query strings.
+- App: Settings sheets stay open with your edits until the save succeeds and show the error inside; their fields
+  survive rotation; a new device token is checked before it replaces the working one. An expired session goes back
+  to sign-in with a note; 429 reads "Too many requests"; the server's own reason is shown (e.g. why Garmin couldn't
+  be linked). Members see a reconnect message for Garmin. The race strip shows the week's phase. Notification
+  switches show before the server's settings load. Cached copies still in use aren't pruned as old; an older build
+  installed over a newer cache starts it fresh.
+
 ## Open items closed (2026-10-05, v0.42.0)
 - Sign-ins expire after 90 days unused; `POST /v1/auth/logout` ends this device's sign-in, and Sign out calls it.
 - Rate limit: 300 requests a minute per device token, 30 per address without one (`RSK_RATE_LIMIT`, 0 = off).

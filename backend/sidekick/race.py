@@ -184,10 +184,13 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
     # Minutes: quality fixed, long ~30% of the target, the rest shared by easy days
     long_min = None
     if target_s:
-        # About 30% of the week, but never shorter than your longest run of the last four weeks
-        recent_runs = rp.activities(conn, source, (ws - timedelta(days=28)).isoformat(), (ws - timedelta(days=1)).isoformat())
-        longest = max((a["moving_s"] or 0 for a in recent_runs), default=0) / 60
-        long_min = max(round(0.3 * target_s / 60 / 5) * 5, round(longest / 5) * 5)
+        # About 30% of the week; while building, never shorter than your longest run of the last four weeks. In the
+        # taper and after it the long run comes down with everything else (holding it at the longest would undo the taper).
+        long_min = round(0.3 * target_s / 60 / 5) * 5
+        if wk_phase not in ("taper", "race_week", "recovery"):
+            recent_runs = rp.activities(conn, source, (ws - timedelta(days=28)).isoformat(), (ws - timedelta(days=1)).isoformat())
+            longest = max((a["moving_s"] or 0 for a in recent_runs), default=0) / 60
+            long_min = max(long_min, round(longest / 5) * 5)
     q_total = sum(QUALITY_MIN[k] for k in kinds.values() if k in QUALITY_MIN)
     n_easy = sum(1 for k in kinds.values() if k == "easy")
     easy_min = (max(25, round(((target_s / 60) - (long_min or 0) - q_total) / n_easy / 5) * 5) if target_s and n_easy else None)

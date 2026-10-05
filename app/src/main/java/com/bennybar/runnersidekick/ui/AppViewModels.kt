@@ -44,9 +44,13 @@ open class BaseVm(val repo: Repository) : ViewModel() {
             _offline.value = e is ApiException.Network
             _error.value = when (e) {
                 is ApiException.NotConfigured -> "Backend not set up. Open Settings to connect."
-                is ApiException.Unauthorized -> "The backend rejected this device's token. Enter a new one in Settings."
+                is ApiException.Unauthorized -> { repo.sessionExpired(); "Your session has ended. Please sign in again." }
                 is ApiException.Network -> "Can't reach the backend. Showing saved data."
-                is ApiException.Http -> "Backend error (${e.code}). Showing saved data."
+                is ApiException.Http -> when {
+                    e.code == 429 -> "Too many requests. Try again in a minute."
+                    e.code in 400..499 && e.detail != null -> e.detail  // the server's own words (e.g. why Garmin couldn't be linked)
+                    else -> "Backend error (${e.code}). Showing saved data."
+                }
                 is ApiException.Sync -> e.detail
             }
         } catch (e: kotlinx.serialization.SerializationException) {

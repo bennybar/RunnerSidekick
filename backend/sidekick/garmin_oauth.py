@@ -107,15 +107,20 @@ def complete(app_conn, state: str, code: str, client_id: str, client_secret: str
     created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
     if (datetime.now(timezone.utc) - created).total_seconds() > STATE_TTL_S:
         raise OAuthError("This sign-in link has expired. Please try again from the app.")
-    with _client() as c:
-        r = c.post(TOKEN_URL, data={"grant_type": "authorization_code", "client_id": client_id, "client_secret": client_secret,
-                                    "code": code, "code_verifier": row["code_verifier"], "redirect_uri": redirect_uri})
-        if r.status_code != 200:
-            raise OAuthError(f"Garmin rejected the sign-in (HTTP {r.status_code}).")
-        tok = r.json()
-        uid = c.get(USER_ID_URL, headers={"Authorization": f"Bearer {tok['access_token']}"})
-        garmin_user = uid.json().get("userId") if uid.status_code == 200 else None
-    if garmin_user and linked_elsewhere(garmin_user, row["user_id"]):
+    try:
+        with _client() as c:
+            r = c.post(TOKEN_URL, data={"grant_type": "authorization_code", "client_id": client_id, "client_secret": client_secret,
+                                        "code": code, "code_verifier": row["code_verifier"], "redirect_uri": redirect_uri})
+            if r.status_code != 200:
+                raise OAuthError(f"Garmin rejected the sign-in (HTTP {r.status_code}).")
+            tok = r.json()
+            uid = c.get(USER_ID_URL, headers={"Authorization": f"Bearer {tok['access_token']}"})
+            garmin_user = uid.json().get("userId") if uid.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, KeyError) as e:  # network, or an answer in an unexpected shape
+        raise OAuthError("Couldn't reach Garmin to finish the connection. Please try again.") from e
+    if not garmin_user:  # without it, "one Garmin account per user" can't be checked: don't link blind
+        raise OAuthError("Garmin didn't say which account this is. Please try again.")
+    if linked_elsewhere(garmin_user, row["user_id"]):
         raise OAuthError("This Garmin account is already linked to another Runner Sidekick account.")
     _store_tokens(user_dir_for(row["user_id"]), tok, {"garmin_user_id": garmin_user})
     return row["user_id"]

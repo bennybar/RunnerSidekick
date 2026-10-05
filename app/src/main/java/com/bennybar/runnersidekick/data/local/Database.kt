@@ -71,6 +71,9 @@ interface CacheDao {
     @Upsert
     suspend fun put(blob: CachedBlob)
 
+    @Query("UPDATE cached_blob SET fetchedAt = :at WHERE `key` = :key")
+    suspend fun touch(key: String, at: Long)
+
     @Query("DELETE FROM cached_blob WHERE mode != :mode")
     suspend fun deleteOtherModes(mode: String)
 
@@ -147,7 +150,9 @@ abstract class SidekickDb : RoomDatabase() {
 
     companion object {
         fun create(context: Context): SidekickDb =
-            Room.databaseBuilder(context, SidekickDb::class.java, "sidekick.db").addMigrations(MIGRATION_1_2).build()
+            Room.databaseBuilder(context, SidekickDb::class.java, "sidekick.db").addMigrations(MIGRATION_1_2)
+                .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)  // an older build over a newer cache: start it fresh
+                .build()
 
         /** v2: check-ins get an owning account. */
         val MIGRATION_1_2 = object : Migration(1, 2) {

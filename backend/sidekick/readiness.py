@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.6"  # 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.7"  # 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -25,6 +25,10 @@ RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining
 CAP_ABOVE_LOWEST = 25  # the score is never more than 25 points above its weakest part (40 let 82 "High" through the
                        # morning after a threshold run with recovery at 45)
 SINGLE_SIGNAL_FLOOR = 50  # the lowest one weak overnight reading alone can take the score (easy, not rest)
+ROUTINE_FLOOR, EXCEPTIONAL_FLOOR = 55, 45  # recovery alone: leftover usual after this weekday (the weekly long run) / more
+ROUTINE_RATIO = 1.25  # leftover up to 1.25× what the same weekday usually shows counts as routine
+HRV_FREE_PCT, HRV_SLOPE = -10, 3  # HRV down to 10% below usual scores 100 (nightly noise); 3 points per % below that
+RHR_FREE_BPM, RHR_SLOPE = 3, 10   # resting HR up to 3 bpm above usual scores 100; 10 points per bpm above that
 GARMIN_HOLD_HOURS = 24  # Garmin's recovery timer at or above this holds intensity back (a cross-check, not in the score)
 HARD_SHARE = 0.3
 OVERNIGHT = {"hrv", "resting_hr", "sleep"}
@@ -135,11 +139,13 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
     # and that's your normal. Only what's above it counts, so the day after a long run or a weekly hard session shows as
     # still recovering (it is) — and alone it can only hold the day to easy (SINGLE_SIGNAL_FLOOR), never to rest.
     usual = median(left(at - timedelta(days=k)) for k in range(1, 29))
+    same_day = median(left(at - timedelta(days=7 * k)) for k in range(1, 5))  # this weekday, this time, the last 4 weeks
     now = left(at)
     fatigue = max(0.0, now - usual) / typical if typical else 0
     days = (local - ends[-1][0].astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()).days
     return {"ratio": acute / chronic if chronic else 1.0, "fatigue": fatigue, "acute": acute, "chronic": chronic, "typical": typical,
             "left_now": now / typical if typical else 0, "left_usual": usual / typical if typical else 0,
+            "left_same_day": same_day / typical if typical else 0, "routine": same_day > 0 and now <= ROUTINE_RATIO * same_day,
             "last_when": "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago" if days < 7 else None}
 
 
@@ -169,9 +175,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     base, against = usual(f, today) if v is not None else (None, "")
     if base:
         pct = 100 * (v - base) / base
-        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms", "points": round(100 if pct >= -5 else clamp(100 + 4 * (pct + 5))),
-                      "say": "Normal for you" if pct >= -5 else f"Lower than usual ({pct:.0f}%)",
-                      "note": f"{pct:+.0f}% vs {against} {round(base)} ms" + (f" · {when}" if when else "") + "; 5% below or better scores 100"})
+        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms", "points": round(100 if pct >= HRV_FREE_PCT else clamp(100 + HRV_SLOPE * (pct - HRV_FREE_PCT))),
+                      "say": "Normal for you" if pct >= HRV_FREE_PCT else f"Lower than usual ({pct:.0f}%)",
+                      "note": f"{pct:+.0f}% vs {against} {round(base)} ms" + (f" · {when}" if when else "") +
+                              f"; up to {-HRV_FREE_PCT}% below scores 100, then {HRV_SLOPE} points per %"})
     else:
         parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms" if v else None, "points": None, "say": "Not known yet",
                       "note": "Needs a few nights to know your usual"})
@@ -182,9 +189,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     if base:
         d = v - base
         parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm",
-                      "points": round(100 if d <= 1 else clamp(100 - 12 * (d - 1))),
-                      "say": "Normal for you" if d <= 1 else f"Higher than usual (+{d:.0f} bpm)",
-                      "note": f"{d:+.0f} bpm vs {against} {round(base)}" + (f" · {when}" if when else "") + "; each bpm over +1 costs 12 points"})
+                      "points": round(100 if d <= RHR_FREE_BPM else clamp(100 - RHR_SLOPE * (d - RHR_FREE_BPM))),
+                      "say": "Normal for you" if d <= RHR_FREE_BPM else f"Higher than usual (+{d:.0f} bpm)",
+                      "note": f"{d:+.0f} bpm vs {against} {round(base)}" + (f" · {when}" if when else "") +
+                              f"; each bpm over +{RHR_FREE_BPM} costs {RHR_SLOPE} points"})
     else:
         parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm" if v else None, "points": None,
                       "say": "Not known yet",
@@ -213,7 +221,9 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         parts.append({"id": "recovery", "title": "Recovery", "value": f"{round(100 * f)}% of a typical run above usual",
                       "points": round(clamp(100 - RECOVERY_SLOPE * f)),
                       "say": ("Recovered" if f < 0.15 else "Mostly recovered" if f < 0.4 else "Still recovering" if f < 0.8
-                              else "Tired from recent runs") + (f" (last run {when})" if when else ""),
+                              else "Tired from recent runs")
+                             + ("" if f < 0.15 else ", as usual after this weekday" if tl.get("routine") else ", more than usual for this weekday")
+                             + (f" (last run {when})" if when else ""),
                       "note": (f"Effort of recent runs still left after fading over about 2 days ({round(100 * tl['left_now'])}% of a "
                                f"typical run), above what's usual for you at this time ({round(100 * tl['left_usual'])}%)")})
     else:
@@ -239,8 +249,12 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         # fading) holds the day to easy, never to rest: alone it's likely noise or simply normal recovery. Two weak
         # parts together cap as usual.
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 60]
-        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT | {"recovery"}:
+        # Recovery alone: what this weekday usually leaves (the morning after the weekly long run) floors higher than
+        # leftover beyond that, which still stays easy, not rest.
+        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT:
             cap = max(cap, SINGLE_SIGNAL_FLOOR)
+        elif len(weak) == 1 and weak[0]["id"] == "recovery":
+            cap = max(cap, ROUTINE_FLOOR if tl.get("routine") else EXCEPTIONAL_FLOOR)
         if out["score"] > cap:
             out["score"], out["capped_by"] = cap, next(p["id"] for p in parts if p.get("points") == low)
         out["label"] = label(out["score"])
@@ -253,8 +267,9 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
             out.update(score=min(out["score"], PAIN_CAP), label="Low", headline="Take it easy or rest", held_back_by="What you reported")
     out.update(algorithm_version=READINESS_VERSION, garmin=garmin_check(conn, source, today, at),
                basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 25 points "
-                     "above it. Garmin's recovery timer is a separate cross-check: while it shows a day or more, nothing harder "
-                     "than easy. A guide, not a medical score.")
+                     "above it, but one weak part on its own never takes it below easy (50 for a night's reading; 55 for recovery "
+                     "usual after this weekday, 45 beyond that). Two weak parts cap as usual. Garmin's recovery timer is a separate "
+                     "cross-check, not in the score: while it shows a day or more, nothing harder than easy. A guide, not a medical score.")
     return out
 
 

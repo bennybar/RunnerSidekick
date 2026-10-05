@@ -229,7 +229,7 @@ def pacing_pattern(runs: list[RunData]) -> dict:
                        f"Needs {MIN_RUNS} steady runs with at least 4 full splits; {len(data)} so far.", n=len(data), method="split comparison")
     pos = sum(1 for _, a, b, _, _ in data if b > a + rn.FADE_S_PER_KM)
     neg = sum(1 for _, a, b, _, _ in data if b < a - rn.FADE_S_PER_KM)
-    fast_start = sum(1 for _, _, _, f, rest in data if f < rest - 5)
+    fast_start = sum(1 for _, _, _, f, rest in data if f < rest - rn.FADE_S_PER_KM)
     n = len(data)
     fade = median(b - a for _, a, b, _, _ in data)
     method = ("Complete splits only, recorded pace. Positive split = last half >5 s/km slower than the first (the same rule as "

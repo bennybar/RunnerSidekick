@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.verticalScroll
@@ -115,15 +116,20 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     fun loadRemote() = launchIo { remote.value = repo.remoteSettings() }
 
-    fun saveBackend(url: String, token: String) = launchIo {
+    fun saveBackend(url: String, token: String, onSaved: () -> Unit) = launchIo {
+        // A new token is checked before it replaces the working one
+        if (token.isNotBlank()) repo.checkToken(url, token)?.let { throw com.bennybar.runnersidekick.data.remote.ApiException.Http(401, it) }
         repo.settings.setBackend(url, token)
+        onSaved()
         repo.refreshAll()
         remote.value = repo.remoteSettings()
         message.value = "Connected"
     }
 
-    fun saveRemote(s: SettingsDto) = launchIo {
+    /** [onSaved] runs once the server has the change: a sheet stays open (with its edits) when saving fails. */
+    fun saveRemote(s: SettingsDto, onSaved: () -> Unit = {}) = launchIo {
         remote.value = repo.saveRemoteSettings(s)
+        onSaved()
         repo.refreshAll()
         message.value = "Saved"
     }
@@ -173,7 +179,8 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
         vm.setNotifications(granted)
         if (!granted) vm.message.value = "Notifications permission denied"
     }
-    LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
+    LaunchedEffect(error, open) { if (open == null) error?.let { snackbar.showSnackbar(it); vm.clearError() } }
+    val close = { open = null; vm.clearError() }
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -189,8 +196,11 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                 item {
                     Group {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
-                            supporting = if (st == "error") (status?.value?.connection?.detail ?: "The last sync failed; it retries on its own.")
-                                else "The server's Garmin sign-in has expired and has to be renewed there. Syncing is paused until then.",
+                            supporting = when {
+                                st == "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
+                                me?.value?.role == "member" -> "Your Garmin connection has to be renewed: tap Connect next to Garmin below. Syncing is paused until then."
+                                else -> "The server's Garmin sign-in has expired and has to be renewed there. Syncing is paused until then."
+                            },
                             icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
                     }
                 }
@@ -240,6 +250,30 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     }
                 }
             }
+            item {
+                Group(title = "Notifications") {
+                    row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
+                        icon = Icons.Outlined.Notifications, iconShape = MaterialShapes.Sunny,
+                        trailing = {
+                            Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
+                                if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
+                            })
+                        })
+                    row("Background refresh", supporting = if (local?.notificationsEnabled == true)
+                            "Already on with notifications (about hourly)."
+                        else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
+                        icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
+                        trailing = {
+                            Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
+                                enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
+                        })
+                    remote?.let { r ->
+                        row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
+                            "or at the end of the window as provisional", icon = Icons.Outlined.Schedule, iconShape = MaterialShapes.Cookie4Sided,
+                            onClick = { open = "window" })
+                    }
+                }
+            }
             remote?.let { r ->
                 item {
                     Group(title = "Training") {
@@ -260,28 +294,6 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     }
                 }
                 item {
-                    Group(title = "Notifications") {
-                        row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
-                            icon = Icons.Outlined.Notifications, iconShape = MaterialShapes.Sunny,
-                            trailing = {
-                                Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
-                                    if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
-                                })
-                            })
-                        row("Background refresh", supporting = if (local?.notificationsEnabled == true)
-                                "Already on with notifications (about hourly)."
-                            else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
-                            icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
-                            trailing = {
-                                Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
-                                    enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
-                            })
-                        row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
-                            "or at the end of the window as provisional", icon = Icons.Outlined.Schedule, iconShape = MaterialShapes.Cookie4Sided,
-                            onClick = { open = "window" })
-                    }
-                }
-                item {
                     val ownKey = local?.hasOwnAiKey == true
                     Group(title = "AI coach (optional)") {
                         row("AI coach and summaries", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
@@ -298,6 +310,14 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                             iconShape = MaterialShapes.Cookie4Sided, onClick = { open = "key" })
                         row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
                             icon = Icons.Outlined.Info, iconShape = MaterialShapes.Circle, onClick = { open = "ai_info" })
+                    }
+                }
+                item {
+                    Group(title = "Weather") {
+                        row("Weather for your runs", icon = Icons.Outlined.WbSunny, iconShape = MaterialShapes.Sunny,
+                            supporting = "Temperature and humidity, so hot, humid runs are read fairly. Sends each outdoor run's start area " +
+                                "(rounded to about 1 km) and time to Open-Meteo, nothing else. Off: nothing is sent; estimates already kept stay.",
+                            trailing = { Switch(checked = r.weatherEnabled, enabled = !busy, onCheckedChange = { vm.saveRemote(r.copy(weatherEnabled = it)) }) })
                     }
                 }
             }
@@ -328,17 +348,17 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     }
     val r = remote
     when (open) {
-        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, onClose = { open = null }) { url, token ->
-            vm.saveBackend(url, token); open = null }
-        "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = { open = null }) {
+        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, error, onClose = close) { url, token ->
+            vm.saveBackend(url, token, close) }
+        "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = close) {
             ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
-        "training" -> r?.let { TrainingSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
-        "race" -> r?.let { RaceSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
-        "about" -> r?.let { AboutYouSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
-        "window" -> r?.let { WindowSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
-        "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, onClose = { open = null }) { m -> vm.saveRemote(it.copy(aiModel = m)); open = null } }
-        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = { open = null }) { k -> vm.setOwnAiKey(k); open = null }
-        "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = { open = null }) {
+        "training" -> r?.let { TrainingSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
+        "race" -> r?.let { RaceSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
+        "about" -> r?.let { AboutYouSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
+        "window" -> r?.let { WindowSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
+        "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, onClose = close) { m -> vm.saveRemote(it.copy(aiModel = m), close) } }
+        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); open = null }
+        "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = close) {
             Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per sync, never for older " +
                 "history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. This uses the server's key; with only " +
                 "your own key, input is written when you ask.", style = MaterialTheme.typography.bodyMedium)
@@ -419,7 +439,7 @@ private fun ThemePicker(theme: String?, appearance: String?, onTheme: (com.benny
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SectionSheet(title: String, dirty: Boolean, canSave: Boolean, onSave: () -> Unit, onClose: () -> Unit,
-                         content: @Composable ColumnScope.() -> Unit) {
+                         error: String? = null, content: @Composable ColumnScope.() -> Unit) {
     var ask by remember { mutableStateOf(false) }
     val dirtyNow by androidx.compose.runtime.rememberUpdatedState(dirty)
     val state = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { v ->
@@ -430,6 +450,7 @@ private fun SectionSheet(title: String, dirty: Boolean, canSave: Boolean, onSave
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(title, style = MaterialTheme.typography.headlineSmall)
             content()
+            error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
             if (canSave || dirty) Button(onClick = onSave, enabled = canSave && dirty, modifier = Modifier.fillMaxWidth()) {
                 Text(if (dirty) "Save" else "Saved")
             }
@@ -450,11 +471,11 @@ private fun Label(text: String, hint: String? = null) {
 }
 
 @Composable
-private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, onClose: () -> Unit, onSave: (String, String) -> Unit) {
-    var url by remember { mutableStateOf(current) }
+private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (String, String) -> Unit) {
+    var url by rememberSaveable { mutableStateOf(current) }
     var token by remember { mutableStateOf("") }
     SectionSheet("Server", dirty = url != current || token.isNotBlank(), canSave = !busy && url.isNotBlank() && (token.isNotBlank() || hasToken),
-        onSave = { onSave(url, token) }, onClose = onClose) {
+        onSave = { onSave(url, token) }, onClose = onClose, error = error) {
         OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
         OutlinedTextField(token, { token = it }, label = { Text(if (hasToken) "Device token (saved, enter to replace)" else "Device token") },
@@ -465,19 +486,19 @@ private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, onCl
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun TrainingSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
-    var days by remember { mutableStateOf(r.runningDays.toSet()) }
-    var goalType by remember { mutableStateOf(r.goalType) }
-    var goal by remember { mutableStateOf(r.goal ?: "") }
-    var minutes by remember { mutableStateOf(r.availableMinutes?.toString() ?: "") }
-    var weekStart by remember { mutableStateOf(r.weekStartDay) }
-    var zones by remember { mutableStateOf(r.hrZoneSource) }
-    var tz by remember { mutableStateOf(r.timezone) }
+private fun TrainingSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var days by rememberSaveable { mutableStateOf(r.runningDays.toSet()) }
+    var goalType by rememberSaveable { mutableStateOf(r.goalType) }
+    var goal by rememberSaveable { mutableStateOf(r.goal ?: "") }
+    var minutes by rememberSaveable { mutableStateOf(r.availableMinutes?.toString() ?: "") }
+    var weekStart by rememberSaveable { mutableStateOf(r.weekStartDay) }
+    var zones by rememberSaveable { mutableStateOf(r.hrZoneSource) }
+    var tz by rememberSaveable { mutableStateOf(r.timezone) }
     val phoneTz = java.time.ZoneId.systemDefault().id
     val tzOk = runCatching { java.time.ZoneId.of(tz.trim()) }.isSuccess
     val edited = r.copy(runningDays = days.sorted(), goalType = goalType, goal = goal.ifBlank { null }, availableMinutes = minutes.toIntOrNull(),
         weekStartDay = weekStart, hrZoneSource = zones, timezone = tz.trim())
-    SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose) {
+    SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose, error = error) {
         Label("Running days")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             DAYS.forEachIndexed { i, d -> FilterChip(i in days, { days = if (i in days) days - i else days + i }, { Text(d) }) }
@@ -510,20 +531,20 @@ private fun TrainingSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, on
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun RaceSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
-    var dist by remember { mutableStateOf(r.raceDistance) }
-    var date by remember { mutableStateOf(r.raceDate) }
-    var name by remember { mutableStateOf(r.raceName ?: "") }
+private fun RaceSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var dist by rememberSaveable { mutableStateOf(r.raceDistance) }
+    var date by rememberSaveable { mutableStateOf(r.raceDate) }
+    var name by rememberSaveable { mutableStateOf(r.raceName ?: "") }
     val t0 = r.raceTargetS ?: 0
-    var h by remember { mutableStateOf(if (r.raceTargetS != null) "${t0 / 3600}" else "") }
-    var m by remember { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 3600 / 60) else "") }
-    var s by remember { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 60) else "") }
+    var h by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "${t0 / 3600}" else "") }
+    var m by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 3600 / 60) else "") }
+    var s by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 60) else "") }
     var picking by remember { mutableStateOf(false) }
     val target = if (h.isBlank() && m.isBlank() && s.isBlank()) null
         else ((h.toIntOrNull() ?: 0) * 3600 + (m.toIntOrNull() ?: 0) * 60 + (s.toIntOrNull() ?: 0)).takeIf { (m.toIntOrNull() ?: 0) < 60 && (s.toIntOrNull() ?: 0) < 60 && it in 600..36000 }
     val targetOk = (h.isBlank() && m.isBlank() && s.isBlank()) || target != null
     val edited = r.copy(raceDistance = dist, raceDate = date, raceName = name.trim().ifBlank { null }, raceTargetS = target)
-    SectionSheet("Race", dirty = edited != r, canSave = !busy && targetOk && ((date == null) == (dist == null)), onSave = { onSave(edited) }, onClose = onClose) {
+    SectionSheet("Race", dirty = edited != r, canSave = !busy && targetOk && ((date == null) == (dist == null)), onSave = { onSave(edited) }, onClose = onClose, error = error) {
         Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Label("Distance")
@@ -552,12 +573,12 @@ private fun RaceSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun AboutYouSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
-    var sex by remember { mutableStateOf(r.profileSex) }
-    var birth by remember { mutableStateOf(r.profileBirthDate) }
+private fun AboutYouSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var sex by rememberSaveable { mutableStateOf(r.profileSex) }
+    var birth by rememberSaveable { mutableStateOf(r.profileBirthDate) }
     var picking by remember { mutableStateOf(false) }
     val edited = r.copy(profileSex = sex, profileBirthDate = birth)
-    SectionSheet("About you", dirty = edited != r, canSave = !busy, onSave = { onSave(edited) }, onClose = onClose) {
+    SectionSheet("About you", dirty = edited != r, canSave = !busy, onSave = { onSave(edited) }, onClose = onClose, error = error) {
         val det = r.profileDetected
         Text(if (det?.sex != null || det?.birthDate != null) "From Garmin: ${listOfNotNull(det.sex, det.birthDate).joinToString(", ")}. Set these only to override Garmin."
             else "Garmin didn't provide these; set them to see age and sex comparisons.",
@@ -576,12 +597,12 @@ private fun AboutYouSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, on
 }
 
 @Composable
-private fun WindowSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
-    var start by remember { mutableStateOf(r.morningWindowStart) }
-    var end by remember { mutableStateOf(r.morningWindowEnd) }
+private fun WindowSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var start by rememberSaveable { mutableStateOf(r.morningWindowStart) }
+    var end by rememberSaveable { mutableStateOf(r.morningWindowEnd) }
     var picking by remember { mutableStateOf<String?>(null) }
     val edited = r.copy(morningWindowStart = start, morningWindowEnd = end)
-    SectionSheet("Morning window", dirty = edited != r, canSave = !busy && start < end, onSave = { onSave(edited) }, onClose = onClose) {
+    SectionSheet("Morning window", dirty = edited != r, canSave = !busy && start < end, onSave = { onSave(edited) }, onClose = onClose, error = error) {
         Text("The briefing is sent once your sleep has synced, or at the end of the window as provisional.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

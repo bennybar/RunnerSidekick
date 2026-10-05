@@ -110,7 +110,7 @@ def cmd_sync(cfg, loop: bool) -> int:
         res = run_sync(conn, c, today, cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days)
         if not c.synthetic:
             from . import weather
-            weather.for_new_runs(conn, c.source, res.changed_activities)
+            res.changed_activities = list(dict.fromkeys(res.changed_activities + weather.for_new_runs(conn, c.source, res.changed_activities)))
         rp.regenerate(conn, c.source, c.synthetic, res.changed_dates, res.changed_activities, today)
         auto_run_ai(cfg, conn, c.source, res.changed_activities, today)
         cp = one(conn.sync_checkpoint, {"source": c.source, "stream": "days"})

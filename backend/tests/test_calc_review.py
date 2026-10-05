@@ -452,7 +452,9 @@ def test_every_fade_uses_the_same_threshold():
     from sidekick import focus
     from sidekick.analytics import insights as ins_mod
     assert focus.FADE_TARGET_S == rn.FADE_S_PER_KM
-    assert "5 s/km" in ins_mod.pacing_pattern.__code__.co_consts[-1] or True  # the insight reads rn.FADE_S_PER_KM directly
+    import inspect
+    src = inspect.getsource(ins_mod.pacing_pattern)
+    assert "rn.FADE_S_PER_KM" in src and "+ 5" not in src and "- 5" not in src  # the insight reads the one threshold, no copy
 
 
 def test_absurd_dates_are_refused_before_anything_changes(tmp_path):
@@ -478,7 +480,13 @@ def test_a_hot_humid_run_is_said_to_be_hot_and_its_drift_isnt_poor_durability():
     assert "warm and humid" in cond["say"]
     r["decoupling"].update(eligible=True, decoupling_pct=8.0)
     drift = next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "drift")
-    assert drift["verdict"] == "ok" and "warm, humid" in drift["say"]  # not "low" on a hot day
+    assert drift["verdict"] == "good" and "warm, humid" in drift["say"]  # heat loosens the bars: 8% is fine when hot
+    for pct, want in ((11.0, "ok"), (14.0, "low")):  # ...but they don't vanish
+        r["decoupling"].update(decoupling_pct=pct)
+        assert next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "drift")["verdict"] == want
+    r["heat"] = None
+    r["decoupling"].update(decoupling_pct=11.0)
+    assert next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "drift")["verdict"] == "low"
     assert weather.heat({"temperature_2m": 18.0, "dew_point_2m": 9.0})["hot"] is False
 
 
@@ -576,3 +584,134 @@ def test_rate_limit(tmp_path, monkeypatch):
     h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
     codes = [c.get("/v1/me", headers=h).status_code for _ in range(7)]
     assert codes[:5] == [200] * 5 and codes[5] == 429
+
+
+def test_a_temperate_summer_stays_in_the_trends():
+    from sidekick import weather
+    from sidekick.db import connect, user_db_name
+    conn = connect(user_db_name(33, "fixture"))
+    conn.run_weather.drop()
+    for i, dew in enumerate([8, 9, 10, 9, 11, 8, 15]):  # 15 °C is warm for this runner but not humid enough to matter
+        conn.run_weather.insert_one({"source_id": f"r{i}", "checked_at": utc_now(), "weather": {"temperature_2m": 24.0, "dew_point_2m": float(dew)}})
+    assert weather.unusually_hot(conn) == set()
+
+
+def test_weather_switch_and_catch_up():
+    from sidekick import weather
+    conn = synced()
+    conn.run_weather.drop()
+    runs = rp.activities(conn, "fixture", "2000-01-01", "9999-12-31")
+    for a in runs:  # give every run a start position
+        conn.raw_payload.update_one({"kind": "activity_summary", "source_key": a["source_id"]},
+                                    {"$set": {"payload.startLatitude": 32.1, "payload.startLongitude": 34.8}}, upsert=True)
+    calls = []
+
+    class R:
+        def __init__(self, day):
+            self.day = day
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"hourly": {"time": [f"{self.day}T{h:02d}:00" for h in range(24)], "temperature_2m": [20.0] * 24,
+                               "dew_point_2m": [12.0] * 24}}
+
+    def fetch(url, params, timeout):
+        calls.append(params)
+        return R(params["start_date"])
+    from sidekick.db import set_setting
+    set_setting(conn, "weather_enabled", False)
+    assert weather.for_new_runs(conn, "fixture", [runs[-1]["source_id"]], fetch) == [] and not calls  # off: nothing is sent
+    assert weather.for_run(conn, runs[-1], fetch) is None and not calls
+    set_setting(conn, "weather_enabled", True)
+    old = runs[0]["source_id"]  # a sync's own runs come first, however old
+    got = weather.for_new_runs(conn, "fixture", [old], fetch)
+    assert got[0] == old and len(got) == len(calls) <= weather.SYNC_LOOKUPS
+    recent = {a["source_id"] for a in runs if a["local_date"] >= (date.today() - timedelta(days=weather.CATCH_UP_DAYS)).isoformat()}
+    assert recent <= set(got) or len(got) == weather.SYNC_LOOKUPS  # recent runs without weather are caught up too
+    calls.clear()
+    assert weather.for_new_runs(conn, "fixture", [old], fetch) == [] and not calls  # nothing asked twice
+
+
+def test_an_out_and_back_on_a_hill_isnt_read_as_a_fade(monkeypatch):
+    from sidekick import run_checks
+    monkeypatch.setattr(rp, "hr_zones", lambda conn: None)
+    up = [{"idx": i, "distance_m": 1000.0, "pace_s_per_km": 330.0, "gap_pace_s_per_km": 330.0, "complete": True,
+           "elevation_gain_m": 2.0, "elevation_loss_m": 25.0} for i in range(4)]  # down the hill and easy...
+    back = [{"idx": i + 4, "distance_m": 1000.0, "pace_s_per_km": 360.0, "gap_pace_s_per_km": 350.0, "complete": True,
+             "elevation_gain_m": 25.0, "elevation_loss_m": 2.0} for i in range(4)]  # ...then back up at the same heart rate
+    assert rn.uneven_halves(up + back) is not None
+    report = {"splits": up + back, "activity": {"source_id": "x", "elevation_gain_m": 108.0}, "intent": {}}
+    pacing = next(c for c in run_checks.build(None, "fixture", report) if c["id"] == "pacing")
+    assert pacing["verdict"] == "info" and "not comparable" in pacing["say"]
+    flat = [{**s, "elevation_gain_m": 3.0, "elevation_loss_m": 3.0} for s in up + back]
+    assert rn.uneven_halves(flat) is None
+    assert next(c for c in run_checks.build(None, "fixture", {**report, "splits": flat}) if c["id"] == "pacing")["verdict"] == "low"
+
+
+def test_a_hot_day_loosens_the_pacing_bar(monkeypatch):
+    from sidekick import run_checks
+    monkeypatch.setattr(rp, "hr_zones", lambda conn: None)
+    sp = [{"idx": i, "distance_m": 1000.0, "pace_s_per_km": 330.0 + (20 if i >= 2 else 0), "complete": True} for i in range(4)]
+    rep = {"splits": sp, "activity": {"source_id": "x"}, "intent": {}}
+    verdict = lambda r: next(c for c in run_checks.build(None, "fixture", r) if c["id"] == "pacing")["verdict"]  # noqa: E731
+    assert verdict(rep) == "low" and verdict({**rep, "heat": {"hot": True, "say": "30°C"}}) == "ok"
+    sp2 = [{**s, "pace_s_per_km": 330.0 + (30 if s["idx"] >= 2 else 0)} for s in sp]
+    assert verdict({**rep, "splits": sp2, "heat": {"hot": True, "say": "30°C"}}) == "low"  # looser, not gone
+
+
+def test_weekly_long_run_leftover_is_routine_an_unusual_one_isnt(monkeypatch):
+    from sidekick import readiness as rd
+    at = datetime(2026, 10, 2, 8, tzinfo=timezone.utc)
+    monkeypatch.setattr(rd, "run_load", lambda conn, a, floors: a["load"])
+    monkeypatch.setattr(rd.rp, "get_setting", lambda conn, k, d: d)
+    weekly = {k: 180.0 for k in range(1, 61, 7)}  # a big run every week, yesterday included
+    monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: daily(at, extra=weekly))
+    tl = rd.training_load(None, "x", at, None)
+    assert tl["fatigue"] > 0.3 and tl["routine"]
+    monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: daily(at, extra={1: 300.0}))
+    assert not rd.training_load(None, "x", at, None)["routine"]
+
+
+def test_strain_leaves_hard_sessions_out_of_felt_harder_and_reads_identical_days_as_monotony(monkeypatch):
+    from sidekick import strain
+    today = date(2026, 10, 5)
+    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn: {"floors": [100, 120, 140, 160, 175]})
+    monkeypatch.setattr("sidekick.readiness.training_load", lambda conn, s, at, z: {"ratio": 1.0})
+    monkeypatch.setattr("sidekick.readiness.moment", lambda conn, d: None)
+    monkeypatch.setattr("sidekick.focus.zone_shares", lambda conn, a, f: {"hard": 0.05, "easy": 0.9})
+    monkeypatch.setattr(strain.wx, "unusually_hot", lambda conn: set())
+
+    def conn_with(kind):
+        class C:
+            class _I:
+                def find_one(self, *a, **k):
+                    return {"kind": kind, "effort": "hard"}
+            run_intent = _I()
+
+            class _E:
+                def find_one(self, *a, **k):
+                    return None
+            activity_effort = _E()
+        return C()
+    # Every day the same load this week, heavier than before: monotony with no spread at all
+    runs = [{"id": k, "source_id": f"s{k}", "local_date": (today - timedelta(days=d)).isoformat(), "distance_m": 8000.0, "moving_s": 2640.0,
+             "elapsed_s": 2640.0, "avg_hr": 150.0, "avg_cadence_spm": 170.0, "load": 80.0 if d <= 6 else 30.0}
+            for k, d in enumerate(range(33, -1, -1)) if d <= 6 or d % 3 == 0]
+    monkeypatch.setattr(strain.rp, "activities", lambda conn, s, a, b: runs)
+    monkeypatch.setattr("sidekick.readiness.run_load", lambda conn, a, floors: a["load"])
+    ids = {s["id"] for s in strain.build(conn_with("easy"), "x", today)["signals"]}
+    assert ids == {"monotony", "felt"}
+    assert strain.build(conn_with("tempo"), "x", today) is None  # tempo is meant to feel hard: only monotony is left
+
+
+def test_junk_tokens_dont_get_a_bucket_of_their_own(tmp_path, monkeypatch):
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    monkeypatch.setenv("RSK_RATE_LIMIT", "100")
+    c = client(tmp_path)
+    good = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    codes = [c.get("/v1/me", headers={"Authorization": f"Bearer junk{i}"}).status_code for i in range(10)]
+    assert codes == [401] * 10
+    assert c.get("/v1/me", headers=good).status_code == 429  # 10 rejected tries from this address: it waits, whatever the token

@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.6"  # 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.7"  # 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -368,7 +368,20 @@ def suggestion_text(rec: dict, plan: dict | None = None, easy_ceiling: float | N
 
 # ---------------------------------------------------------------- post-run report
 
-_class_cache: dict[tuple, dict] = {}
+class Bounded(dict):
+    """A dict that forgets its oldest entries past a size (the per-run analysis caches would otherwise grow forever)."""
+    def __init__(self, size: int = 4000):
+        super().__init__()
+        self.size = size
+
+    def __setitem__(self, k, v):
+        if k not in self and len(self) >= self.size:
+            for old in list(self)[: self.size // 4]:
+                del self[old]
+        super().__setitem__(k, v)
+
+
+_class_cache: dict[tuple, dict] = Bounded()
 
 
 def run_key(conn, a: dict) -> tuple:
@@ -388,7 +401,7 @@ def run_analysis(conn, a: dict) -> dict:
     return _class_cache[key]
 
 
-_effort_cache: dict[tuple, dict] = {}
+_effort_cache: dict[tuple, dict] = Bounded()
 
 EFFORT_LABELS = {"1k": "1 km", "5k": "5 km", "10k": "10 km", "half": "half marathon"}
 
@@ -664,7 +677,9 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
         paces = [d.get("gap_pace_s_per_km") or s.pace_s_per_km for s, d in pairs]
         first = rn.halves(paces)[0]
         fade = rn.fade(paces)
-        if fade > rn.FADE_S_PER_KM:
+        odd = rn.uneven_halves([{"distance_m": s.distance_m, "elevation_gain_m": s.elevation_gain_m,
+                                 "elevation_loss_m": d.get("elevation_loss_m")} for s, d in pairs])
+        if fade > rn.FADE_S_PER_KM and not odd:
             return (f"You faded by about {fade:.0f} s/km (hill-adjusted). Next time, try starting 5–10 s/km slower than "
                     f"{fmt_pace(first)} and see if the second half holds.")
     if zones and sum(1 for z in zones if z >= 4) >= 0.8 * len(zones):
