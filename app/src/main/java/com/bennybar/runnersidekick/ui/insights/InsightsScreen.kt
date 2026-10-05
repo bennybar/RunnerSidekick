@@ -75,6 +75,7 @@ import com.bennybar.runnersidekick.ui.factory
 import com.bennybar.runnersidekick.ui.theme.accentFor
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -273,15 +274,22 @@ private fun MethodSheet(i: Insight, onState: (String?) -> Unit, onDismiss: () ->
     }
 }
 
+// Chart data is read defensively: a missing or reshaped field draws less (or nothing), never crashes the screen
+internal fun JsonObject.list(k: String): List<kotlinx.serialization.json.JsonElement> = (this[k] as? kotlinx.serialization.json.JsonArray).orEmpty()
+internal fun kotlinx.serialization.json.JsonElement.str(): String? = (this as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+internal fun kotlinx.serialization.json.JsonElement.dbl(): Double? = (this as? kotlinx.serialization.json.JsonPrimitive)?.doubleOrNull
+internal fun kotlinx.serialization.json.JsonElement.obj(): JsonObject? = this as? JsonObject
+
 /** Small purpose-built visuals for insight types. Every value is also stated in the card text. */
 @Composable
 fun InsightChart(chart: JsonObject, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     when (chart["type"]?.jsonPrimitive?.content) {
         "stacked_share" -> {
-            val labels = chart["labels"]!!.jsonArray.map { it.jsonPrimitive.content }
-            val values = chart["values"]!!.jsonArray.map { it.jsonPrimitive.doubleOrNull ?: 0.0 }
             val colors = listOf(cs.primary.copy(alpha = 0.25f), cs.primary.copy(alpha = 0.45f), cs.primary.copy(alpha = 0.65f), cs.tertiary, cs.error)
+            val labels = chart.list("labels").map { it.str() ?: "" }.take(colors.size)
+            val values = chart.list("values").map { it.dbl() ?: 0.0 }.take(colors.size)
+            if (values.isEmpty()) return
             Column(modifier) {
                 Canvas(Modifier.fillMaxWidth().height(28.dp).semantics {
                     contentDescription = labels.zip(values).joinToString { (l, v) -> "$l ${(v * 100).toInt()}%" }
@@ -305,9 +313,9 @@ fun InsightChart(chart: JsonObject, modifier: Modifier = Modifier) {
             }
         }
         "pace_trend" -> {
-            val series = chart["series"]!!.jsonArray.map { s ->
-                s.jsonObject["points"]!!.jsonArray.map { it.jsonObject["pace_s_per_km"]!!.jsonPrimitive.doubleOrNull ?: 0.0 }
-            }
+            val series = chart.list("series").map { s ->
+                s.obj()?.list("points").orEmpty().mapNotNull { it.obj()?.get("pace_s_per_km")?.dbl() }
+            }.filter { it.isNotEmpty() }
             val all = series.flatten()
             if (all.size < 2) return
             val lo = all.min() - 5
@@ -337,7 +345,8 @@ fun InsightChart(chart: JsonObject, modifier: Modifier = Modifier) {
             }
         }
         "weekly_bars" -> {
-            val pts = chart["points"]!!.jsonArray.map { it.jsonObject["moving_s"]!!.jsonPrimitive.doubleOrNull ?: 0.0 }
+            val pts = chart.list("points").map { it.obj()?.get("moving_s")?.dbl() ?: 0.0 }
+            if (pts.isEmpty()) return
             val mx = (pts.maxOrNull() ?: 1.0).coerceAtLeast(1.0)
             val bar = cs.primary
             Canvas(modifier.height(64.dp).semantics { contentDescription = "Weekly running time, last 8 weeks" }) {

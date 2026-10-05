@@ -350,7 +350,7 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
     if hit:
         return view(hit)
     from .narrative import finish_call, reserve_call
-    call = reserve_call(conn, "coach", budget)
+    call = reserve_call(conn, "coach", budget, server_key=key_source == "server")
     status, out, detail = "ok", None, None
     if call is None:
         # Recorded so the app sees the limit instead of waiting on a result that will never come

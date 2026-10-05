@@ -255,9 +255,9 @@ private fun Freshness(status: Status?, fetchedAt: Instant?, report: MorningRepor
 @Composable
 private fun ConnectionNotice(state: String, detail: String?, onOpenSettings: () -> Unit) {
     val (title, body) = when (state) {
-        "reauth_required" -> "Garmin needs you to sign in again" to "Run `python -m sidekick garmin-login` on the backend computer. Syncing is paused until then."
+        "reauth_required" -> "Garmin needs you to sign in again" to "Reconnect Garmin in Settings. Syncing is paused until then."
         "rate_limited" -> "Garmin asked us to slow down" to "Syncing will retry automatically later."
-        "not_configured" -> "Garmin isn't connected" to "Run `python -m sidekick garmin-login` on the backend computer."
+        "not_configured" -> "Garmin isn't connected" to "Connect Garmin in Settings to start syncing."
         else -> "Last sync failed" to (detail ?: "Will retry later.")
     }
     Group { row(title, supporting = body, icon = Icons.Outlined.LinkOff, iconShape = MaterialShapes.Burst, onClick = onOpenSettings) }
@@ -426,7 +426,7 @@ private val SESSION_NAMES = mapOf("easy" to "Easy run", "long" to "Long run", "t
 fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
                          onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Group(title = "This week toward ${race.headline.substringBefore(" in ").substringBefore(" today")} · ${race.phase.replace('_', ' ')}") {
+    Group(title = "This week toward ${race.title ?: race.headline} · ${race.phase.replace('_', ' ')}") {
         custom {
             Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
                 style = MaterialTheme.typography.titleMedium)

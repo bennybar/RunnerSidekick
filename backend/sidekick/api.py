@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 import os
@@ -225,10 +225,14 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     lock_reports = threading.RLock()
     inflight: set[tuple] = set()
 
-    def ai_config(conn) -> nv.AiConfig:
+    def ai_config(conn, own_key: str | None = None) -> nv.AiConfig:
+        """On the server's key only the allowed models run (RSK_AI_MODELS); with the runner's own key, any model they set."""
+        model = rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL)
+        if not (own_key or "").strip() and model not in nv.server_models():
+            model = nv.DEFAULT_MODEL
         return nv.AiConfig(
             enabled=bool(rp.get_setting(conn, "ai_enabled", False)),
-            model=rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
+            model=model,
             api_key=os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key"),
             max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "25")),
         )
@@ -426,7 +430,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """Latest validated coach analysis for the current evidence; generates in the background when inputs changed.
         A user's own key (X-OpenAI-Key) is used for that call only and never stored or logged."""
         from . import coach as ch
-        ai = ai_config(conn)
+        ai = ai_config(conn, x_openai_key)
         if not ai.enabled:
             return {"status": "disabled"}
         key = (x_openai_key or "").strip() or ai.api_key
@@ -478,7 +482,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def ai_summary(conn, kind: str, b, x_openai_key: str | None) -> dict:
         """Today's AI summary of a screen. Written in the background; meanwhile the newest earlier one is attached."""
         from . import summaries as sm
-        ai = ai_config(conn)
+        ai = ai_config(conn, x_openai_key)
         if not ai.enabled:
             return {"status": "disabled"}
         key = (x_openai_key or "").strip() or ai.api_key
@@ -614,7 +618,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """AI input on one run. Generated only on request (start=True); afterwards served from the cache while the run's
         data is unchanged. A user's own key is used for that call only and never stored."""
         from . import run_ai
-        ai = ai_config(conn)
+        ai = ai_config(conn, x_openai_key)
         if not ai.enabled:
             return {"status": "disabled"}
         key = (x_openai_key or "").strip() or ai.api_key
@@ -684,7 +688,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/settings")
     def get_settings(conn=Depends(db)):
-        return {"timezone": str(tz(conn)), "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5]),
+        return {"timezone": str(tz(conn)), "timezone_set": rp.get_setting(conn, "timezone", None) is not None, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5]),
                 "goal": rp.get_setting(conn, "goal", None), "available_minutes": rp.get_setting(conn, "available_minutes", None),
                 "hr_zone_source": rp.get_setting(conn, "hr_zone_source", "garmin"),
                 "goal_type": rp.get_setting(conn, "goal_type", None),
@@ -770,18 +774,35 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         except goauth.NotConfigured as e:
             raise HTTPException(503, str(e))
 
+    def oauth_page(title, msg):
+        return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><title>{title}</title>"
+                            f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>{title}</h2>"
+                            f"<p>{msg}</p><p>You can close this page and return to Runner Sidekick.</p></body>")
+
+    @app.get("/v1/garmin/oauth/begin")
+    def garmin_begin(ticket: str = ""):
+        """The app opens this one-time link; it marks this browser (a cookie) and sends it on to Garmin."""
+        from fastapi.responses import RedirectResponse
+        sec = secrets(cfg.data_dir)
+        try:
+            url, nonce = goauth.begin(accounts.app_db(), ticket, sec.get("garmin_client_id", ""), GARMIN_REDIRECT_URI)
+        except goauth.OAuthError as e:
+            return oauth_page("Garmin not connected", str(e))
+        r = RedirectResponse(url, status_code=302)
+        r.set_cookie("rsk_garmin", nonce, max_age=goauth.STATE_TTL_S, httponly=True, secure=True, samesite="lax",
+                     path="/v1/garmin/oauth")
+        return r
+
     @app.get("/v1/garmin/oauth/callback", response_class=HTMLResponse)
-    def garmin_callback(state: str = "", code: str = "", error: str = ""):
-        def page(title, msg):
-            return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><title>{title}</title>"
-                                f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>{title}</h2>"
-                                f"<p>{msg}</p><p>You can close this page and return to Runner Sidekick.</p></body>")
+    def garmin_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+        page = oauth_page
         if error or not code or not state:
             return page("Garmin not connected", "The connection was cancelled or Garmin returned an error.")
         sec = secrets(cfg.data_dir)
         try:
             goauth.complete(accounts.app_db(), state, code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""), GARMIN_REDIRECT_URI,
-                            lambda uid: accounts.user_dir(cfg.data_dir, uid))
+                            lambda uid: accounts.user_dir(cfg.data_dir, uid), nonce=request.cookies.get("rsk_garmin"),
+                            linked_elsewhere=lambda g, uid: any(u != uid for u in goauth.linked_users(cfg.data_dir / "users", g)))
         except goauth.OAuthError as e:
             return page("Garmin not connected", str(e))
         return page("Garmin connected", "Your Garmin account is linked.")

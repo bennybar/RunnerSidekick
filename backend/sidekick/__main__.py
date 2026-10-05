@@ -193,7 +193,11 @@ def cmd_sync_all(cfg, loop: bool, only_user: int | None) -> int:
             print(f"user {uid}: no Garmin connection, skipped")
             continue
         print(f"user {uid}:", end=" ")
-        worst = max(worst, cmd_sync(ucfg, loop))
+        try:
+            worst = max(worst, cmd_sync(ucfg, loop))
+        except Exception as e:  # one user's failure never skips the users after them
+            print(f"failed: {type(e).__name__}: {e}")
+            worst = max(worst, 1)
     return worst
 
 

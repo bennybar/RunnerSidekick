@@ -191,7 +191,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         icon = if (ok) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff, iconShape = MaterialShapes.Cookie9Sided,
                     )
                     if (s?.connection?.state == "reauth_required" || s?.connection?.state == "not_configured") {
-                        row("Garmin sign-in needed", supporting = "Run `python -m sidekick garmin-login` on the backend computer.")
+                        row("Garmin sign-in needed", supporting = "Garmin asked for a new sign-in. Reconnect it below; syncing is paused until then.")
                     }
                     row("Backend", supporting = local?.backendUrl ?: "", onClick = { editBackend = !editBackend })
                     if (editBackend || local?.hasToken == false) custom {

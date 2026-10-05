@@ -29,6 +29,13 @@ log = logging.getLogger(__name__)
 
 PROMPT_VERSION = "prompt-1.0"
 DEFAULT_MODEL = "gpt-6.1-sol"
+ALL_USERS_DAILY_CAP = 300  # AI calls a day on the server's key, across every user (RSK_AI_MAX_CALLS_ALL)
+
+
+def server_models() -> set[str]:
+    """Models that may run on the server's OpenAI key (RSK_AI_MODELS, comma separated); the default model always may."""
+    import os
+    return {DEFAULT_MODEL, *(m.strip() for m in os.getenv("RSK_AI_MODELS", "").split(",") if m.strip())}
 MAX_SENTENCES = 4
 PLACEHOLDER = re.compile(r"\{(value|median|delta):([A-Za-z0-9:_.\-]+)\}")
 # Conservative wording guard: no diagnoses, no causal claims, no certainty upgrades.
@@ -218,19 +225,35 @@ def calls_today(conn: Database) -> int:
     return conn.ai_call.count_documents({"created_at": {"$gte": day}})
 
 
-def reserve_call(conn: Database, feature: str, limit: int) -> int | None:
-    """Records an AI call before it is made; None when today's budget is used up. The day's count is one atomic
-    counter, incremented before checking, so concurrent requests can't both take the last call."""
-    day = datetime.now(timezone.utc).date().isoformat()
-    key = f"ai_calls:{day}"
-    if conn.counters.find_one({"_id": key}) is None:
-        try:  # the day's first call starts from the ledger (calls made before this counter existed)
-            conn.counters.insert_one({"_id": key, "n": calls_today(conn)})
+def take_from(counters, key: str, limit: int, start: int = 0) -> bool:
+    """One from a day's atomic counter; False (and nothing taken) when it's used up."""
+    if counters.find_one({"_id": key}) is None:
+        try:
+            counters.insert_one({"_id": key, "n": start})
         except DuplicateKeyError:
             pass
-    n = conn.counters.find_one_and_update({"_id": key}, {"$inc": {"n": 1}}, return_document=ReturnDocument.AFTER)["n"]
-    if n > limit:
-        conn.counters.update_one({"_id": key}, {"$inc": {"n": -1}})
+    if counters.find_one_and_update({"_id": key}, {"$inc": {"n": 1}}, return_document=ReturnDocument.AFTER)["n"] > limit:
+        counters.update_one({"_id": key}, {"$inc": {"n": -1}})
+        return False
+    return True
+
+
+def reserve_call(conn: Database, feature: str, limit: int, server_key: bool = True) -> int | None:
+    """Records an AI call before it is made; None when today's budget is used up. The day's count is one atomic
+    counter, incremented before checking, so concurrent requests can't both take the last call. Calls on the server's
+    key also count against one cap for all users together, so many users can't run up the server's bill."""
+    day = datetime.now(timezone.utc).date().isoformat()
+    if server_key:
+        import os
+        from .accounts import app_db
+        cap = int(os.getenv("RSK_AI_MAX_CALLS_ALL", str(ALL_USERS_DAILY_CAP)))
+        if not take_from(app_db().counters, f"ai_calls_all:{day}", cap):
+            return None
+    # The day's first call starts from the ledger (calls made before this counter existed)
+    start = calls_today(conn) if conn.counters.find_one({"_id": f"ai_calls:{day}"}) is None else 0
+    if not take_from(conn.counters, f"ai_calls:{day}", limit, start):
+        if server_key:  # give the shared call back
+            app_db().counters.update_one({"_id": f"ai_calls_all:{day}"}, {"$inc": {"n": -1}})
         return None
     cid = next_id(conn, "ai_call")
     conn.ai_call.insert_one({"id": cid, "feature": feature, "created_at": utc_now(), "outcome": None})

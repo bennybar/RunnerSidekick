@@ -105,7 +105,11 @@ def sign_in_with_google(conn: Database, claims: dict) -> dict:
     if not claims.get("email_verified"):
         raise NotInvited("Google account email is not verified")
     email, sub = normalise_email(claims["email"]), claims["sub"]
-    u = one(conn.users, {"$or": [{"google_sub": sub}, {"email": email}], "deleted_at": None})
+    # A linked account is matched only by its Google subject. Email matches only a user with no Google account linked
+    # yet (the owner's first sign-in), and never re-links one: another Google account with the same email can't take over.
+    u = one(conn.users, {"google_sub": sub, "deleted_at": None}) or one(conn.users, {"email": email, "google_sub": None, "deleted_at": None})
+    if u is None and one(conn.users, {"email": email, "deleted_at": None}):
+        raise NotInvited("This email is already linked to a different Google account")
     if u is None:
         if one(conn.invites, {"email": email, "used_at": None}) is None:
             raise NotInvited("This Google account hasn't been invited yet")

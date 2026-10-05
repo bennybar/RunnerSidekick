@@ -55,16 +55,34 @@ def code_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
 
+BEGIN_TTL_S = 120  # the one-time link the app opens must be used within two minutes
+
+
 def start(app_conn, user_id: int, client_id: str | None, redirect_uri: str) -> str:
+    """The link the app opens: our own one-time /begin page, which ties the flow to that browser (a cookie) and only
+    then sends it on to Garmin. A link forwarded to someone else can't finish linking (no cookie in their browser, and
+    the ticket is single use)."""
     if not client_id:
         raise NotConfigured("Garmin sign-in isn't available yet: the Garmin developer program access is pending.")
     state, verifier = pysecrets.token_urlsafe(24), code_verifier()
     app_conn.oauth_states.delete_many({"created_at": {"$lt": (datetime.now(timezone.utc) - timedelta(seconds=STATE_TTL_S)).isoformat()
                                                                  .replace("+00:00", "Z")}})
-    app_conn.oauth_states.insert_one({"state": state, "user_id": user_id, "code_verifier": verifier, "created_at": utc_now()})
+    ticket, nonce = pysecrets.token_urlsafe(24), pysecrets.token_urlsafe(24)
+    app_conn.oauth_states.insert_one({"state": state, "user_id": user_id, "code_verifier": verifier, "created_at": utc_now(),
+                                      "ticket": ticket, "nonce": nonce, "begun": False})
+    return redirect_uri.rsplit("/", 1)[0] + "/begin?" + urlencode({"ticket": ticket})
+
+
+def begin(app_conn, ticket: str, client_id: str, redirect_uri: str) -> tuple[str, str]:
+    """(Garmin's authorize URL, the browser nonce to set as a cookie), once per ticket and within BEGIN_TTL_S."""
+    row = app_conn.oauth_states.find_one_and_update({"ticket": ticket, "begun": False}, {"$set": {"begun": True}})
+    if row is None:
+        raise OAuthError("This link was already used. Please start again from the app.")
+    if (datetime.now(timezone.utc) - datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))).total_seconds() > BEGIN_TTL_S:
+        raise OAuthError("This link has expired. Please start again from the app.")
     return AUTHORIZE_URL + "?" + urlencode({
-        "client_id": client_id, "response_type": "code", "code_challenge": code_challenge(verifier),
-        "code_challenge_method": "S256", "redirect_uri": redirect_uri, "state": state})
+        "client_id": client_id, "response_type": "code", "code_challenge": code_challenge(row["code_verifier"]),
+        "code_challenge_method": "S256", "redirect_uri": redirect_uri, "state": row["state"]}), row["nonce"]
 
 
 def _token_file(user_dir: Path) -> Path:
@@ -89,11 +107,15 @@ def _store_tokens(user_dir: Path, tok: dict, extra: dict | None = None) -> dict:
     return data
 
 
-def complete(app_conn, state: str, code: str, client_id: str, client_secret: str, redirect_uri: str, user_dir_for) -> int:
-    """Callback: validate state, exchange the code, store tokens in the user's folder. Returns the user id."""
+def complete(app_conn, state: str, code: str, client_id: str, client_secret: str, redirect_uri: str, user_dir_for,
+             nonce: str | None = None, linked_elsewhere=lambda garmin_user, user_id: False) -> int:
+    """Callback: validate state and the browser that began it, exchange the code, refuse a Garmin account already linked
+    to another user, store tokens in the user's folder. Returns the user id."""
     row = app_conn.oauth_states.find_one_and_delete({"state": state})  # single use
     if row is None:
         raise OAuthError("This sign-in link has expired or was already used. Please try again from the app.")
+    if row.get("nonce") and not (nonce and pysecrets.compare_digest(nonce, row["nonce"])):
+        raise OAuthError("This connection was started on another device or browser. Please start again from the app.")
     created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
     if (datetime.now(timezone.utc) - created).total_seconds() > STATE_TTL_S:
         raise OAuthError("This sign-in link has expired. Please try again from the app.")
@@ -105,6 +127,8 @@ def complete(app_conn, state: str, code: str, client_id: str, client_secret: str
         tok = r.json()
         uid = c.get(USER_ID_URL, headers={"Authorization": f"Bearer {tok['access_token']}"})
         garmin_user = uid.json().get("userId") if uid.status_code == 200 else None
+    if garmin_user and linked_elsewhere(garmin_user, row["user_id"]):
+        raise OAuthError("This Garmin account is already linked to another Runner Sidekick account.")
     _store_tokens(user_dir_for(row["user_id"]), tok, {"garmin_user_id": garmin_user})
     return row["user_id"]
 
@@ -148,3 +172,15 @@ def disconnect(user_dir: Path, client_id: str | None, client_secret: str | None)
         pass  # still forget locally; Garmin also lets users revoke from their account settings
     p.unlink(missing_ok=True)
     return True
+
+
+def linked_users(users_root: Path, garmin_user) -> list[int]:
+    """User ids whose stored Garmin connection is this Garmin account."""
+    out = []
+    for f in users_root.glob("*/garmin_oauth.json"):
+        try:
+            if json.loads(f.read_text()).get("garmin_user_id") == garmin_user:
+                out.append(int(f.parent.name))
+        except (ValueError, OSError):
+            continue
+    return out

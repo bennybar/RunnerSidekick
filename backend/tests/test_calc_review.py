@@ -1,6 +1,6 @@
 """Calculation defects reported in the v0.30.2 review, each reproduced and then pinned."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sidekick import progress, race, stats
 from sidekick import reports as rp
@@ -297,3 +297,46 @@ def test_manual_sync_cooldown_by_how_the_last_sync_ended():
     finish("ok", 30)
     set_connection(conn, "fixture", retry_not_before=(now + timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=40)  # Garmin's own back-off wins
+
+
+def test_ai_calls_on_the_server_key_share_one_daily_cap(monkeypatch):
+    from sidekick import narrative as nv
+    from sidekick.accounts import app_db
+    from sidekick.db import connect, user_db_name
+    monkeypatch.setenv("RSK_AI_MAX_CALLS_ALL", "3")
+    app_db().counters.delete_many({})
+    users = [connect(user_db_name(u, "fixture")) for u in (11, 12)]
+    for c in users:
+        c.counters.delete_many({}); c.ai_call.delete_many({})
+    got = [nv.reserve_call(users[k % 2], "coach", 25) for k in range(5)]
+    assert sum(g is not None for g in got) == 3  # three for both users together, each well under their own 25
+    assert nv.reserve_call(users[0], "coach", 25, server_key=False) is not None  # the runner's own key isn't capped by it
+
+
+def test_only_allowed_models_run_on_the_server_key(monkeypatch):
+    from sidekick import narrative as nv
+    monkeypatch.setenv("RSK_AI_MODELS", "gpt-6.1-sol-mini")
+    assert nv.server_models() == {nv.DEFAULT_MODEL, "gpt-6.1-sol-mini"}
+
+
+def test_one_bad_record_doesnt_stop_the_sync_and_syncs_dont_overlap():
+    from sidekick.connectors.fixture import FixtureConnector
+    from sidekick.db import connect, user_db_name
+    from sidekick.sync import release_lease, run_sync, take_lease
+
+    class Odd(FixtureConnector):
+        def read_activity(self, s):
+            if s["source_id"].endswith("3"):
+                raise ValueError("activity has no startTimeGMT")
+            return super().read_activity(s)
+    conn = connect(user_db_name(31, "fixture"))
+    for c in conn.list_collection_names():
+        conn[c].drop()
+    res = run_sync(conn, Odd(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    assert res.outcome == "ok" and res.skipped and "couldn't be read" in res.detail and conn.activity.count_documents({}) > 0
+    # Another sync for the same user while one holds the lease is deferred, not run twice
+    now = datetime.now(timezone.utc)
+    assert take_lease(conn, now)
+    assert run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3).outcome == "deferred"
+    release_lease(conn)
+    assert run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3).outcome == "ok"

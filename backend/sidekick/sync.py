@@ -38,6 +38,7 @@ class SyncResult:
     days_fetched: int = 0
     activities_fetched: int = 0
     job_id: int | None = None
+    skipped: list[str] = field(default_factory=list)  # records that couldn't be read; the rest of the sync goes on
 
 
 def report_progress(conn, job_id: int | None, fraction: float, phase: str) -> None:
@@ -100,6 +101,24 @@ def _update_checkpoint(conn, source, stream, **fields) -> None:
     conn.sync_checkpoint.update_one({"source": source, "stream": stream}, {"$set": {**fields, "updated_at": utc_now()}})
 
 
+LEASE_MIN = 20  # a sync that died without releasing its lease frees it after this
+
+
+def take_lease(conn: Database, now: datetime) -> bool:
+    from pymongo.errors import DuplicateKeyError
+    stamp = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    until = (now + timedelta(minutes=LEASE_MIN)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    try:
+        conn.sync_lease.update_one({"_id": "sync", "until": {"$lt": stamp}}, {"$set": {"until": until}}, upsert=True)
+        return True
+    except DuplicateKeyError:
+        return False  # held by a sync that's still running
+
+
+def release_lease(conn: Database) -> None:
+    conn.sync_lease.delete_one({"_id": "sync"})
+
+
 def run_sync(conn: Database, connector: Connector, today: date, backfill_days: int, refetch_days: int,
              raw_retention_days: int = 120, max_backfill_days: int = 30, max_activity_details: int = 60,
              force: bool = False, now: datetime | None = None) -> SyncResult:
@@ -115,6 +134,9 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
         set_connection(conn, source, state=ConnectionState.NOT_CONFIGURED.value, detail="No credentials configured")
         return SyncResult("auth_failed", "Source not configured")
 
+    # One sync per user at a time, across processes (the hourly job and the API): a lease in the user's database
+    if not take_lease(conn, now):
+        return SyncResult("deferred", "Another sync is running")
     target = (today - timedelta(days=backfill_days - 1)).isoformat()
     job_id = next_id(conn, "sync_job")
     conn.sync_job.insert_one({"id": job_id, "source": source, "kind": "sync", "started_at": utc_now(), "finished_at": None, "outcome": None,
@@ -164,6 +186,17 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
         set_connection(conn, source, state=(ConnectionState.RATE_LIMITED if limited else ConnectionState.ERROR).value,
                        detail=str(e), consecutive_failures=failures,
                        retry_not_before=(now + timedelta(seconds=wait)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+    except Exception as e:  # anything else (a parsing bug, a database error): the job ends as a failure with a back-off
+        log.exception("sync failed")
+        res.outcome, res.detail = "error", f"{type(e).__name__}: {e}"[:300]
+        failures = (row["consecutive_failures"] or 0) + 1
+        set_connection(conn, source, state=ConnectionState.ERROR.value, detail=res.detail, consecutive_failures=failures,
+                       retry_not_before=(now + timedelta(seconds=backoff_seconds(failures, 120))).replace(microsecond=0)
+                       .isoformat().replace("+00:00", "Z"))
+    finally:
+        release_lease(conn)
+    if res.skipped and res.outcome == "ok":
+        res.detail = f"Skipped {len(res.skipped)} record{'s' if len(res.skipped) != 1 else ''} Garmin sent that couldn't be read"
     conn.sync_job.update_one({"id": job_id}, {"$set": {"finished_at": utc_now(), "outcome": res.outcome, "detail": res.detail,
                                                        "days_fetched": res.days_fetched, "activities_fetched": res.activities_fetched}})
     return res
@@ -180,7 +213,15 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
     todo = [d for d in todo if not (d < today - timedelta(days=1) and day_complete(conn, source, d))]
     for i, d in enumerate(todo):
         report_progress(conn, res.job_id, 0.05 + 0.45 * i / len(todo), "Reading your days from Garmin")
-        for b in connector.read_days(d, d):
+        try:
+            bundles = connector.read_days(d, d)
+        except (AuthRequired, RateLimited, SourceUnavailable):
+            raise
+        except Exception as e:  # one unreadable day doesn't stop the sync
+            log.warning("skipped day %s: %s", d, e)
+            res.skipped.append(f"day:{d}")
+            continue
+        for b in bundles:
             res.changed_dates |= save_day(conn, source, b)
             oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
             _update_checkpoint(conn, source, "days", oldest_done=oldest)
@@ -229,7 +270,14 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
             res.outcome = "partial"
             res.detail = "Activity detail limit reached for this run; next sync continues"
             break
-        a = connector.read_activity(s)
+        try:
+            a = connector.read_activity(s)
+        except (AuthRequired, RateLimited, SourceUnavailable):
+            raise
+        except Exception as e:  # one activity Garmin sent in an odd shape doesn't stop the others
+            log.warning("skipped activity %s: %s", s.get("source_id"), e)
+            res.skipped.append(f"activity:{s.get('source_id')}")
+            continue
         save_activity(conn, source, a, s["content_hash"])
         fetched += 1
         res.changed_activities.append(a.source_id)

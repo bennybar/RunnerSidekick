@@ -53,6 +53,12 @@ open class BaseVm(val repo: Repository) : ViewModel() {
             // A contract mismatch must never crash the app or replace cached data
             android.util.Log.e("RunnerSidekick", "Unexpected backend response", e)
             _error.value = "Unexpected response from the backend. Showing saved data."
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e  // leaving the screen cancels its work; that isn't an error
+        } catch (e: Exception) {
+            // Anything else (storage, the database, opening a page): a message, never a crash
+            android.util.Log.e("RunnerSidekick", "Unexpected error", e)
+            _error.value = "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
         } finally {
             _busy.value = false
         }

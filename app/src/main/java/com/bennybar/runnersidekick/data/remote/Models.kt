@@ -310,6 +310,8 @@ data class RaceStatus(
     val headline: String, val phase: String, @SerialName("phase_note") val phaseNote: String,
     @SerialName("days_to_go") val daysToGo: Int, @SerialName("prediction_text") val predictionText: String? = null,
     val week: RaceWeek? = null,
+    /** The race's name, or "Your half marathon" */
+    val title: String? = null,
 )
 
 @Serializable

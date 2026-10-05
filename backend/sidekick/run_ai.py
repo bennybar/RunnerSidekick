@@ -203,7 +203,7 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
     hit = latest(conn, sid, h)
     if hit and hit["status"] == "ok":
         return view(hit)
-    call = reserve_call(conn, "run_ai", budget)
+    call = reserve_call(conn, "run_ai", budget, server_key=key_source == "server")
     status, out, detail = "ok", None, None
     if call is None:
         status, detail = "budget_exceeded", f"daily limit of {budget} AI calls reached"

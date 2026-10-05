@@ -123,14 +123,13 @@ private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
                     "distribution" -> DistributionChart(c)
                     "age_grade" -> AgeGradeChart(i.rows, onOpenRun)
                     "weekly_dots" -> com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
-                        c["points"]!!.jsonArray.map { it.jsonObject }.map { p ->
-                            com.bennybar.runnersidekick.ui.components.WeekPoint(java.time.LocalDate.parse(p["week"]!!.jsonPrimitive.content),
-                                p.num("value") ?: 0.0, p["new_watch"]?.jsonPrimitive?.content == "true")
+                        c.list("points").mapNotNull { it.obj() }.mapNotNull { p ->
+                            val week = p["week"]?.str()?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return@mapNotNull null
+                            com.bennybar.runnersidekick.ui.components.WeekPoint(week, p.num("value") ?: 0.0, p["new_watch"]?.str() == "true")
                         },
                         decimals = c.num("decimals")?.toInt() ?: 0, step = c.num("step") ?: 5.0, caption = "Weekly median (${c["unit"]?.jsonPrimitive?.content})",
                         description = i.title,
-                        band = c["band"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.jsonArray?.let { b ->
-                            b[0].jsonPrimitive.doubleOrNull!! to b[1].jsonPrimitive.doubleOrNull!! })
+                        band = c.list("band").mapNotNull { it.dbl() }.takeIf { it.size == 2 }?.let { it[0] to it[1] })
                 }
             }
             if (i.detail != null || i.method != null || i.caveats.isNotEmpty()) {
@@ -150,15 +149,18 @@ private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
 @Composable
 private fun BandsChart(c: JsonObject) {
     val cs = MaterialTheme.colorScheme
-    val bands = c["bands"]!!.jsonArray.map { it.jsonObject }
+    // Only well-formed bands (a label, from and to); nothing drawn without them
+    val bands = c.list("bands").mapNotNull { it.obj() }.filter { it["label"]?.str() != null && it.num("from") != null && it.num("to") != null }
     val value = c.num("value") ?: return
+    if (bands.isEmpty()) return
     val lo = bands.first().num("from")!!
     val hi = bands.last().num("to")!!
+    if (hi <= lo) return
     val colors = listOf(cs.surfaceContainerHighest, cs.primary.copy(alpha = 0.25f), cs.primary.copy(alpha = 0.45f),
         cs.primary.copy(alpha = 0.7f), cs.primary)
     Column {
         Canvas(Modifier.fillMaxWidth().height(36.dp).semantics {
-            contentDescription = "Your value ${"%.1f".format(value)} on the rating scale " + bands.joinToString { it["label"]!!.jsonPrimitive.content }
+            contentDescription = "Your value ${"%.1f".format(value)} on the rating scale " + bands.joinToString { it["label"]?.str().orEmpty() }
         }) {
             fun x(v: Double) = ((v.coerceIn(lo, hi) - lo) / (hi - lo) * size.width).toFloat()
             bands.forEachIndexed { k, b ->
@@ -172,7 +174,7 @@ private fun BandsChart(c: JsonObject) {
         }
         Row(Modifier.fillMaxWidth()) {
             bands.forEach { b ->
-                Text(b["label"]!!.jsonPrimitive.content, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
+                Text(b["label"]?.str().orEmpty(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
                     textAlign = TextAlign.Center, modifier = Modifier.weight(((b.num("to")!! - b.num("from")!!) / (hi - lo)).toFloat()))
             }
         }

@@ -12,6 +12,8 @@ import re
 from datetime import date, timedelta
 from statistics import median, pstdev
 
+from pymongo.errors import DuplicateKeyError
+
 from .analytics import baseline as bl
 from .analytics import running as rn
 from .analytics.recommend import RULES_VERSION, recommend
@@ -134,9 +136,14 @@ def save_report(conn, rtype: str, key: str, local_date: str, body: dict, ihash: 
     body.update(revision=rev, input_hash=ihash, generated_at=utc_now(), data_cutoff=cutoff, algorithm_version=ALGORITHMS)
     body["id"] = next_id(conn, "report")
     body = plain(body)
-    conn.report.insert_one({"id": body["id"], "type": rtype, "subject_key": key, "local_date": local_date, "revision": rev,
-                            "generated_at": body["generated_at"], "data_cutoff": cutoff or "", "input_hash": ihash,
-                            "algorithm_version": ALGORITHMS, "body": body})
+    try:
+        conn.report.insert_one({"id": body["id"], "type": rtype, "subject_key": key, "local_date": local_date, "revision": rev,
+                                "generated_at": body["generated_at"], "data_cutoff": cutoff or "", "input_hash": ihash,
+                                "algorithm_version": ALGORITHMS, "body": body})
+    except DuplicateKeyError:
+        # Another process (the hourly sync, or a second request) wrote this revision a moment ago: use the newest one
+        latest = one(conn.report, {"type": rtype, "subject_key": key}, sort=[("revision", -1)])
+        return latest["body"]
     return body
 
 

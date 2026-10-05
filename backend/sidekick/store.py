@@ -73,10 +73,11 @@ def save_activity(conn: Database, source: str, a: Activity, chash: str) -> int:
     }, upsert=True)
     conn.activity_lap.delete_many({"activity_id": aid})
     if a.laps:
-        conn.activity_lap.insert_many([{
+        # Replace by (activity, lap) so two syncs writing the same run at once can't collide on the unique index
+        conn.activity_lap.bulk_write([ReplaceOne({"activity_id": aid, "idx": l["idx"]}, l, upsert=True) for l in [{
             "activity_id": aid, "idx": l.idx, "start_utc": l.start_utc, "distance_m": l.distance_m, "elapsed_s": l.elapsed_s,
             "moving_s": l.moving_s, "avg_hr": l.avg_hr, "max_hr": l.max_hr, "elevation_gain_m": l.elevation_gain_m,
-            "elevation_loss_m": l.elevation_loss_m, "avg_cadence_spm": l.avg_cadence_spm, "intensity": l.intensity} for l in a.laps])
+            "elevation_loss_m": l.elevation_loss_m, "avg_cadence_spm": l.avg_cadence_spm, "intensity": l.intensity} for l in a.laps]])
     if a.samples is not None:
         conn.activity_samples.replace_one({"activity_id": aid}, {"activity_id": aid, "samples": a.samples.to_json()}, upsert=True)
     return aid

@@ -148,11 +148,13 @@ private fun TrendChart(m: TrendMetric, t: Trends, selected: Int?, onSelect: (Int
                 fun x(i: Int) = if (n <= 1) 0f else i * size.width / (n - 1)
                 fun y(v: Double) = (size.height * (1 - (v - lo) / (hi - lo))).toFloat()
                 // personal range band, drawn per contiguous run of days that have one
+                // (a day counts only with both ends of its range, and only where the band lines up with the values)
+                fun has(k: Int) = m.band.getOrNull(k)?.let { it.q1 != null && it.q3 != null } == true
                 var i = 0
                 while (i < n) {
-                    if (m.band[i].q1 == null) { i++; continue }
+                    if (!has(i)) { i++; continue }
                     var j = i
-                    while (j + 1 < n && m.band[j + 1].q1 != null) j++
+                    while (j + 1 < n && has(j + 1)) j++
                     val p = Path()
                     p.moveTo(x(i), y(m.band[i].q3!!))
                     for (k in i..j) p.lineTo(x(k), y(m.band[k].q3!!))
@@ -235,7 +237,7 @@ private fun PaceCard(t: Trends, units: Units, onOpenRun: (String) -> Unit) {
     val hi = pts.maxOf { it.second.paceSPerKm } + 5
     Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Pace at ${p.bandBpm[0]}–${p.bandBpm[1]} bpm", style = MaterialTheme.typography.titleMedium)
+            Text("Pace at ${p.bandBpm.getOrNull(0) ?: "–"}–${p.bandBpm.getOrNull(1) ?: "–"} bpm", style = MaterialTheme.typography.titleMedium)
             Text(p.headline, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             Text("${Format.pace(lo + 5, units)} (faster)", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             Canvas(Modifier.fillMaxWidth().height(110.dp).semantics { contentDescription = "Pace at the same heart rate, per run; colours are watches" }

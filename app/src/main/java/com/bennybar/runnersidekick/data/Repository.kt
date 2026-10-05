@@ -18,6 +18,7 @@ import com.bennybar.runnersidekick.data.remote.Fitness
 import com.bennybar.runnersidekick.data.remote.FocusState
 import com.bennybar.runnersidekick.data.remote.RunIntent
 import com.bennybar.runnersidekick.data.remote.RunIntentIn
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -227,7 +228,28 @@ class Repository(
         return key
     }
 
+    /** Decodes a response the way its screen will, before it's cached: one the app can't read throws here (and the
+     *  caller reports it) instead of replacing good saved data with something that shows as an empty screen. */
+    private fun check(key: String, body: String) {
+        when {
+            key == "status" -> json.decodeFromString<Status>(body)
+            key == "today" || key.startsWith("day:") -> json.decodeFromString<MorningReport>(body)
+            key == "activities" -> json.decodeFromString(ListSerializer(ActivitySummary.serializer()), body)
+            key == "insights" -> json.decodeFromString<InsightsReport>(body)
+            key == "weekly" -> json.decodeFromString<WeeklyReport>(body)
+            key == "fitness" -> json.decodeFromString<Fitness>(body)
+            key == "me" -> json.decodeFromString<Me>(body)
+            key == "focus" -> json.decodeFromString<FocusState>(body)
+            key == "coach" -> json.decodeFromString<CoachView>(body)
+            key == "compare" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body)
+            key.startsWith("trends:") -> json.decodeFromString<Trends>(body)
+            key.startsWith("activity:") -> json.decodeFromString<ActivityDetail>(body)
+            key.startsWith("runai:") -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body)
+        }
+    }
+
     private suspend fun put(key: String, body: String) {
+        check(key, body)
         val mode = settings.settings.first().currentMode ?: return
         // Unchanged content isn't rewritten: no disk write and no needless refresh of every screen observing it
         val existing = db.cache().get(key)
@@ -268,7 +290,7 @@ class Repository(
 
     private suspend fun refreshAllNow(from: Float, to: Float) {
         val steps = listOf<Pair<String, suspend () -> Unit>>(
-            "Checking the connection" to { refreshStatus(); establishAccount(); pushPendingCheckins(); pullCheckins() },
+            "Checking the connection" to { refreshStatus(); establishAccount(); ensureTimezone(); pushPendingCheckins(); pullCheckins() },
             "Loading today" to {
                 val todayBody = api.getRaw("/v1/today")
                 put("today", todayBody)
@@ -397,6 +419,18 @@ class Repository(
             clientUpdatedAt = Instant.now().toString(), pendingSync = true, account = acct,
         )
         db.checkins().put(c)
+    }
+
+    private var timezoneChecked = false
+
+    /** A new account starts in the phone's time zone (the server's default is just a guess); once set, it's left alone. */
+    private suspend fun ensureTimezone() {
+        if (timezoneChecked) return
+        val s = json.parseToJsonElement(api.getRaw("/v1/settings")).jsonObject
+        if (s["timezone_set"]?.jsonPrimitive?.booleanOrNull == false) {
+            api.putRaw("/v1/settings", """{"timezone":"${java.time.ZoneId.systemDefault().id}"}""")
+        }
+        timezoneChecked = true
     }
 
     /** "Not feeling well" for one day: an illness check-in the readiness and the next run take as overriding everything

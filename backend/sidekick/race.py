@@ -82,6 +82,7 @@ def status(conn, today: date) -> dict | None:
         else:
             out["prediction_text"] = f"Garmin predicts {clock(pred)}."
     title = g.get("name") or f"Your {label}"
+    out["title"] = title
     out["headline"] = (f"{title} today" if days == 0 else f"{title} in {days} day{'s' if days != 1 else ''}" if days > 0
                        else f"{title}: {-days} day{'s' if days != -1 else ''} ago")
     return out

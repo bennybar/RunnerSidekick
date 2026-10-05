@@ -74,14 +74,19 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
     # Only readings from the current watch: a device change makes earlier values incomparable
     era = rp.device_era_start(conn, source, today)
     vo2 = {d: v for d, v in rp.series(conn, source, "garmin_vo2max_running", today.isoformat()).items() if not era or d >= era.isoformat()}
-    if vo2:
-        latest_d = max(vo2)
-        earlier = [d for d in vo2 if d <= (date.fromisoformat(latest_d) - timedelta(days=VO2_WINDOW_DAYS)).isoformat()]
+    # The same freshness rule as fitness progress: a recent reading, and an earlier one 3–8 weeks before it
+    from .progress import VO2_FRESH_DAYS, VO2_MIN_GAP_DAYS, VO2_OLDEST_DAYS
+    latest_d = max(vo2) if vo2 else None
+    if latest_d and latest_d >= (today - timedelta(days=VO2_FRESH_DAYS)).isoformat():
+        ld = date.fromisoformat(latest_d)
+        earlier = [d for d in vo2 if d <= (ld - timedelta(days=max(VO2_WINDOW_DAYS, VO2_MIN_GAP_DAYS))).isoformat()
+                   and d >= (today - timedelta(days=VO2_OLDEST_DAYS)).isoformat()]
         if earlier:
             ch = vo2[latest_d] - vo2[max(earlier)]
+            weeks = round((ld - date.fromisoformat(max(earlier))).days / 7)
             if abs(ch) >= VO2_MIN_CHANGE:
-                out.append({"id": "vo2_change", "tone": "positive" if ch > 0 else "attention", "kind": "fitness",
-                            "title": f"VO₂ max {'up' if ch > 0 else 'down'} {abs(ch):.1f} in four weeks",
+                out.append({"id": "vo2_change", "tone": "positive" if ch > 0 else "info", "kind": "fitness",
+                            "title": f"VO₂ estimate {'up' if ch > 0 else 'down'} {abs(ch):.1f} in {weeks} weeks",
                             "text": f"Now {vo2[latest_d]:.1f} (Garmin).", "target": {"type": "insights"}, "source": "Garmin"})
 
     # Weekly focus outcome so far

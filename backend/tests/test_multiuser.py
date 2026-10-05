@@ -183,7 +183,13 @@ def test_garmin_connect_flow(tmp_path, garmin_mock):
     h = {"Authorization": f"Bearer {create_token(tmp_path, 'o')}"}
     assert c.post("/v1/garmin/oauth/start", headers=h).status_code == 503  # not configured yet
     (tmp_path / "secrets.json").write_text(json.dumps({"garmin_client_id": "cid", "garmin_client_secret": "csecret"}))
-    url = c.post("/v1/garmin/oauth/start", headers=h).json()["authorize_url"]
+    begin = c.post("/v1/garmin/oauth/start", headers=h).json()["authorize_url"]
+    assert urlparse(begin).path.endswith("/v1/garmin/oauth/begin")  # our own one-time page first
+    r = c.get(urlparse(begin).path + "?" + urlparse(begin).query, follow_redirects=False)
+    assert r.status_code == 302 and "rsk_garmin=" in r.headers["set-cookie"]
+    nonce = r.headers["set-cookie"].split("rsk_garmin=")[1].split(";")[0]
+    assert "already used" in c.get(urlparse(begin).path + "?" + urlparse(begin).query, follow_redirects=False).text  # single use
+    url = r.headers["location"]
     u = urlparse(url)
     q = {k: v[0] for k, v in parse_qs(u.query).items()}
     assert f"{u.scheme}://{u.netloc}{u.path}" == "https://connect.garmin.com/oauth2Confirm"
@@ -192,11 +198,20 @@ def test_garmin_connect_flow(tmp_path, garmin_mock):
     assert 43 <= len(verifier) <= 128
     assert q["code_challenge"] == base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
-    page = c.get("/v1/garmin/oauth/callback", params={"state": q["state"], "code": "good-code"})
+    # Finished in another browser (no cookie from /begin): refused, and the state is spent
+    other = c.get("/v1/garmin/oauth/callback", params={"state": q["state"], "code": "good-code"}, cookies={"rsk_garmin": "someone-else"})
+    assert "another device or browser" in other.text
+    begin = c.post("/v1/garmin/oauth/start", headers=h).json()["authorize_url"]
+    r = c.get(urlparse(begin).path + "?" + urlparse(begin).query, follow_redirects=False)
+    nonce = r.headers["set-cookie"].split("rsk_garmin=")[1].split(";")[0]
+    u = urlparse(r.headers["location"])
+    q = {k: v[0] for k, v in parse_qs(u.query).items()}
+    verifier = accounts.app_db().oauth_states.find_one({"state": q["state"]})["code_verifier"]
+    page = c.get("/v1/garmin/oauth/callback", params={"state": q["state"], "code": "good-code"}, cookies={"rsk_garmin": nonce})
     assert "Garmin connected" in page.text
     tok_file = tmp_path / "users" / "1" / "garmin_oauth.json"
     assert stat.S_IMODE(os.stat(tok_file).st_mode) == 0o600
-    exchange = parse_qs(garmin_mock[0].content.decode())
+    exchange = parse_qs([x for x in garmin_mock if x.url.host == "diauth.garmin.com"][-1].content.decode())
     assert exchange["code_verifier"] == [verifier] and exchange["client_secret"] == ["csecret"]
     st = c.get("/v1/status", headers=h).json()["garmin_official"]
     assert st["connected"] and st["garmin_user_id"] == "garmin-123"
@@ -215,3 +230,27 @@ def test_garmin_callback_rejects_unknown_state_and_cancel(tmp_path):
     c = client(tmp_path)
     assert "not connected" in c.get("/v1/garmin/oauth/callback", params={"state": "nope", "code": "x"}).text.lower()
     assert "cancelled" in c.get("/v1/garmin/oauth/callback", params={"error": "access_denied"}).text
+
+
+def test_one_garmin_account_links_to_one_user(tmp_path, garmin_mock):
+    for uid, g in ((1, "garmin-123"), (2, "garmin-999")):
+        (tmp_path / "users" / str(uid)).mkdir(parents=True)
+        (tmp_path / "users" / str(uid) / "garmin_oauth.json").write_text(json.dumps({"garmin_user_id": g}))
+    assert goauth.linked_users(tmp_path / "users", "garmin-123") == [1]
+    a = accounts.app_db()
+    a.oauth_states.insert_one({"state": "s2", "user_id": 2, "code_verifier": "v" * 50, "created_at": accounts.utc_now()})
+    with pytest.raises(goauth.OAuthError, match="already linked"):
+        goauth.complete(a, "s2", "good-code", "cid", "csecret", "https://x/cb", lambda uid: tmp_path / "users" / str(uid),
+                        linked_elsewhere=lambda g, uid: any(u != uid for u in goauth.linked_users(tmp_path / "users", g)))
+    assert json.loads((tmp_path / "users" / "2" / "garmin_oauth.json").read_text())["garmin_user_id"] == "garmin-999"  # untouched
+
+
+def test_google_sign_in_never_relinks_an_account():
+    a = accounts.app_db()
+    a.users.delete_many({})
+    a.users.insert_one({"id": 1, "email": "owner@example.com", "google_sub": "sub-owner", "name": "O", "role": "owner",
+                        "created_at": accounts.utc_now(), "deleted_at": None})
+    with pytest.raises(accounts.NotInvited, match="different Google account"):
+        accounts.sign_in_with_google(a, {"email_verified": True, "email": "owner@example.com", "sub": "sub-attacker"})
+    assert a.users.find_one({"id": 1})["google_sub"] == "sub-owner"
+    assert accounts.sign_in_with_google(a, {"email_verified": True, "email": "owner@example.com", "sub": "sub-owner"})["id"] == 1

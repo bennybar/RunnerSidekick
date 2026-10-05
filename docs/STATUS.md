@@ -332,6 +332,24 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Robustness and security (2026-10-05, v0.37.0)
+From the full-code review, batch 1:
+- Sync: one day or activity Garmin sends in a shape we can't read is skipped and noted ("Skipped 1 record…"); any other
+  error ends the job as a failure with a back-off instead of leaving it unfinished. The hourly job catches each user's
+  failure so the users after them still sync. One sync per user at a time across processes (a lease in the user's
+  database); reports and laps are written so two writers can't collide.
+- Google sign-in: a linked account is matched only by its Google ID; another Google account with the same email can't
+  take it over.
+- Garmin linking (official OAuth, not live yet): the app opens a one-time /begin link (2 minutes) that ties the flow to
+  that browser with a cookie; the callback needs it. A Garmin account already linked to another user is refused.
+- AI: only allowed models run on the server's key (`RSK_AI_MODELS`, plus the default); your own key may use any. A
+  daily cap across all users on the server's key (`RSK_AI_MAX_CALLS_ALL`, 300).
+- App: any unexpected error shows a message instead of crashing; a response the app can't read is rejected before it's
+  cached, so good saved data stays; chart data is read defensively.
+- VO₂ highlight uses the same freshness rule as fitness progress and says the real span ("in 7 weeks"). A new
+  account takes the phone's time zone. Messages no longer tell you to run backend commands. The race week title uses
+  the race's name, not text cut from the headline.
+
 ## Manual sync cooldown (2026-10-05, v0.36.0)
 - The server won't call Garmin for a manual sync within 15 minutes of the last sync that ended well (manual or the
   hourly job), 2 minutes after a failure, 30 minutes after Garmin rate-limited us, or before Garmin's own back-off
