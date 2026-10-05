@@ -15,12 +15,12 @@ android {
         applicationId = "com.bennybar.runnersidekick"
         minSdk = 35
         targetSdk = 36
-        versionCode = 68
-        versionName = "0.43.1"
+        versionCode = 69
+        versionName = "0.44.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"162421419636-deds89pjaleairjrbj6brdn29ldkhvh9.apps.googleusercontent.com\"")
     }
 
     // Release signing comes from ~/.gradle/gradle.properties (never the repo). Without it, release builds stay unsigned.

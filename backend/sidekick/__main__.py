@@ -6,7 +6,9 @@
   revoke-token NAME
   sync [--loop]          sync every connected user (+ report regeneration); --loop repeats until backfill completes
   invite add|remove|list EMAIL   invite-only access: who may sign in with Google
-  users                  list accounts
+  users [list]           list accounts
+  users disable|enable EMAIL|ID   a disabled account's sign-ins end, it can't sign in and isn't synced; data kept
+  users delete EMAIL|ID --yes     delete an account and all its data (can't be undone)
   set-owner-email EMAIL  let the owner sign in with Google as this address
   (most commands take --user ID; the default is the owner)
   rebuild-reports        regenerate reports after an algorithm change (new revisions; old ones kept)
@@ -188,7 +190,7 @@ def user_cfg(cfg, user_id: int | None):
 
 
 def cmd_sync_all(cfg, loop: bool, only_user: int | None) -> int:
-    users = [u["id"] for u in accounts.list_users(accounts.app_db())] if only_user is None else [only_user]
+    users = [u["id"] for u in accounts.list_users(accounts.app_db()) if not u.get("disabled_at")] if only_user is None else [only_user]
     worst = 0
     for uid in users:
         ucfg, _ = user_cfg(cfg, uid)
@@ -225,7 +227,9 @@ def main(argv=None) -> int:
     with_user(sub.add_parser("audit")).add_argument("--out")
     p = sub.add_parser("invite", help="invite-only access by Google email")
     p.add_argument("action", choices=["add", "remove", "list"]); p.add_argument("email", nargs="?")
-    sub.add_parser("users")
+    p = sub.add_parser("users", help="list, disable, enable or delete accounts")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "disable", "enable", "delete"])
+    p.add_argument("who", nargs="?", help="email or user id"); p.add_argument("--yes", action="store_true")
     sub.add_parser("set-owner-email").add_argument("email")
     p = sub.add_parser("serve"); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8765)
     sub.add_parser("migrate-sqlite").add_argument("--replace", action="store_true", help="overwrite data already in MongoDB")
@@ -242,9 +246,29 @@ def main(argv=None) -> int:
         return 0
     if args.cmd in ("invite", "users", "set-owner-email"):
         a = accounts.app_db()
-        if args.cmd == "users":
+        if args.cmd == "users" and args.action == "list":
             for u in accounts.list_users(a):
-                print(f"{u['id']:>3}  {u['role']:<6}  {u['email'] or '(no email yet)':<32}  {u['sessions']} active token(s)")
+                print(f"{u['id']:>3}  {u['role']:<6}  {u['email'] or '(no email yet)':<32}  {u['sessions']} active token(s)"
+                      + ("  DISABLED" if u.get("disabled_at") else ""))
+        elif args.cmd == "users":
+            u = accounts.find_user(a, args.who or "")
+            if u is None:
+                print(f"no account {args.who!r} (see: users list)"); return 2
+            label = f"user {u['id']} ({u['email'] or 'no email'})"
+            try:
+                if args.action == "delete":
+                    if u["role"] == accounts.OWNER_ROLE:
+                        print("the owner account can't be deleted"); return 2
+                    if not args.yes:
+                        print(f"This deletes {label} and all their data for good. Run again with --yes to do it."); return 2
+                    accounts.delete_user(a, cfg.data_dir, u["id"])
+                    print(f"Deleted {label}.")
+                else:
+                    accounts.set_disabled(a, u["id"], args.action == "disable")
+                    print(f"{'Disabled' if args.action == 'disable' else 'Enabled'} {label}."
+                          + (" Their sign-ins ended; their data is kept." if args.action == "disable" else " They can sign in again."))
+            except ValueError as e:
+                print(e); return 2
         elif args.cmd == "set-owner-email":
             accounts.set_owner_email(a, args.email)
             print(f"Owner can now sign in with Google as {accounts.normalise_email(args.email)}.")

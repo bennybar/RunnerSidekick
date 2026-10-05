@@ -77,7 +77,7 @@ def verify_session(conn: Database, token: str) -> dict | None:
         conn.sessions.update_one({"id": s["id"]}, {"$set": {"revoked_at": utc_now()}})
         return None
     u = one(conn.users, {"id": s["user_id"], "deleted_at": None})
-    if u is None:
+    if u is None or u.get("disabled_at"):
         return None
     conn.sessions.update_one({"id": s["id"]}, {"$set": {"last_used_at": utc_now()}})
     return {**u, "session_id": s["id"]}
@@ -132,6 +132,8 @@ def sign_in_with_google(conn: Database, claims: dict) -> dict:
         conn.users.insert_one({"id": next_id(conn, "users"), "email": email, "google_sub": sub, "name": claims.get("name"),
                                "role": "member", "created_at": utc_now(), "deleted_at": None})
         conn.invites.update_one({"email": email}, {"$set": {"used_at": utc_now()}})
+    elif u.get("disabled_at"):
+        raise NotInvited("This account has been disabled. Ask the server owner.")
     else:
         conn.users.update_one({"id": u["id"]}, {"$set": {"google_sub": sub, "name": u.get("name") or claims.get("name")}})
     return one(conn.users, {"google_sub": sub, "deleted_at": None})
@@ -149,9 +151,27 @@ def delete_user(conn: Database, data_dir: Path, user_id: int) -> None:
     conn.users.update_one({"id": user_id}, {"$set": {"deleted_at": utc_now(), "email": None, "google_sub": None, "name": None}})
 
 
+def find_user(conn: Database, who: str) -> dict | None:
+    """A live account by id or email."""
+    q = {"id": int(who)} if who.isdigit() else {"email": normalise_email(who)}
+    return one(conn.users, {**q, "deleted_at": None})
+
+
+def set_disabled(conn: Database, user_id: int, disabled: bool) -> None:
+    """Disabled: every sign-in ends now, new ones are refused and syncing stops; the data stays. The owner can't be."""
+    u = one(conn.users, {"id": user_id, "deleted_at": None})
+    if u is None:
+        raise ValueError("no such account")
+    if u["role"] == OWNER_ROLE:
+        raise ValueError("the owner account can't be disabled")
+    conn.users.update_one({"id": user_id}, {"$set": {"disabled_at": utc_now() if disabled else None}})
+    if disabled:
+        revoke_sessions(conn, user_id)
+
+
 def list_users(conn: Database) -> list[dict]:
     out = []
     for u in many(conn.users, {"deleted_at": None}, sort=[("id", 1)]):
-        out.append({k: u.get(k) for k in ("id", "email", "name", "role", "created_at")} |
+        out.append({k: u.get(k) for k in ("id", "email", "name", "role", "created_at", "disabled_at")} |
                    {"sessions": conn.sessions.count_documents({"user_id": u["id"], "revoked_at": None})})
     return out

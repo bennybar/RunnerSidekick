@@ -145,7 +145,8 @@ def test_account_deletion_removes_data_and_sessions(tmp_path):
     assert c.delete("/v1/account", headers=owner_h).status_code == 409
 
 
-def test_google_sign_in_unconfigured_is_503(tmp_path):
+def test_google_sign_in_unconfigured_is_503(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidekick.api.GOOGLE_WEB_CLIENT_ID", "")
     c = TestClient(create_app(cfg(tmp_path), connector=FixtureConnector(ANCHOR)))
     assert c.post("/v1/auth/google", json={"id_token": "x" * 30}).status_code == 503
 

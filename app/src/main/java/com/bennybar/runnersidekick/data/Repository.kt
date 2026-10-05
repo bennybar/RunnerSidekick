@@ -165,7 +165,11 @@ class Repository(
                 settings.setBackend(backendUrl, r.token)  // Today loads everything once the app opens
                 null
             }
-            403 -> "This Google account hasn't been invited yet. Ask the server owner to run: sidekick invite add <your email>"
+            // The server says why (not invited, or the account was disabled)
+            403 -> runCatching { json.parseToJsonElement(body).let { (it as kotlinx.serialization.json.JsonObject)["detail"]!!
+                    .let { d -> (d as kotlinx.serialization.json.JsonPrimitive).content } } }.getOrNull()
+                ?.let { if (it.contains("invited")) "$it. Ask the server owner to invite your Google email." else it }
+                ?: "This Google account can't sign in here. Ask the server owner."
             503 -> "Google sign-in isn't set up on this server yet."
             429 -> "Too many tries from this network. Wait a minute and try again."
             else -> "Sign-in failed (HTTP $code)."

@@ -1,0 +1,4 @@
+#!/bin/sh
+# /usr/local/bin/sidekick: the admin CLI from anywhere on the server (e.g. `sidekick invite add someone@gmail.com`).
+# Install: install -m 755 deploy/sidekick /usr/local/bin/sidekick
+cd /var/www/RunnerSidekick/backend && exec .venv/bin/python -m sidekick "$@"

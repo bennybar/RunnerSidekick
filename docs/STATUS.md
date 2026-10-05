@@ -332,6 +332,14 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Google sign-in, account admin (2026-10-05, v0.44.0)
+- Google sign-in is on: the Web OAuth client ID is in the app build and on the server (the Android clients, release
+  and debug, match by package name and signing key). Invite-only as before.
+- `sidekick users disable|enable EMAIL|ID`: a disabled account's sign-ins end at once, it can't sign in again and the
+  hourly sync skips it; its data is kept. `sidekick users delete EMAIL|ID --yes` deletes an account and its data.
+  Neither works on the owner. A refused Google sign-in shows the server's reason (not invited, or disabled).
+- `/usr/local/bin/sidekick` on the server (`deploy/sidekick`) runs the admin CLI from anywhere.
+
 ## Android review round 4 (2026-10-05, v0.43.1)
 - Server address: the saved token is never sent to a new address. A new server needs its own token (the sheet says
   so and Save waits for it), and it's checked there before anything is saved, so a wrong address can't sign you out.

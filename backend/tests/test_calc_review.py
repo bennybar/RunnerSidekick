@@ -725,3 +725,25 @@ def test_the_decision_says_when_reported_illness_is_applied(monkeypatch):
     for rule, want in (("R0", True), ("R1", False)):
         out = dc.decide(None, "x", date(2026, 10, 5), {"recommendation": {"rule_id": rule, "state": "normal"}})
         assert out["unwell_applied"] is want and (out["allows"] == "rest") is want
+
+
+def test_a_disabled_account_is_signed_out_refused_and_not_synced(tmp_path):
+    from sidekick import accounts
+    a = accounts.app_db()
+    owner = accounts.ensure_owner(a)
+    accounts.add_invite(a, "member@example.com")
+    claims = {"email": "member@example.com", "email_verified": True, "sub": "g-member", "name": "M"}
+    u = accounts.sign_in_with_google(a, claims)
+    tok = accounts.create_session(a, u["id"], "phone")
+    assert accounts.verify_session(a, tok) is not None
+    accounts.set_disabled(a, u["id"], True)
+    assert accounts.verify_session(a, tok) is None  # signed out now
+    import pytest
+    with pytest.raises(accounts.NotInvited, match="disabled"):
+        accounts.sign_in_with_google(a, claims)
+    assert next(x for x in accounts.list_users(a) if x["id"] == u["id"])["disabled_at"]
+    with pytest.raises(ValueError):
+        accounts.set_disabled(a, owner["id"], True)  # never the owner
+    accounts.set_disabled(a, u["id"], False)
+    assert accounts.sign_in_with_google(a, claims)["id"] == u["id"]
+    assert accounts.find_user(a, "MEMBER@example.com")["id"] == u["id"] and accounts.find_user(a, str(u["id"]))

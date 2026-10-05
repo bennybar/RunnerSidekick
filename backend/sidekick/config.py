@@ -42,7 +42,7 @@ REPO_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_DIR / "data"
 
 # Google Sign-In: the *Web* OAuth client ID from Google Cloud (not a secret). Android sign-in requests ID tokens for it.
-GOOGLE_WEB_CLIENT_ID = ""  # filled in once the Google Cloud OAuth client exists
+GOOGLE_WEB_CLIENT_ID = "162421419636-deds89pjaleairjrbj6brdn29ldkhvh9.apps.googleusercontent.com"  # Google Cloud OAuth Web client (the app's Android clients match by package + signing key)
 
 PUBLIC_BASE_URL = "https://runnersidekick.ibarak.org"
 GARMIN_REDIRECT_URI = f"{PUBLIC_BASE_URL}/v1/garmin/oauth/callback"
