@@ -215,18 +215,10 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
                 item {
                     Group {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
-                            supporting = run {
-                                val member = me?.value?.role == "member"
-                                val canConnect = status?.value?.garminOfficial?.available == true
-                                when {
-                                    st == "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
-                                    member && canConnect -> (if (st == "not_configured") "Garmin isn't connected yet" else "Your Garmin connection has to be renewed") +
-                                        ": tap Connect next to Garmin below. Syncing is paused until then."
-                                    member -> (if (st == "not_configured") "Garmin isn't connected for your account yet" else "Garmin's sign-in has expired") +
-                                        ". Connecting your own Garmin account opens once Garmin approves this app; until then, ask the server owner."
-                                    st == "not_configured" -> "Garmin isn't signed in on the server yet: run sidekick garmin-login there. Syncing is paused until then."
-                                    else -> "The server's Garmin sign-in has expired and has to be renewed there (sidekick garmin-login). Syncing is paused until then."
-                                }
+                            supporting = when (st) {
+                                "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
+                                "not_configured" -> "Garmin isn't connected yet: tap Connect next to Garmin below."
+                                else -> "Garmin ended this connection, so syncing is paused: tap Connect next to Garmin below."
                             },
                             icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
                     }
@@ -251,6 +243,8 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
                     }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided,
                         trailing = when {
                             s == null || s.synthetic -> null
+                            // Garmin ended the connection: Connect again (it replaces the old one)
+                            s.connection.state == "reauth_required" && g?.connected != true -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                             g?.connected == true || s.garminLinked -> ({ TextButton(onClick = { confirm = "garmin" }) { Text("Disconnect") } })
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
                             else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })

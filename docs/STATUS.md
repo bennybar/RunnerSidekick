@@ -332,6 +332,18 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Connect Garmin from the app (2026-10-05, v0.45.0)
+- Garmin is connected from the phone: Settings → Garmin → Connect (and by itself right after signing in when the
+  account has no Garmin connection, with "Skip for now"). Garmin's own sign-in page opens in the app, so the password
+  and any two-factor code go only to Garmin, from the phone's address (the server no longer signs in to Garmin and
+  can't hit its sign-in limits). Garmin returns a one-time ticket; the app sends only that to `POST
+  /v1/garmin/ticket`, and the server exchanges it for Garmin's renewable tokens, kept in the user's folder, then
+  starts the first sync. One Garmin account per app user (by Garmin profile id); a failed relink never replaces a
+  working connection. Status has `garmin_linked`.
+- Settings → Garmin → Disconnect (with a confirmation) removes the connection; downloaded data stays. When Garmin ends
+  a connection, the row offers Connect again. `sidekick garmin-login` still works on the server as a fallback.
+- Still unofficial Garmin access (the official OAuth route waits for Garmin's approval).
+
 ## Google sign-in, account admin (2026-10-05, v0.44.0)
 - Google sign-in is on: the Web OAuth client ID is in the app build and on the server (the Android clients, release
   and debug, match by package name and signing key). Invite-only as before.

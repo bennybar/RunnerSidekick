@@ -46,6 +46,17 @@ private val SIGN_IN_URL = android.net.Uri.parse("https://sso.garmin.com/sso/sign
     .appendQueryParameter("gauthHost", SSO_EMBED).appendQueryParameter("service", SSO_EMBED)
     .appendQueryParameter("source", SSO_EMBED).appendQueryParameter("redirectAfterAccountLoginUrl", SSO_EMBED)
     .appendQueryParameter("redirectAfterAccountCreationUrl", SSO_EMBED).build().toString()
+/** Garmin's widget is made for a frame on a desktop page: phone-sized fields and buttons (looks only; the form is Garmin's). */
+private const val PHONE_STYLE = """(function(){
+  if (document.getElementById('rsk-style')) return;
+  var m = document.createElement('meta'); m.name = 'viewport'; m.content = 'width=device-width, initial-scale=1'; document.head.appendChild(m);
+  var s = document.createElement('style'); s.id = 'rsk-style';
+  s.textContent = 'body{font-family:sans-serif;font-size:17px;padding:8px 16px;margin:0;color:#1b1b1b}' +
+    'input[type=email],input[type=text],input[type=password],input[type=tel],input[type=number]{width:100%!important;max-width:none!important;box-sizing:border-box;font-size:18px;padding:14px 12px;margin:6px 0 14px;border:1px solid #8a8a8a;border-radius:10px}' +
+    'button,input[type=submit],.btn{width:100%!important;font-size:18px;padding:14px;border-radius:24px;margin-top:8px}' +
+    'h1,h2,h3{font-size:22px} label{font-weight:600} form,fieldset,#login-form,.form-group{width:auto!important;max-width:none!important}';
+  document.head.appendChild(s);
+})()"""
 private val TICKET = Regex("""ticket=(ST-[A-Za-z0-9._\-]{8,300})""")
 
 /**
@@ -131,6 +142,7 @@ fun GarminConnectScreen(onDone: () -> Unit, onSkip: (() -> Unit)?, onClose: () -
                                     override fun onPageFinished(view: WebView, url: String?) {
                                         // The sign-in widget's success page carries the ticket in its own script
                                         view.evaluateJavascript("document.documentElement.outerHTML") { html -> caught(html) }
+                                        view.evaluateJavascript(PHONE_STYLE, null)
                                     }
                                 }
                                 loadUrl(SIGN_IN_URL)
