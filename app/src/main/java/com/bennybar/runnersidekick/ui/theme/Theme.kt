@@ -18,24 +18,42 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.bennybar.runnersidekick.R
 import androidx.compose.ui.unit.dp
 
-// Fallback palette (used if dynamic color is unavailable): a calm teal-green seed.
+// Design B ("Expressive Tonal"): deep green and coral on a sage ground, white cards, tonal chips
 private val Light = lightColorScheme(
-    primary = Color(0xFF006A60), onPrimary = Color.White, primaryContainer = Color(0xFF9EF2E4), onPrimaryContainer = Color(0xFF00201C),
-    secondary = Color(0xFF4A635F), secondaryContainer = Color(0xFFCCE8E2), onSecondaryContainer = Color(0xFF05201C),
-    tertiary = Color(0xFF456179), tertiaryContainer = Color(0xFFCCE5FF), onTertiaryContainer = Color(0xFF001E31),
-    surface = Color(0xFFF4FBF8), surfaceContainerLow = Color(0xFFEEF5F2), surfaceContainer = Color(0xFFE8EFEC),
-    surfaceContainerHigh = Color(0xFFE3EAE7),
+    primary = Color(0xFF1F5F4A), onPrimary = Color.White, primaryContainer = Color(0xFFC4E8D6), onPrimaryContainer = Color(0xFF002116),
+    secondary = Color(0xFF4C5A52), onSecondary = Color.White, secondaryContainer = Color(0xFFDDE6DC), onSecondaryContainer = Color(0xFF18201C),
+    tertiary = Color(0xFFB8432A), onTertiary = Color.White, tertiaryContainer = Color(0xFFFFE1D6), onTertiaryContainer = Color(0xFF4A1606),
+    background = Color(0xFFF2F4EE), onBackground = Color(0xFF18201C), surface = Color(0xFFF2F4EE), onSurface = Color(0xFF18201C),
+    onSurfaceVariant = Color(0xFF4C5A52), surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF8FAF5),
+    surfaceContainer = Color.White, surfaceContainerHigh = Color.White, surfaceContainerHighest = Color(0xFFE6EBE3),
+    outline = Color(0xFF76837B), outlineVariant = Color(0xFFC4CCC5),
 )
 private val Dark = darkColorScheme(
-    primary = Color(0xFF82D5C8), onPrimary = Color(0xFF003731), primaryContainer = Color(0xFF005048), onPrimaryContainer = Color(0xFF9EF2E4),
-    secondary = Color(0xFFB1CCC6), secondaryContainer = Color(0xFF334B47), onSecondaryContainer = Color(0xFFCCE8E2),
-    tertiary = Color(0xFFADCAE6), tertiaryContainer = Color(0xFF2D4960), onTertiaryContainer = Color(0xFFCCE5FF),
-    surface = Color(0xFF0E1513), surfaceContainerLow = Color(0xFF171D1B), surfaceContainer = Color(0xFF1B211F),
-    surfaceContainerHigh = Color(0xFF252B2A),
+    primary = Color(0xFF8FD5B5), onPrimary = Color(0xFF003826), primaryContainer = Color(0xFF1F5F4A), onPrimaryContainer = Color(0xFFC4E8D6),
+    secondary = Color(0xFFBFC9C0), onSecondary = Color(0xFF29332D), secondaryContainer = Color(0xFF34413A), onSecondaryContainer = Color(0xFFDDE6DC),
+    tertiary = Color(0xFFFFB59F), onTertiary = Color(0xFF5E1A07), tertiaryContainer = Color(0xFF7A2B14), onTertiaryContainer = Color(0xFFFFE1D6),
+    background = Color(0xFF101512), onBackground = Color(0xFFE0E4DE), surface = Color(0xFF101512), onSurface = Color(0xFFE0E4DE),
+    onSurfaceVariant = Color(0xFFC0C9C1), surfaceContainerLowest = Color(0xFF0B0F0D), surfaceContainerLow = Color(0xFF161B18),
+    surfaceContainer = Color(0xFF1B211E), surfaceContainerHigh = Color(0xFF1F2622), surfaceContainerHighest = Color(0xFF2A312D),
+    outline = Color(0xFF8A948C), outlineVariant = Color(0xFF404943),
 )
+
+/** The deep green hero cards (readiness, the run's header) and their content: the same in light and dark. */
+@Immutable
+data class Hero(val container: Color, val content: Color, val tile: Color)
+
+val LocalHero = staticCompositionLocalOf { Hero(Color(0xFF1F5F4A), Color.White, Color.White.copy(alpha = 0.14f)) }
+private val LightHero = Hero(Color(0xFF1F5F4A), Color.White, Color.White.copy(alpha = 0.14f))
+private val DarkHero = Hero(Color(0xFF1A4D3C), Color(0xFFF1F7F2), Color.White.copy(alpha = 0.10f))
 
 /** Semantic colours for data viz. Always paired with text/icons so meaning never relies on colour alone. */
 @Immutable
@@ -93,17 +111,33 @@ fun accentFor(category: String): Accent? = LocalAccents.current.let { a ->
 }
 
 private val base = Typography()
-// Expressive: heavier display/headline weights for hero numerals and headlines, medium-weight titles and labels.
+
+@OptIn(ExperimentalTextApi::class)
+private fun variable(res: Int, w: FontWeight) = Font(res, w, variationSettings = FontVariation.Settings(FontVariation.weight(w.weight)))
+
+/** Unbounded (wide display face) for numbers and headlines; Plus Jakarta Sans for everything else. Both variable fonts. */
+private val Display = FontFamily(variable(R.font.unbounded, FontWeight.Medium), variable(R.font.unbounded, FontWeight.SemiBold),
+    variable(R.font.unbounded, FontWeight.Bold))
+private val Body = FontFamily(variable(R.font.plus_jakarta_sans, FontWeight.Normal), variable(R.font.plus_jakarta_sans, FontWeight.Medium),
+    variable(R.font.plus_jakarta_sans, FontWeight.SemiBold), variable(R.font.plus_jakarta_sans, FontWeight.Bold))
+
+// Unbounded runs wide, so display and headline sizes step down a little from the Material defaults
 private val AppTypography = base.copy(
-    displayLarge = base.displayLarge.copy(fontWeight = FontWeight.Medium),
-    displayMedium = base.displayMedium.copy(fontWeight = FontWeight.Medium),
-    displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Medium),
-    headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Medium),
-    headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Medium),
-    headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Medium),
-    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Medium),
-    titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-    labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+    displayLarge = base.displayLarge.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 52.sp, lineHeight = 56.sp),
+    displayMedium = base.displayMedium.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 40.sp, lineHeight = 46.sp),
+    displaySmall = base.displaySmall.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp),
+    headlineLarge = base.headlineLarge.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 26.sp, lineHeight = 32.sp),
+    headlineMedium = base.headlineMedium.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
+    headlineSmall = base.headlineSmall.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 26.sp),
+    titleLarge = base.titleLarge.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
+    titleMedium = base.titleMedium.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
+    titleSmall = base.titleSmall.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
+    bodyLarge = base.bodyLarge.copy(fontFamily = Body),
+    bodyMedium = base.bodyMedium.copy(fontFamily = Body),
+    bodySmall = base.bodySmall.copy(fontFamily = Body),
+    labelLarge = base.labelLarge.copy(fontFamily = Body, fontWeight = FontWeight.SemiBold),
+    labelMedium = base.labelMedium.copy(fontFamily = Body, fontWeight = FontWeight.SemiBold),
+    labelSmall = base.labelSmall.copy(fontFamily = Body, fontWeight = FontWeight.Medium),
 )
 
 private val AppShapes = Shapes(
@@ -112,7 +146,7 @@ private val AppShapes = Shapes(
 )
 
 @Composable
-fun RunnerTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = true, content: @Composable () -> Unit) {
+fun RunnerTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = false, content: @Composable () -> Unit) {
     val ctx = LocalContext.current
     val cs = when {
         dynamic && dark -> dynamicDarkColorScheme(ctx)
@@ -120,7 +154,8 @@ fun RunnerTheme(dark: Boolean = isSystemInDarkTheme(), dynamic: Boolean = true, 
         dark -> Dark
         else -> Light
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides if (dark) DarkAccents else LightAccents) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides if (dark) DarkAccents else LightAccents,
+        LocalHero provides if (dark) DarkHero else LightHero) {
         @OptIn(ExperimentalMaterial3ExpressiveApi::class)
         MaterialExpressiveTheme(colorScheme = cs, typography = AppTypography, shapes = AppShapes,
             motionScheme = MotionScheme.expressive(), content = content)

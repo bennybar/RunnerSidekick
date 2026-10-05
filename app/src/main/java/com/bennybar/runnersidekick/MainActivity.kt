@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
@@ -135,13 +136,20 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            if (onTab) ShortNavigationBar {
-                TABS.forEach { t ->
-                    val sel = dest?.hierarchy?.any { it.route == t.route } == true
-                    ShortNavigationBarItem(
-                        selected = sel, onClick = { go(t.route) },
-                        icon = { Icon(if (sel) t.selected else t.unselected, null) }, label = { Text(t.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                    )
+            // A floating, rounded bar over the page background
+            if (onTab) androidx.compose.foundation.layout.Box(Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface)
+                .navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
+                androidx.compose.material3.Surface(shape = androidx.compose.material3.MaterialTheme.shapes.large,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, shadowElevation = 2.dp) {
+                    ShortNavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, windowInsets = WindowInsets(0, 0, 0, 0)) {
+                        TABS.forEach { t ->
+                            val sel = dest?.hierarchy?.any { it.route == t.route } == true
+                            ShortNavigationBarItem(
+                                selected = sel, onClick = { go(t.route) },
+                                icon = { Icon(if (sel) t.selected else t.unselected, null) }, label = { Text(t.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
+                            )
+                        }
+                    }
                 }
             }
         },

@@ -3,6 +3,10 @@ package com.bennybar.runnersidekick.ui.today
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.toShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -140,10 +144,10 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
-                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
-                // Readiness and the next run answer "what should I do today"; the details and what changed sit behind a tap
+                // Readiness and the next run answer "what should I do today" first; the details and what changed sit behind a tap
                 report.readiness?.let { r -> animatedItem(key = "readiness") { ReadinessCard(r) { sheet = "readiness" } } }
                 report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
+                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
@@ -164,18 +168,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 animatedItem(key = "readings") {
                     Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }) { evidence = it }
                 }
-                report.recentRun?.let { run ->
-                    animatedItem(key = "lastrun") {
-                        Group(title = "Latest run") {
-                            row(Format.shortDate(run.localDate) + " · " + Format.distance(run.distanceM, units),
-                                supporting = "${Format.duration(run.movingS)} moving · " +
-                                    Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units) +
-                                    (run.avgHr?.let { " · ${it.roundToInt()} bpm" } ?: ""),
-                                icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided, onClick = { onOpenRun(run.sourceId) },
-                                accent = "running")
-                        }
-                    }
-                }
+                report.recentRun?.let { run -> animatedItem(key = "lastrun") { LastRunCard(run, units) { onOpenRun(run.sourceId) } } }
             }
         }
     }
@@ -456,68 +449,57 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
 }
 
 
-/** Health and fitness out of 100, as two tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
+/** Health and fitness out of 100, as two tonal tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
 @Composable
 private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    // Equal heights, and a fixed two-line subtitle, so both rings and labels line up
+    val sleep = com.bennybar.runnersidekick.ui.theme.LocalAccents.current.sleep
+    // Equal heights, and a fixed two-line subtitle, so both numbers and bars line up
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-        ScoreTile("Health", s.scope["health"], s.health, cs.tertiary, Modifier.weight(1f)) { onOpen("health") }
-        ScoreTile("Fitness", s.scope["fitness"], s.fitness, cs.primary, Modifier.weight(1f)) { onOpen("fitness") }
+        ScoreTile("Health", s.scope["health"], s.health, sleep.container, sleep.content,
+            androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), Modifier.weight(1f)) { onOpen("health") }
+        ScoreTile("Fitness", s.scope["fitness"], s.fitness, cs.tertiaryContainer, cs.onTertiaryContainer,
+            androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 8.dp, 28.dp), Modifier.weight(1f)) { onOpen("fitness") }
     }
 }
 
 @Composable
-private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color,
-                      modifier: Modifier, onOpen: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
+private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, container: androidx.compose.ui.graphics.Color,
+                      content: androidx.compose.ui.graphics.Color, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
     val v = sc?.score
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = modifier.fillMaxHeight()) {
-        // A soft wash of the score's colour from the top, fading into the card
-        Column(Modifier.fillMaxHeight().background(androidx.compose.ui.graphics.Brush.verticalGradient(
-            listOf(color.copy(alpha = 0.16f), cs.surfaceContainerHigh))).padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                // What the number covers, so Health isn't read as a medical verdict
-                Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant,
-                    minLines = 2, maxLines = 2)
+    Surface(onClick = onOpen, shape = shape, color = container, contentColor = content, modifier = modifier.fillMaxHeight()
+        .semantics(mergeDescendants = true) { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
+        Column(Modifier.fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            // What the number covers, so Health isn't read as a medical verdict
+            Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.75f),
+                minLines = 2, maxLines = 2)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(v?.toString() ?: "—", style = MaterialTheme.typography.displaySmall)
+                Spacer(Modifier.width(8.dp))
+                Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 6.dp))
             }
-            // The ring and its lines, centred in the tile under the left-aligned title
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(96.dp), description = "$title score ${v ?: "not available"} out of 100")
-                Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
-                val t = sc?.trend
-                // Completeness is shown on its own, never hidden behind the trend
-                Text(listOfNotNull(
-                    when {
-                        t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
-                        // A lower Fitness number comes from Garmin's VO2 estimate: labelled as such, not as lost fitness
-                        t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks" + if (t.note != null) " · estimate" else ""
-                        t != null -> "Same as 4 weeks ago"
-                        else -> null
-                    },
-                    if (sc?.status == "partial") "partial" else null,
-                    if (sc?.stale == true) "stale" else null,
-                ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
-                    style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
-                    Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = color)
-                }
+            // The score as a bar on a white track
+            Box(Modifier.fillMaxWidth().height(10.dp).background(MaterialTheme.colorScheme.surfaceContainerLowest, CircleShape)) {
+                Box(Modifier.fillMaxWidth(((v ?: 0) / 100f).coerceIn(0f, 1f)).height(10.dp).background(content, CircleShape))
             }
-        }
-    }
-}
-
-@Composable
-private fun ScoreRing(title: String, sc: com.bennybar.runnersidekick.data.remote.Score?, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    val cs = MaterialTheme.colorScheme
-    val v = sc?.score
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        com.bennybar.runnersidekick.ui.components.ScoreGauge(v, color, Modifier.size(84.dp), description = "$title score ${v ?: "not available"} out of 100")
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.bodyMedium, color = color)
+            val t = sc?.trend
+            // Completeness is shown on its own, never hidden behind the trend
+            Text(listOfNotNull(
+                when {
+                    t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
+                    // A lower Fitness number comes from Garmin's VO2 estimate: labelled as such, not as lost fitness
+                    t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks" + if (t.note != null) " · estimate" else ""
+                    t != null -> "Same as 4 weeks ago"
+                    else -> null
+                },
+                if (sc?.status == "partial") "partial" else null,
+                if (sc?.stale == true) "stale" else null,
+            ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
+                style = MaterialTheme.typography.labelMedium)
+            sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
+                Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = content.copy(alpha = 0.8f))
+            }
         }
     }
 }
@@ -576,19 +558,28 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
     }
 }
 
-/** Our own training readiness out of 100: what it means in a few words and what holds it back. Tap for the breakdown. */
+/** Our own training readiness out of 100, in the green hero card: the number in a scalloped badge, what it means and
+ *  what holds it back. Tap for the breakdown. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOpen: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val v = s.score ?: 0
-    val tone = if (v >= 75) cs.primary else if (v >= 50) cs.secondary else cs.tertiary
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(tone.copy(alpha = 0.14f), cs.surfaceContainerHigh)))
-            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ScoreRing("Training readiness", s.copy(label = s.headline ?: s.label), tone,
-                Modifier.fillMaxWidth())
-            Text((s.heldBackBy?.let { "Held back by: ${it.lowercase()} · " } ?: "") + "tap for details",
-                style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
+    Surface(onClick = onOpen, shape = RoundedCornerShape(36.dp), color = hero.container, contentColor = hero.content, modifier = Modifier.fillMaxWidth()
+        .semantics(mergeDescendants = true) { contentDescription = "Training readiness ${s.score ?: "not available"}. ${s.headline ?: s.label ?: ""}" }) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(120.dp).background(hero.tile, MaterialShapes.Cookie9Sided.toShape()), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(s.score?.toString() ?: "—", style = MaterialTheme.typography.displayMedium)
+                    Text("readiness", style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.85f))
+                }
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(s.label ?: "Not known yet", style = MaterialTheme.typography.titleLarge)
+                s.headline?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = hero.content.copy(alpha = 0.9f)) }
+                Text((s.heldBackBy?.let { "Held back by ${it.lowercase()} · " } ?: "") + "tap for details",
+                    style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.75f))
+            }
         }
     }
 }
@@ -608,35 +599,57 @@ private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, cha
     }
 }
 
-/** The next run in numbers: kind, distance, heart-rate cap, pace and time, with the reason in one line. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
+/** The next run in numbers: kind, distance, heart-rate cap, pace and time as chips, with the reason in one line. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, units: Units) {
     val cs = MaterialTheme.colorScheme
     val dist = n.distanceKm?.let { if (units == Units.IMPERIAL) "%.1f mi".format(it / 1.609344) else "%.1f km".format(it) }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(cs.primaryContainer, cs.secondaryContainer, cs.tertiaryContainer.copy(alpha = 0.8f))))
-            .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                com.bennybar.runnersidekick.ui.components.ShapeBadge(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided,
-                    Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("Next run · ${n.dayLabel}", style = MaterialTheme.typography.labelLarge, color = cs.onPrimaryContainer.copy(alpha = 0.8f))
-                    Text(n.title, style = MaterialTheme.typography.headlineSmall, color = cs.onPrimaryContainer)
+                Text("Next run", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Surface(shape = CircleShape, color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
+                    Text(n.dayLabel, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
             }
+            Text(n.title, style = MaterialTheme.typography.headlineSmall)
             val chips = listOfNotNull(dist, n.hr?.text, n.pace, n.minutes?.let { "about $it min" })
             if (chips.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 chips.forEach { c ->
-                    Surface(shape = MaterialTheme.shapes.large, color = cs.surface.copy(alpha = 0.78f)) {
-                        Text(c, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                    Surface(shape = RoundedCornerShape(16.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
+                        Text(c, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                 }
             }
-            if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
-                color = cs.onPrimaryContainer.copy(alpha = 0.8f))
+            if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+/** The latest run as one card: a green badge, when, and distance at pace. */
+@Composable
+private fun LastRunCard(run: com.bennybar.runnersidekick.data.remote.RecentRun, units: Units, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
+    val pace = Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units)
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(48.dp).background(hero.container, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Outlined.DirectionsRun, null, tint = hero.content)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Latest run · ${Format.shortDate(run.localDate)} · ${Format.duration(run.movingS)}", style = MaterialTheme.typography.labelMedium,
+                    color = cs.onSurfaceVariant)
+                Text("${Format.distance(run.distanceM, units)} at $pace", style = MaterialTheme.typography.titleMedium)
+            }
+            run.avgHr?.let {
+                Surface(shape = RoundedCornerShape(12.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
+                    Text("${it.roundToInt()} bpm", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+            }
         }
     }
 }

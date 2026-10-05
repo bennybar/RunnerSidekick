@@ -37,6 +37,13 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material.icons.outlined.Info
 import kotlinx.coroutines.launch
@@ -105,7 +112,7 @@ private fun displayName(name: String?) = name?.takeUnless { it.isBlank() || it.e
 private fun BigStat(value: String, unit: String?, label: String, color: Color, modifier: Modifier = Modifier) {
     Column(modifier) {
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = MaterialTheme.typography.headlineLarge, color = color)
+            Text(value, style = MaterialTheme.typography.headlineMedium, color = color, maxLines = 1)
             unit?.let { Text(" $it", style = MaterialTheme.typography.titleMedium, color = color.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 4.dp)) }
         }
         Text(label, style = MaterialTheme.typography.labelLarge, color = color.copy(alpha = 0.8f))
@@ -202,8 +209,8 @@ private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units
             Text(if (start == Format.weekStart(LocalDate.now(), firstDay)) "This week" else "Week of ${Format.shortDate(start.toString())}",
                 style = MaterialTheme.typography.titleMedium, color = on)
             Row {
-                BigStat(d, du, "distance", on, Modifier.weight(1f))
-                BigStat("${runs.size}", null, if (runs.size == 1) "run" else "runs", on, Modifier.weight(0.7f))
+                BigStat(d, du, "distance", on, Modifier.weight(1.25f))
+                BigStat("${runs.size}", null, if (runs.size == 1) "run" else "runs", on, Modifier.weight(0.6f))
                 BigStat(Format.hoursMinutes(runs.sumOf { it.movingS ?: 0.0 }).replace(" min", "m").replace(" h ", "h "), null, "moving", on, Modifier.weight(1f))
             }
         }
@@ -271,6 +278,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
             }
             LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
+                if (r.decoupling.decouplingPct != null) item { DecouplingCard(r.decoupling) }
                 // Shown at the top once asked for (or already written); the button lives in the top bar
                 if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
@@ -368,61 +376,78 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
     evidence?.let { EvidenceSheet(it) { evidence = null } }
 }
 
+/** The run's header, in the green hero card: distance with the moving pace in a white pill beside it, then six numbers
+ *  as tiles. */
 @Composable
 private fun RunHero(r: PostRunReport, units: Units) {
     val a = r.activity
-    val on = MaterialTheme.colorScheme.onPrimaryContainer
+    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
+    val on = hero.content
     val (d, du) = distanceParts(a.distanceM, units)
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            displayName(a.name)?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = on) }
-            // Distance with the moving pace beside it
+    val pace = Format.pace(r.paceMovingSPerKm, units)
+    Surface(shape = RoundedCornerShape(40.dp), color = hero.container, contentColor = on, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(listOfNotNull(Format.longDate(a.localDate), displayName(a.name)).joinToString(" · "),
+                style = MaterialTheme.typography.labelLarge, color = on.copy(alpha = 0.85f))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(d, style = MaterialTheme.typography.displayLarge, color = on)
-                Text(" $du", style = MaterialTheme.typography.headlineSmall, color = on.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 10.dp))
+                Text(d, style = MaterialTheme.typography.displayLarge)
+                Text(" $du", style = MaterialTheme.typography.titleMedium, color = on.copy(alpha = 0.85f), modifier = Modifier.padding(bottom = 8.dp))
                 Spacer(Modifier.weight(1f))
-                Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 6.dp)) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(Format.pace(r.paceMovingSPerKm, units).substringBefore(" "), style = MaterialTheme.typography.headlineLarge, color = on)
-                        Text(" " + Format.pace(r.paceMovingSPerKm, units).substringAfter(" "), style = MaterialTheme.typography.titleMedium,
-                            color = on.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 4.dp))
+                Surface(shape = RoundedCornerShape(20.dp), color = on, contentColor = hero.container) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(pace.substringBefore(" "), style = MaterialTheme.typography.headlineMedium)
+                        Text(pace.substringAfter(" ", "") + " moving", style = MaterialTheme.typography.labelSmall)
                     }
-                    Text("moving pace", style = MaterialTheme.typography.labelLarge, color = on.copy(alpha = 0.8f))
                 }
             }
-            Row {
-                BigStat(a.avgHr?.roundToInt()?.toString() ?: "—", "bpm", "avg heart rate", on, Modifier.weight(1f))
-                // Garmin's aerobic training effect for this run
-                val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
-                BigStat(te?.let { "%.1f".format(it) } ?: "—", null, "aerobic TE", on, Modifier.weight(1f))
-                // Garmin's VO2 max on the day of the run (as Garmin shows it); the run's own estimate as a fallback
-                BigStat(r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"') ?: "—", null,
-                    if (r.garminVo2maxDay != null || r.garminMetrics["vO2MaxValue"] == null) "VO₂ max" else "VO₂ max (run)", on, Modifier.weight(1f))
-            }
-            Row {
-                BigStat(Format.duration(a.movingS), null, "moving", on, Modifier.weight(1f))
-                BigStat(Format.duration(a.elapsedS), null, "elapsed", on, Modifier.weight(1f))
-                BigStat("+${Format.elevation(a.elevationGainM, units)}", null, "climb", on, Modifier.weight(1f))
-            }
-            // Aerobic decoupling for every run: pace:HR and power:HR, first half against second
-            val dc = r.decoupling
-            val ready = r.garminReadinessDay?.value?.roundToInt()?.toString()
-            if (dc.decouplingPct != null || ready != null) Row(verticalAlignment = Alignment.Bottom) {
-                if (dc.decouplingPct != null) Column(Modifier.weight(2f)) {
-                    DecouplingTitle(on)
-                    Row {
-                        BigStat("%.1f".format(dc.decouplingPct), "%", "pace:HR", on, Modifier.weight(1f))
-                        BigStat(dc.powerDecouplingPct?.let { "%.1f".format(it) } ?: "—", if (dc.powerDecouplingPct != null) "%" else null,
-                            "power:HR", on, Modifier.weight(1f))
-                    }
-                } else Spacer(Modifier.weight(2f))
+            val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
+            // Garmin's VO2 max on the day of the run (as Garmin shows it); the run's own estimate as a fallback
+            val vo2 = r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"')
+            val tiles = listOf(
+                (a.avgHr?.roundToInt()?.toString() ?: "—") to "avg bpm",
+                (te?.let { "%.1f".format(it) } ?: "—") to "aerobic TE",
                 // Garmin's training readiness on the morning of the run
-                if (ready != null) BigStat(ready, null, "Garmin readiness", on, Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
+                (r.garminReadinessDay?.value?.roundToInt()?.toString() ?: "—") to "Garmin readiness",
+                // Elapsed only when stops made it differ
+                Format.duration(a.movingS) to (if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "moving · ${Format.duration(a.elapsedS)} total" else "moving"),
+                "+${Format.elevation(a.elevationGainM, units)}" to "climb",
+                (vo2 ?: "—") to (if (r.garminVo2maxDay != null || vo2 == null) "VO₂ estimate" else "VO₂ (run)"),
+            )
+            tiles.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                    row.forEach { (v, l) ->
+                        Column(Modifier.weight(1f).fillMaxHeight().background(hero.tile, RoundedCornerShape(18.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                            Text(v, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                            Text(l, style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.85f))
+                        }
+                    }
+                }
             }
-            if (dc.decouplingPct != null && !dc.eligible) Text("Decoupling is indicative here: " +
-                (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady" else dc.reasons.firstOrNull() ?: "not a steady run") + ".",
-                style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
             Text("Pace uses moving time (stops excluded). Elapsed includes stops.", style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
+        }
+    }
+}
+
+/** Aerobic decoupling for every run, pace:HR and power:HR (first half against second), as two tonal tiles. */
+@Composable
+private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decoupling) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DecouplingTitle(cs.onSurface)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct to "power:HR · best on hills").forEach { (v, l) ->
+                    Column(Modifier.weight(1f).background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {
+                        Text(v?.let { "%.1f%%".format(it) } ?: "—", style = MaterialTheme.typography.headlineMedium, color = cs.onSecondaryContainer)
+                        Text(if (v == null && l.startsWith("power")) "no power recorded" else l, style = MaterialTheme.typography.labelMedium,
+                            color = cs.onSecondaryContainer.copy(alpha = 0.85f))
+                    }
+                }
+            }
+            Text(if (!dc.eligible) "Indicative here: " + (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady"
+                else dc.reasons.firstOrNull() ?: "not a steady run") + "."
+                else "Under 5% means heart rate kept pace with the effort. Lower is better.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }
@@ -433,8 +458,8 @@ private fun RunHero(r: PostRunReport, units: Units) {
 private fun DecouplingTitle(color: Color) {
     val tip = androidx.compose.material3.rememberTooltipState(isPersistent = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Aerobic decoupling", style = MaterialTheme.typography.titleSmall, color = color)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text("Aerobic decoupling", style = MaterialTheme.typography.titleMedium, color = color, modifier = Modifier.weight(1f))
         androidx.compose.material3.TooltipBox(
             positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(
                 androidx.compose.material3.TooltipAnchorPosition.Above),
@@ -456,11 +481,39 @@ private fun DecouplingTitle(color: Color) {
 
 @Composable
 private fun Splits(r: PostRunReport, units: Units) {
+    val cs = MaterialTheme.colorScheme
     Group(title = "Splits") {
+        // Capsules: taller = faster; the hilliest km in coral with its flat-equivalent pace
+        val paced = r.splits.filter { it.paceSPerKm != null }
+        if (paced.size >= 2) custom {
+            val fastest = paced.minOf { it.paceSPerKm!! }
+            val slowest = paced.maxOf { it.paceSPerKm!! }
+            val hilly = r.splits.filter { it.complete }.maxByOrNull { it.elevationGainM ?: 0.0 }?.takeIf { (it.elevationGainM ?: 0.0) >= 10 && it.gapPaceSPerKm != null }
+            Row(Modifier.fillMaxWidth().height(110.dp).semantics(mergeDescendants = true) { contentDescription = "Pace per kilometre, taller is faster" },
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+                r.splits.forEach { s ->
+                    val f = s.paceSPerKm?.let { if (slowest > fastest) 0.35f + 0.65f * ((slowest - it) / (slowest - fastest)).toFloat() else 1f } ?: 0.1f
+                    Box(Modifier.weight(1f).fillMaxHeight(f).background(
+                        (if (s.idx == hilly?.idx) cs.tertiary else cs.primary).copy(alpha = if (s.complete) 1f else 0.45f), CircleShape))
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                r.splits.forEach { s -> Text("${s.idx + 1}", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+                    color = cs.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+            }
+            hilly?.let { h ->
+                Surface(shape = RoundedCornerShape(18.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.padding(top = 10.dp)) {
+                    Text("Km ${h.idx + 1} climbed ${Format.elevation(h.elevationGainM, units)}: ${Format.pace(h.paceSPerKm, units)} actual, " +
+                        "${Format.pace(h.gapPaceSPerKm, units)} on the flat.", style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
+                }
+            }
+        }
         custom {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                listOf("#", "Pace", "Flat-equiv.", "HR", "Zone", "Climb").forEachIndexed { i, h ->
-                    Text(h, Modifier.weight(if (i == 0) 0.5f else 1f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                listOf("#", "Pace", "Flat", "HR", "Zone", "Climb").forEachIndexed { i, h ->
+                    Text(h, Modifier.weight(if (i == 0) 0.5f else 1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1)
                 }
             }
             HorizontalDivider()
@@ -475,7 +528,7 @@ private fun Splits(r: PostRunReport, units: Units) {
                     Text("+${Format.elevation(s.elevationGainM, units)}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            Text("Flat-equiv. = the pace this effort would give on flat ground.",
+            Text("Flat = flat-equivalent: the pace this effort would give on flat ground.",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             if (r.splits.any { !it.complete }) Text("* Partial km", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))

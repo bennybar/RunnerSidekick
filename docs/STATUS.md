@@ -332,6 +332,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Redesign B, "Expressive Tonal" (2026-10-05, v0.32.0)
+- Theme: a fixed deep-green and coral palette on a sage background with white cards (light and dark); dynamic
+  wallpaper colours are off. Fonts: Unbounded for numbers and headlines, Plus Jakarta Sans for text (both bundled,
+  OFL). Floating rounded navigation bar.
+- Today: readiness first, in a green hero card with the number in a scalloped badge; then the next run as chips;
+  Health and Fitness as tonal tiles with a bar; the latest run as one card.
+- Run screen: green header with distance, moving pace in a white pill and six number tiles; aerobic decoupling in its
+  own card; capsule split chart with the hilliest km and its flat-equivalent pace called out above the table.
+- Removed the score rings (`ScoreGauge`, `ScoreRing`), no longer used.
+
 ## Calculation review fixes (2026-10-05, v0.31.0)
 From the v0.30.2 review, each reproduced first (`tests/test_calc_review.py`, `test_readiness.py`):
 - Readiness recovery counts only the effort left above what's usual for you at that time of day (the median of the last
