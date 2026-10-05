@@ -113,6 +113,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
     val coach by vm.coach.collectAsStateWithLifecycle()
+    val checkins by vm.checkins.collectAsStateWithLifecycle()
 
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
     val report = today?.value
@@ -144,10 +145,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
-                // Readiness first, then health and fitness, then the next run; the details and what changed sit behind a tap
-                report.readiness?.let { r -> animatedItem(key = "readiness") { ReadinessCard(r) { sheet = "readiness" } } }
-                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
+                // "How am I and what do I do today" first (readiness, then the next run), then the slower health and fitness scores
+                val unwell = checkins.any { it.localDate == report.localDate && it.illness }
+                report.readiness?.let { r -> animatedItem(key = "readiness") {
+                    ReadinessCard(r, unwell, onUnwell = { vm.setUnwell(report.localDate, !unwell) }) { sheet = "readiness" } } }
                 report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
+                report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
@@ -455,21 +458,23 @@ private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen
     val sc = com.bennybar.runnersidekick.ui.theme.LocalScoreColors.current
     // Equal heights, and a fixed two-line subtitle, so both numbers and bars line up
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-        ScoreTile("Health", s.scope["health"], s.health, sc.health.container, sc.health.content,
+        ScoreTile("Health", s.scope["health"], s.horizon["health"], s.health, sc.health.container, sc.health.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), Modifier.weight(1f)) { onOpen("health") }
-        ScoreTile("Fitness", s.scope["fitness"], s.fitness, sc.fitness.container, sc.fitness.content,
+        ScoreTile("Fitness", s.scope["fitness"], s.horizon["fitness"], s.fitness, sc.fitness.container, sc.fitness.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 8.dp, 28.dp), Modifier.weight(1f)) { onOpen("fitness") }
     }
 }
 
 @Composable
-private fun ScoreTile(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, container: androidx.compose.ui.graphics.Color,
+private fun ScoreTile(title: String, scope: String?, horizon: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, container: androidx.compose.ui.graphics.Color,
                       content: androidx.compose.ui.graphics.Color, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
     val v = sc?.score
     Surface(onClick = onOpen, shape = shape, color = container, contentColor = content, modifier = modifier.fillMaxHeight()
         .semantics(mergeDescendants = true) { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
         Column(Modifier.fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
+            // The time it looks at, so it's clear why Health, Fitness and readiness move differently
+            horizon?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.75f)) }
             // What the number covers, so Health isn't read as a medical verdict
             Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.75f),
                 minLines = 2, maxLines = 2)
@@ -526,7 +531,7 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
         sc.progress?.let { p ->
             // Is it improving? Separate signals from different data, with how much they agree
             Group(title = "Progress · " + when (p.verdict) { "insufficient" -> "not enough evidence yet"; else -> p.verdict } +
-                    (p.confidence?.let { " · $it confidence" } ?: "")) {
+                    (p.agreement?.let { " · $it agree" } ?: p.confidence?.let { " · $it confidence" } ?: "")) {
                 p.summary?.let { custom { Text(it, style = MaterialTheme.typography.bodyMedium) } }
                 p.signals.forEach { g -> row(g.title, supporting = g.say + if (how) "\n" + (g.note ?: "") else "", trailing = {
                     // Garmin's VO2 max is a device estimate: a dip is an estimate trend, not a decline
@@ -561,7 +566,7 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
  *  what holds it back. Tap for the breakdown. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOpen: () -> Unit) {
+private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwell: Boolean, onUnwell: () -> Unit, onOpen: () -> Unit) {
     val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
     Surface(onClick = onOpen, shape = RoundedCornerShape(36.dp), color = hero.container, contentColor = hero.content, modifier = Modifier.fillMaxWidth()
         .semantics(mergeDescendants = true) { contentDescription = "Training readiness ${s.score ?: "not available"}. ${s.headline ?: s.label ?: ""}" }) {
@@ -574,10 +579,19 @@ private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, onOp
             }
             Spacer(Modifier.width(18.dp))
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Today", style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.75f))
                 Text(s.label ?: "Not known yet", style = MaterialTheme.typography.titleLarge)
                 s.headline?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = hero.content.copy(alpha = 0.9f)) }
-                Text((s.heldBackBy?.let { "Held back by ${it.lowercase()} · " } ?: "") + "tap for details",
+                // What decided it: the reason for "easy only" when there is one, else the weakest part
+                Text((s.holdReason?.let { (if (s.allows == "rest") "Rest: " else "Easy only: ") + "$it · " }
+                    ?: s.heldBackBy?.let { "Held back by ${it.lowercase()} · " } ?: "") + "tap for details",
                     style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.75f))
+                // Context the watch can't see; one tap for the day, tap again to undo. Never asked for.
+                Surface(onClick = onUnwell, shape = CircleShape, color = if (unwell) hero.content else hero.tile,
+                    contentColor = if (unwell) hero.container else hero.content, modifier = Modifier.padding(top = 4.dp)) {
+                    Text(if (unwell) "Not feeling well today · undo" else "Not feeling well?", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
             }
         }
     }
@@ -621,7 +635,9 @@ private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, unit
                 }
             }
             Text(n.title, style = MaterialTheme.typography.headlineSmall)
-            val chips = listOfNotNull(dist, n.hr?.text, n.pace, n.minutes?.let { "about $it min" })
+            // The pace in the runner's units (the backend's text is per km)
+            val pace = n.paceSPerKm?.let { p -> if (n.paceWay == "around") "around ${Format.pace(p, units)}" else "about ${Format.pace(p, units)} or slower" } ?: n.pace
+            val chips = listOfNotNull(dist, n.hr?.text, pace, n.minutes?.let { "about $it min" })
             if (chips.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 chips.forEach { c ->

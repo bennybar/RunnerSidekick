@@ -170,3 +170,56 @@ def test_split_cadence_is_time_weighted():
     s = Samples(t, [150.0] * n, [3.0] * n, [3.0 * x for x in t], [10.0] * n, [160.0] * 180 + [180.0] * 6)
     d = rn.split_details(s, [{"idx": 0, "elapsed_s": 250.0}], None)
     assert 164 <= d[0]["cadence_spm"] <= 165  # an unweighted mean of the samples would say 161
+
+
+def test_readiness_headline_and_next_run_follow_one_policy():
+    from sidekick import decide
+    rec = {"rule_id": "R5", "state": "usual_plan"}
+    assert decide.allows(rec, {"score": 70}, None) == "steady"  # Moderate: steady at most, said as such
+    assert decide.HEADLINES["steady"] == "Good for a steady run"
+    assert decide.allows(rec, {"score": 70}, "Garmin's recovery timer still shows about 49 h") == "easy"
+    assert decide.allows(rec, {"score": 80}, None) == "hard" and decide.allows(rec, {"score": 35}, None) == "rest"
+    assert decide.allows({"rule_id": "R0", "state": "consider_easier"}, {"score": 90}, None) == "rest"
+
+
+def test_moderate_readiness_turns_quality_into_steady_and_the_card_agrees(monkeypatch):
+    from sidekick import decide, readiness as rd
+    conn = synced()
+    m = rp.build_morning(conn, "fixture", ANCHOR, False)
+    monkeypatch.setattr(rd, "build", lambda c, s, d, mo: {"status": "ok", "score": 70, "label": "Moderate", "components": []})
+    dec = decide.decide(conn, "fixture", ANCHOR, m)
+    assert dec["readiness"]["headline"] == decide.HEADLINES[dec["allows"]]
+    nr = dec["next_run"]
+    if nr and nr["date"] == ANCHOR.isoformat():
+        assert nr["kind"] not in ("tempo", "intervals", "race_pace")
+
+
+def test_intensity_rejects_truncated_sample_files():
+    zones = {"floors": [100, 120, 140, 155, 170], "method": "HR_MAX", "max_hr": 190}
+    # 45-minute runs whose files hold only 60 s of (fully valid) heart rate
+    cut = [run(f"2026-09-{d:02d}", 60, 60) for d in range(1, 9)]
+    for r in cut:
+        r.moving_s = 2700.0
+    assert ins.intensity_distribution(cut, zones)["verdict"] == "not_enough_data"
+
+
+def test_race_week_sessions_shrink_to_what_is_left(monkeypatch):
+    conn = synced()
+    set_race(conn, 60)
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    left = w["target_minutes"] - w["done_minutes"]
+    todo = [s for s in w["sessions"] if s["status"] in ("today", "planned") and s["kind"] not in ("race", "rest") and s["minutes"]]
+    assert sum(s["minutes"] for s in todo if not s["optional"]) <= max(left, 0) + race.MIN_SESSION
+    # Target already met: everything still to do is optional, short and easy
+    monkeypatch.setattr(race, "VOLUME_FACTOR", {k: 0.1 for k in race.VOLUME_FACTOR})
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    rest_of_week = [s for s in w["sessions"] if s["status"] in ("today", "planned") and s["kind"] not in ("race", "rest")]
+    assert all(s["optional"] and s["kind"] == "easy" and s["minutes"] == race.MIN_SESSION for s in rest_of_week)
+
+
+def test_one_improving_signal_is_an_early_sign(monkeypatch):
+    from test_progress import fake
+    p = fake(monkeypatch, "improving", "stable", "stable")
+    assert p["summary"].startswith("Early signs of improvement") and p["agreement"] == "1 of 3 signals"
+    p = fake(monkeypatch, "improving", "improving", "stable")
+    assert p["summary"].startswith("You're getting fitter") and p["agreement"] == "2 of 3 signals"

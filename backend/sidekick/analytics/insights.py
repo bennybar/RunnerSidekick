@@ -91,8 +91,10 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     floors = zones["floors"]  # zone1..zone5 floors in bpm
     # Runs whose heart rate covers most of their moving time (the same rule as drift): a few valid seconds aren't a run's intensity
     def covered(r):
+        # A truncated file (a few seconds of samples for a 45-minute run) isn't the run's intensity either
         moving = sum(w for w in rn._weights(r.samples) if w > 0)
-        return moving > 0 and sum(zone_time(r, floors)) >= rn.MIN_HR_COVERAGE * moving
+        whole = r.moving_s or moving
+        return moving >= rn.MIN_HR_COVERAGE * whole and sum(zone_time(r, floors)) >= rn.MIN_HR_COVERAGE * moving
     usable = [r for r in runs if r.samples and covered(r)]
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",

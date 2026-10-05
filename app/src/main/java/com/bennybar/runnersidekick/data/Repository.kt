@@ -252,7 +252,18 @@ class Repository(
     val progress: kotlinx.coroutines.flow.StateFlow<Progress?> = _progress
 
     /** Everything the screens show, step by step; [from]..[to] is this refresh's share of the progress bar. */
+    private val refreshing = kotlinx.coroutines.sync.Mutex()
+
+    /** One full refresh at a time: a second call while one runs waits for it instead of fetching everything again. */
     suspend fun refreshAll(from: Float = 0f, to: Float = 1f) {
+        if (!refreshing.tryLock()) {
+            refreshing.lock(); refreshing.unlock()
+            return
+        }
+        try { refreshAllNow(from, to) } finally { refreshing.unlock() }
+    }
+
+    private suspend fun refreshAllNow(from: Float, to: Float) {
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Checking the connection" to { refreshStatus(); establishAccount(); pushPendingCheckins(); pullCheckins() },
             "Loading today" to {
@@ -377,6 +388,14 @@ class Repository(
             clientUpdatedAt = Instant.now().toString(), pendingSync = true, account = acct,
         )
         db.checkins().put(c)
+    }
+
+    /** "Not feeling well" for one day: an illness check-in the readiness and the next run take as overriding everything
+     *  else; tapping again clears it. */
+    suspend fun setUnwell(date: String, on: Boolean) {
+        saveCheckin(date, null, null, null, pain = false, illness = on, notes = null, tags = if (on) listOf("unwell") else emptyList())
+        pushPendingCheckins()
+        refreshToday()
     }
 
     suspend fun pushPendingCheckins() {

@@ -362,6 +362,8 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
         fitness["progress"] = progress.build(conn, source, today)
     return {"status": "ok", "age": age, "sex": prof["sex"], "fitness": fitness, "health": health,
             "scope": {"fitness": "Aerobic fitness for your age, from Garmin's VO₂ max", "health": "Activity and sleep habits, from your watch"},
+            # The time each number looks at, so it's clear why they move differently
+            "horizon": {"health": "Last 2–4 weeks", "fitness": "Latest VO₂ estimate"},
             "basis": "Fixed weights; each counted part is anchored to a published reference, the point curves are ours. Missing parts "
                      "are listed, never guessed. Context lines aren't counted. Trends use today's reference group. Not a medical score.",
             "algorithm_version": SCORES_VERSION}

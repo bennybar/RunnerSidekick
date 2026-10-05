@@ -240,7 +240,9 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
                  @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
                  val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList(), val stale: Boolean = false,
-                 val progress: FitnessProgress? = null, val garmin: GarminReadiness? = null)
+                 val progress: FitnessProgress? = null, val garmin: GarminReadiness? = null,
+                 /** Readiness only: the hardest session today allows (rest, easy, steady, hard) and why it's held to easy */
+                 val allows: String? = null, @SerialName("hold_reason") val holdReason: String? = null)
 
 /** Garmin's own training readiness and what's left on its recovery timer: shown beside ours, and a cross-check. */
 @Serializable
@@ -249,7 +251,9 @@ data class GarminReadiness(val score: Int, val level: String? = null, @SerialNam
 /** Is fitness improving? Three separate signals (aerobic estimate, efficiency, durability), not averaged into the score. */
 @Serializable
 data class FitnessProgress(val verdict: String, val confidence: String? = null, val summary: String? = null,
-                           val signals: List<ProgressSignal> = emptyList(), val basis: String? = null)
+                           val signals: List<ProgressSignal> = emptyList(), val basis: String? = null,
+                           /** "2 of 3 signals": how many of the signals with a direction agree */
+                           val agreement: String? = null)
 
 @Serializable
 data class ProgressSignal(val id: String, val title: String, val direction: String? = null, val say: String, val note: String? = null)
@@ -269,12 +273,16 @@ data class NextRunHr(val min: Int? = null, val max: Int? = null, val text: Strin
 @Serializable
 data class NextRun(val date: String, @SerialName("day_label") val dayLabel: String, val kind: String, val title: String,
                    @SerialName("distance_km") val distanceKm: Double? = null, val minutes: Int? = null, val hr: NextRunHr? = null,
-                   val pace: String? = null, val why: List<String> = emptyList(), val basis: String? = null)
+                   val pace: String? = null, @SerialName("pace_s_per_km") val paceSPerKm: Double? = null,
+                   /** "or_slower" (easy and long runs) or "around" (race pace) */
+                   @SerialName("pace_way") val paceWay: String? = null, val why: List<String> = emptyList(), val basis: String? = null)
 
 @Serializable
 data class Scores(val status: String, val age: Int? = null, val fitness: Score? = null, val health: Score? = null, val basis: String? = null,
                   /** What each score covers, in a few words */
                   val scope: Map<String, String> = emptyMap(),
+                  /** The time each score looks at ("Last 2–4 weeks", "Latest VO₂ estimate") */
+                  val horizon: Map<String, String> = emptyMap(),
                   val missing: List<String> = emptyList())
 
 @Serializable

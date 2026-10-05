@@ -284,8 +284,10 @@ def day_label(d: date, today: date) -> str:
     return "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%A")
 
 
-def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: dict | None, hold: str | None = None) -> dict | None:
-    """hold: why intensity is held back today (from decide.hold_reason), or None."""
+def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: dict | None, hold: str | None = None,
+             allowed: str = "hard") -> dict | None:
+    """hold: why intensity is held back today (from decide.hold_reason), or None. allowed: the hardest session today
+    allows (decide.allows); a run today never goes past it."""
     zones = rp.hr_zones(conn)
     runs = rp.activities(conn, source, (today - timedelta(days=27)).isoformat(), today.isoformat())
     if len(runs) < 3:
@@ -334,6 +336,11 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
         kind = "steady"
         why.append("you're fresh and recent running was balanced")
 
+    # Moderate readiness: steady at most today, so tempo or intervals become a steady run (the headline says the same)
+    if day == today and allowed == "steady" and kind in ("tempo", "intervals", "race_pace"):
+        why.append(f"readiness is moderate: steady instead of {kind.replace('_', ' ')}")
+        kind = "steady"
+
     # 2. Derive distance, time and effort from that one session, so they always agree with each other
     easy_pace = None
     ins = rp.latest_body(conn, "insights")
@@ -362,10 +369,13 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
               "steady": {"min": f[2], "max": f[3], "text": f"{f[2]}–{f[3]} bpm (zone 3)"},
               "tempo": {"min": f[3], "max": f[4], "text": f"{f[3]}–{f[4]} bpm (zone 4) in the middle block"},
               "intervals": {"min": f[3], "text": f"repeats above {f[3]} bpm, easy jogs between"}}.get(kind)
-    pace = (f"about {rp.fmt_pace(easy_pace)} or slower" if easy_pace and kind in ("easy", "long") else
-            f"around {rp.fmt_pace(race['target_pace_s_per_km'])}" if kind in ("race", "race_pace") and race and race.get("target_pace_s_per_km")
-            else None)
+    # The pace as a number too, so the app can show it in the runner's units
+    pace_s, pace_way = ((easy_pace, "or_slower") if easy_pace and kind in ("easy", "long") else
+                        (race["target_pace_s_per_km"], "around") if kind in ("race", "race_pace") and race and race.get("target_pace_s_per_km")
+                        else (None, None))
+    pace = (f"about {rp.fmt_pace(pace_s)} or slower" if pace_way == "or_slower" else f"around {rp.fmt_pace(pace_s)}" if pace_way else None)
     return {"date": day.isoformat(), "day_label": day_label(day, today), "kind": kind, "title": KIND_TITLE[kind],
-            "distance_km": km, "minutes": minutes, "hr": hr, "pace": pace, "why": why, "algorithm_version": READINESS_VERSION,
+            "distance_km": km, "minutes": minutes, "hr": hr, "pace": pace,
+            "pace_s_per_km": round(pace_s) if pace_s else None, "pace_way": pace_way, "why": why, "algorithm_version": READINESS_VERSION,
             "basis": "Sized from your runs of the last 4 weeks (typical distance, longest run), Garmin's heart-rate zones and "
                      "your easy pace. Calculated, not written by AI."}

@@ -92,7 +92,8 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
         updateCoach()
     }
     fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
-
+    val checkins = repo.checkins.state(emptyList())
+    fun setUnwell(date: String, on: Boolean) = launchIo { repo.setUnwell(date, on) }
 }
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {
@@ -124,7 +125,8 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     // The visible sub-tab (0 Insights, 1 Compare, 2 Trends): Compare and Trends poll only while they're shown
     private val tab = MutableStateFlow(0)
-    fun setTab(t: Int) { tab.value = t }
+    // Trends (and its AI summary) load only once that tab is opened
+    fun setTab(t: Int) { tab.value = t; if (t == 2 && trendsJob == null) loadTrends(_days.value) }
     private var compareJob: kotlinx.coroutines.Job? = null
     fun loadCompare() {
         if (compareJob?.isActive == true) return
@@ -160,7 +162,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
 
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); loadTrends(_days.value) }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); if (tab.value == 2) loadTrends(_days.value) }
         .also { loadCoach() }
     fun setDays(d: Int) { _days.value = d; loadTrends(d) }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }

@@ -10,7 +10,7 @@ from statistics import median
 
 from . import reports as rp
 
-PROGRESS_VERSION = "progress-1.2"  # 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
+PROGRESS_VERSION = "progress-1.3"  # 1.3: one moving signal is an early sign; signal agreement; 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
 EFFICIENCY_S_PER_MONTH = 3.0   # a pace change smaller than this at the same heart rate is "stable"
 EFFICIENCY_MIN_RUNS = 6
 EFFICIENCY_MAX_AGE_DAYS = 45   # the trend must reach into the last 6 weeks
@@ -106,8 +106,14 @@ def build(conn, source: str, today: date) -> dict:
     # One plain line: the agreement, or the tension between the signals
     names = {"vo2": "Garmin's VO₂ estimate", "efficiency": "efficiency", "drift": "durability"}
     verb = lambda s: "dipped" if s["id"] == "vo2" and s["direction"] == "declining" else s["direction"]  # noqa: E731
+    agree = sum(s["direction"] == verdict for s in known) if verdict != "insufficient" else 0
     if verdict == "insufficient":
         summary = "Not enough comparable runs yet to say whether you're improving."
+    elif verdict in ("improving", "declining") and agree == 1 and not (up and down):
+        # One signal moving and the rest stable: an early sign, said as such
+        moving = next(s for s in known if s["direction"] == verdict)
+        summary = ("Early signs of improvement" if verdict == "improving" else "Early signs of slipping") + \
+                  f": {names[moving['id']]} {verb(moving)}, the rest stable."
     elif up and down:
         ups = " and ".join(names[s["id"]] for s in known if s["direction"] == "improving")
         downs = " and ".join(names[s["id"]] for s in known if s["direction"] == "declining")
@@ -117,5 +123,6 @@ def build(conn, source: str, today: date) -> dict:
         summary = {"improving": "You're getting fitter", "declining": "Fitness is slipping", "stable": "Holding steady"}[verdict] + \
                   " (" + ", ".join(f"{names[s['id']]} {verb(s)}" for s in known) + ")."
     return {"verdict": verdict, "confidence": confidence, "summary": summary, "signals": sigs,
+            "agreement": f"{agree} of {len(known)} signals" if verdict != "insufficient" else None,
             "basis": "Three separate signals from different data; not averaged into the fitness number. Terrain, heat and watch "
                      "changes affect efficiency and drift.", "algorithm_version": PROGRESS_VERSION}

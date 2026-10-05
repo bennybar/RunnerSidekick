@@ -332,6 +332,24 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## One decision policy, coverage, race week, "Not feeling well" (2026-10-05, v0.35.0)
+From the v0.34.1 review:
+- One policy decides what today allows (rest, easy, steady, hard: `decide.allows`), and both the readiness headline
+  and the next run follow it: Moderate (60–74) means steady at most, so a planned tempo or intervals becomes steady and
+  the card says "Good for a steady run". The card shows the reason when intensity is held back (e.g. Garmin's timer).
+- Intensity insight: the samples must cover 90% of the activity's moving time, and heart rate 90% of the samples.
+- Race week: sessions still to run share what's left of the target; once it's reached, they become optional, short
+  and easy.
+- Fitness progress: one improving signal with the rest stable reads "Early signs of improvement"; the sheet shows
+  signal agreement ("1 of 3 signals agree") instead of a confidence word (progress-1.3).
+- Units: the next run's pace is sent as a number and shown in miles when set; the morning notification uses the
+  runner's units.
+- Today: readiness and the next run together at the top, then Health and Fitness, each with its time horizon.
+- "Not feeling well?" on the readiness card: one tap marks the day (an illness check-in, the existing R0 rule: rest,
+  readiness capped), tap again to undo. Never asked for.
+- Trends (and its AI summary) load only when that tab is opened; a full refresh that's already running isn't started
+  twice.
+
 ## "Aerobic decoupling" everywhere (2026-10-05, v0.34.1)
 - The "How it went" check, the run's analysis item, the durability signal, the durability insight and the export now
   say "Aerobic decoupling" instead of "Heart-rate drift" / "Drift"; explanations keep "heart-rate drift" as the plain

@@ -219,8 +219,22 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
         m["status"], e["status"] = "moved", "done"
         e["kind"], e["text"], e["minutes"], m["moved_to"] = m["kind"], SESSION_TEXT[m["kind"]] + " (moved)", m["minutes"], e["date"]
     done = sum(a["moving_s"] or 0 for a in week_runs)
-    if target_s and done >= target_s:
-        guard = (guard + " " if guard else "") + "You've already run this week's target; keep anything else short and easy."
+    # Sessions still to run share what's left of the target: once it's reached, anything else is optional, short and easy
+    if target_s:
+        left = (target_s - done) / 60
+        todo = [x for x in sessions if x["status"] in ("today", "planned") and x["kind"] not in ("race", "rest") and x["minutes"]]
+        if left <= 0:
+            for x in todo:
+                x.update(kind="easy", text=SESSION_TEXT["easy"], minutes=MIN_SESSION, optional=True)
+            guard = (guard + " " if guard else "") + "You've already run this week's target: anything else is optional, short and easy."
+        elif sum(x["minutes"] for x in todo) > left:
+            f = left / sum(x["minutes"] for x in todo)
+            for x in todo:
+                x["minutes"] = max(MIN_SESSION, int(x["minutes"] * f / 5) * 5)
+            for x in sorted(todo, key=lambda x: (-KEEP_ORDER.index(x["kind"]) if x["kind"] in KEEP_ORDER else 0, x["date"])):
+                if sum(y["minutes"] for y in todo if not y["optional"]) <= left:
+                    break
+                x["optional"] = True  # easy days first, the long run last
     return {"week_start": ws.isoformat(), "phase": st["phase"], "target_minutes": round(target_s / 60) if target_s else None,
             "recent_minutes": round(recent / 60) if recent else None, "done_minutes": round(done / 60), "sessions": sessions,
             "guardrail": guard, "basis": "Rules of thumb by phase from your running days and recent volume; not a personal "
