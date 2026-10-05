@@ -14,6 +14,8 @@ def block(conn, source: str, start: date, end: date, zones: dict | None) -> dict
     dist = sum(a["distance_m"] or 0 for a in acts)
     moving = sum(a["moving_s"] or 0 for a in acts)
     hrs = [(a["avg_hr"], a["moving_s"]) for a in acts if a.get("avg_hr") and a.get("moving_s")]
+    both = [a for a in acts if a.get("distance_m") and a.get("moving_s")]  # pace only where both were measured
+    pace_d, pace_s = sum(a["distance_m"] for a in both), sum(a["moving_s"] for a in both)
     hard = None
     if zones:
         from .focus import zone_shares
@@ -21,7 +23,7 @@ def block(conn, source: str, start: date, end: date, zones: dict | None) -> dict
         if sh:
             hard = sum(h * m for h, m in sh) / sum(m for _, m in sh)
     return {"runs": len(acts), "km_per_week": dist / 4000, "time_per_week_s": moving / 4,
-            "pace_s_per_km": rn.moving_pace(dist, moving) if dist else None,
+            "pace_s_per_km": rn.moving_pace(pace_d, pace_s) if pace_d else None,
             "avg_hr": sum(h * m for h, m in hrs) / sum(m for _, m in hrs) if hrs else None,
             "longest_km": max((a["distance_m"] or 0 for a in acts), default=0) / 1000,
             "climb_per_week_m": sum(a["elevation_gain_m"] or 0 for a in acts) / 4, "hard_share": hard}

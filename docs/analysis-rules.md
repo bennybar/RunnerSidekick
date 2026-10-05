@@ -459,7 +459,7 @@ The race week plan gets that "held" flag. The next run turns it into an easy run
 into rest. hold_back also covers a next run today that is easy or rest. The AI coach and the AI input on runs receive
 hold_back and may not suggest anything harder.
 
-## Fitness progress — `progress.py` (`progress-1.1`)
+## Fitness progress — `progress.py` (`progress-1.2`)
 
 Is aerobic fitness improving? There are three separate signals from different data, and they're not averaged into the
 Fitness number (they don't share a scale).
@@ -495,3 +495,9 @@ check with at most 30% in zones 4–5.
 Open-Meteo, looked up on export only: the start position rounded to 0.01° and the hour nearest the run's middle. The
 forecast API for the last 30 days, the historical (reanalysis) API before that. Kept with the run; a failed lookup is
 retried after a day. Always labelled as an estimate, never as watch data.
+
+## Readiness recovery — `readiness.py` (`readiness-1.2`)
+
+Effort left = each finished run's load fading with a 48-hour time constant. What counts is the effort left now above
+the median left at the same time of day over the last 28 days, as a share of your typical run: a regular routine is
+your normal. Runs are found by the local calendar day and end at start + elapsed time.

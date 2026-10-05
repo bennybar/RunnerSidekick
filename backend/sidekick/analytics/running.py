@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.3"  # 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.4"  # 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -270,27 +270,41 @@ def best_efforts(s: Samples | None) -> dict[str, dict]:
     pts = [(s.t[i], s.dist[i]) for i in range(len(s.t)) if s.dist[i] is not None]
     if len(pts) < 2:
         return {}
+    # The fastest segment of a piecewise-linear track starts or ends on a sample: try both anchors
+    gaps = [0]
+    for k in range(len(pts) - 1):
+        gaps.append(gaps[-1] + (pts[k + 1][0] - pts[k][0] > 30))
+    gap_free = lambda a, b: gaps[b] == gaps[a]  # noqa: E731  (no gap > 30 s between samples a and b)
+
+    def interp(k: int, d: float) -> float:
+        (t0, d0), (t1, d1) = pts[k], pts[k + 1]
+        return t0 + (t1 - t0) * ((d - d0) / (d1 - d0)) if d1 > d0 else t0
     out = {}
     for key, target in BEST_EFFORT_DISTANCES.items():
         if pts[-1][1] - pts[0][1] < target:
             continue
         best = None
         j = 0
-        for i in range(len(pts)):
-            # advance j to the last point at least `target` metres behind i
+        for i in range(len(pts)):  # end on sample i, start interpolated
             while j + 1 < i and pts[i][1] - pts[j + 1][1] >= target:
                 j += 1
-            if pts[i][1] - pts[j][1] < target:
+            if pts[i][1] - pts[j][1] < target or not gap_free(j, i):
                 continue
-            (t0, d0), (t1, d1) = pts[j], pts[j + 1] if j + 1 <= i else pts[j]
-            # interpolate the start so the segment is exactly `target` long
-            need = pts[i][1] - target
-            ts = t0 + (t1 - t0) * ((need - d0) / (d1 - d0)) if d1 > d0 else t0
-            if any(pts[k + 1][0] - pts[k][0] > 30 for k in range(j, i)):
-                continue
+            ts = interp(j, pts[i][1] - target) if j + 1 <= i else pts[j][0]
             dur = pts[i][0] - ts
             if dur > 0 and (best is None or dur < best[0]):
                 best = (dur, ts, pts[i][0])
+        m = 0
+        for i in range(len(pts)):  # start on sample i, end interpolated
+            m = max(m, i + 1)
+            while m < len(pts) and pts[m][1] - pts[i][1] < target:
+                m += 1
+            if m >= len(pts) or not gap_free(i, m):
+                continue
+            te = interp(m - 1, pts[i][1] + target)
+            dur = te - pts[i][0]
+            if dur > 0 and (best is None or dur < best[0]):
+                best = (dur, pts[i][0], te)
         if best:
             out[key] = {"distance_m": target, "elapsed_s": round(best[0], 1), "start_t": round(best[1], 1), "end_t": round(best[2], 1),
                         "pace_s_per_km": round(best[0] / (target / 1000.0), 1)}

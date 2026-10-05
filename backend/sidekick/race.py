@@ -143,7 +143,10 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
         factor, guard = 1.0, ("Volume held at your recent level: " + ("Garmin rates your load above its range" if over else
                                                                        "today's advice holds intensity back") + ".")
     target_s = round(recent * factor) if recent else None
-    acts = {a["local_date"]: a for a in rp.activities(conn, source, ws.isoformat(), (ws + timedelta(days=6)).isoformat())}
+    week_runs = rp.activities(conn, source, ws.isoformat(), (ws + timedelta(days=6)).isoformat())
+    acts: dict[str, list[dict]] = {}  # every run of each day (two runs on one day both count)
+    for a in week_runs:
+        acts.setdefault(a["local_date"], []).append(a)
     # Session kinds: race day fixed; long run on the last running day before the weekend ends; quality spread out
     kinds: dict[date, str] = {}
     usable = [d for d in run_days if d != race_day and d < race_day + timedelta(days=1) or race_day > days[-1]]
@@ -200,8 +203,8 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
             status_ = "extra"
         sessions.append({"date": d.isoformat(), "kind": k, "text": SESSION_TEXT[k], "minutes": minutes,
                          "optional": k in QUALITY_MIN and k != "strides" and (held or over), "status": status_,
-                         "ran_minutes": round((ran["moving_s"] or 0) / 60) if ran else None,
-                         "source_id": ran["source_id"] if ran else None})
+                         "ran_minutes": round(sum(a["moving_s"] or 0 for a in ran) / 60) if ran else None,
+                         "source_id": ran[-1]["source_id"] if ran else None, "source_ids": [a["source_id"] for a in ran or []]})
     # A run on a day off stands in for the earliest missed session (days swapped, not a session lost)
     extras = [x for x in sessions if x["status"] == "extra"]
     for m in [x for x in sessions if x["status"] == "missed"]:
@@ -210,7 +213,7 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
         e = extras.pop(0)
         m["status"], e["status"] = "moved", "done"
         e["kind"], e["text"], e["minutes"], m["moved_to"] = m["kind"], SESSION_TEXT[m["kind"]] + " (moved)", m["minutes"], e["date"]
-    done = sum(a["moving_s"] or 0 for a in acts.values())
+    done = sum(a["moving_s"] or 0 for a in week_runs)
     if target_s and done >= target_s:
         guard = (guard + " " if guard else "") + "You've already run this week's target; keep anything else short and easy."
     return {"week_start": ws.isoformat(), "phase": st["phase"], "target_minutes": round(target_s / 60) if target_s else None,

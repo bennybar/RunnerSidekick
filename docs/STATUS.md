@@ -332,6 +332,20 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Calculation review fixes (2026-10-05, v0.31.0)
+From the v0.30.2 review, each reproduced first (`tests/test_calc_review.py`, `test_readiness.py`):
+- Readiness recovery counts only the effort left above what's usual for you at that time of day (the median of the last
+  4 weeks), so a steady daily routine no longer pins readiness to Low. Load queries use the local calendar day, and runs
+  end on elapsed time (readiness-1.2).
+- Fitness progress: VO₂ needs two different dated readings (the newer within 2 weeks, 3+ weeks apart); efficiency
+  follows the insight's rule that the trend and the half-by-half medians agree; durability looks at each run's newest
+  report revision only (progress-1.2).
+- Race week: two runs on one day both count toward the day and the weekly target.
+- Intensity insight: only runs with heart rate over 90% of their moving time.
+- Consistency insight: weeks before the first synced run are unknown, not zero.
+- Four-week pace: only runs with both distance and moving time.
+- Best efforts: end-anchored segments are tried too, so the fastest one is found (running-1.4).
+
 ## Wording: VO₂ estimate, aerobic decoupling (2026-10-04, v0.30.2)
 - Garmin's VO₂ max is called a device estimate everywhere it trends: the progress signal is "Garmin VO₂ estimate", a
   dip shows as "Estimate dipped" (not "Declining"), and the Fitness trend says it's an estimate trend, not a measured

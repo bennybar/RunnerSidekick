@@ -13,7 +13,7 @@ from statistics import median
 from . import reports as rp
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.1"
+READINESS_VERSION = "readiness-1.2"  # 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -99,12 +99,16 @@ def moment(conn, d: date) -> datetime:
 
 
 def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict | None:
-    """Acute and chronic load (exponentially fading sums per day) and the effort of recent runs not yet recovered from.
-    None with fewer than 3 weeks of runs."""
-    runs = [a for a in rp.activities(conn, source, (at.date() - timedelta(days=84)).isoformat(), at.date().isoformat())
-            if a.get("start_utc") and a.get("moving_s")]
-    ends = [(datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a["moving_s"]), a) for a in runs]
-    ends = [(e, a) for e, a in ends if e <= at]
+    """Acute and chronic load (exponentially fading sums per day) and the effort of recent runs not yet recovered from,
+    above what's usual for you at this time of day. None with fewer than 3 weeks of runs."""
+    # Activities are stored by local date: query the runner's calendar days, then keep runs finished by `at` (in UTC,
+    # by elapsed time, so a paused run doesn't seem to end early)
+    local = at.astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()
+    runs = [a for a in rp.activities(conn, source, (local - timedelta(days=84)).isoformat(), local.isoformat())
+            if a.get("start_utc") and (a.get("elapsed_s") or a.get("moving_s"))]
+    ends = [(datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a.get("elapsed_s") or a["moving_s"]), a)
+            for a in runs]
+    ends = sorted(((e, a) for e, a in ends if e <= at), key=lambda x: x[0])
     if len(ends) < 6 or (at - ends[0][0]).days < 21:
         return None
     floors = zones["floors"] if zones else None
@@ -116,9 +120,17 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
     acute = sum(l * exp(-(at - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS / (1 - exp(-span / ACUTE_DAYS))
     chronic = sum(l * exp(-(at - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS / (1 - exp(-span / CHRONIC_DAYS))
     typical = median(l for e, l in loads if (at - e).days < 28) if any((at - e).days < 28 for e, _ in loads) else median(l for _, l in loads)
-    fatigue = sum(l * exp(-(at - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads) / typical if typical else 0
-    days = (at.date() - ends[-1][0].date()).days
+
+    def left(when: datetime) -> float:  # effort still fading at `when`, from runs finished by then
+        return sum(l * exp(-(when - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads if e <= when)
+    # What's normally still there at this time of day (median of the last 4 weeks): a steady daily routine always leaves
+    # some, and that's your normal, not unrecovered effort. Only what's above it counts.
+    usual = median(left(at - timedelta(days=k)) for k in range(1, 29))
+    now = left(at)
+    fatigue = max(0.0, now - usual) / typical if typical else 0
+    days = (local - ends[-1][0].astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()).days
     return {"ratio": acute / chronic if chronic else 1.0, "fatigue": fatigue, "acute": acute, "chronic": chronic, "typical": typical,
+            "left_now": now / typical if typical else 0, "left_usual": usual / typical if typical else 0,
             "last_when": "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago" if days < 7 else None}
 
 
@@ -173,11 +185,12 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
                       "note": "Last week's effort (heart-rate zones × minutes, fading over 7 days) against your usual (fading over 28 days)"})
         f = tl["fatigue"]
         when = tl["last_when"]
-        parts.append({"id": "recovery", "title": "Recovery", "value": f"{round(100 * f)}% of a typical run",
+        parts.append({"id": "recovery", "title": "Recovery", "value": f"{round(100 * f)}% of a typical run above usual",
                       "points": round(clamp(100 - RECOVERY_SLOPE * f)),
                       "say": ("Recovered" if f < 0.15 else "Mostly recovered" if f < 0.4 else "Still recovering" if f < 0.8
                               else "Tired from recent runs") + (f" (last run {when})" if when else ""),
-                      "note": "Effort of recent runs still left after fading over about 2 days, against your typical run"})
+                      "note": (f"Effort of recent runs still left after fading over about 2 days ({round(100 * tl['left_now'])}% of a "
+                               f"typical run), above what's usual for you at this time ({round(100 * tl['left_usual'])}%)")})
     else:
         parts.append({"id": "load", "title": "Training load", "value": None, "points": None, "say": "Not known yet",
                       "note": "Needs 3 weeks of runs"})

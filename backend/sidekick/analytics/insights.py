@@ -89,10 +89,15 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
         return insight("intensity", q, "training", "not_enough_data", "Heart-rate zones not available",
                        "Garmin heart-rate zones couldn't be read, so intensity can't be grouped.", method="time in Garmin HR zones")
     floors = zones["floors"]  # zone1..zone5 floors in bpm
-    usable = [r for r in runs if r.samples and sum(zone_time(r, floors)) > 0]  # runs with usable heart rate
+    # Runs whose heart rate covers most of their moving time (the same rule as drift): a few valid seconds aren't a run's intensity
+    def covered(r):
+        moving = sum(w for w in rn._weights(r.samples) if w > 0)
+        return moving > 0 and sum(zone_time(r, floors)) >= rn.MIN_HR_COVERAGE * moving
+    usable = [r for r in runs if r.samples and covered(r)]
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",
-                       f"Needs {MIN_RUNS} runs with heart rate; {len(usable)} so far.", n=len(usable), method="time in Garmin HR zones")
+                       f"Needs {MIN_RUNS} runs with heart rate over at least {rn.MIN_HR_COVERAGE:.0%} of the run; {len(usable)} so far.",
+                       n=len(usable), method="time in Garmin HR zones")
     totals = [0.0] * 6
     hard_runs = 0
     per_run = []
@@ -320,12 +325,14 @@ def recovery_after_load(runs: list[RunData], obs: dict[str, dict[str, float]]) -
 def consistency(runs: list[RunData], today: date, first_weekday: int = 0) -> dict:
     q = "How consistent is your running week to week?"
     start = today - timedelta(days=(today.weekday() - first_weekday) % 7) - timedelta(weeks=8)
-    weeks = [(start + timedelta(weeks=i)) for i in range(8)]
+    # Weeks before the first synced run are unknown, not weeks without running
+    first = min((date.fromisoformat(r.local_date) for r in runs), default=None)
+    weeks = [w for w in (start + timedelta(weeks=i) for i in range(8)) if first and w + timedelta(days=6) >= first]
     vol = []
     for w in weeks:
         s = sum(r.moving_s or 0 for r in runs if w <= date.fromisoformat(r.local_date) < w + timedelta(days=7))
         vol.append(s)
-    if sum(1 for v in vol if v > 0) < 4:
+    if len(weeks) < 4 or sum(1 for v in vol if v > 0) < 4:
         return insight("consistency", q, "training", "not_enough_data", "Not enough weeks of running yet", "", method="weekly moving time")
     avg = mean(vol)
     cv = pstdev(vol) / avg if avg else 0
@@ -333,22 +340,23 @@ def consistency(runs: list[RunData], today: date, first_weekday: int = 0) -> dic
     big = max(jumps, key=lambda x: x[1])
     effect = {"weeks": [{"start": w.isoformat(), "moving_s": round(v)} for w, v in zip(weeks, vol)], "cv": round(cv, 2), "mean_s": round(avg)}
     chart = {"type": "weekly_bars", "points": effect["weeks"]}
-    method = "Running moving time per calendar week over the last 8 complete weeks; coefficient of variation."
+    method = (f"Running moving time per calendar week over the last {len(weeks)} complete weeks with synced history (up to 8); "
+              "coefficient of variation.")
     if cv >= 0.4:
         return insight("consistency", q, "training", "pattern", "Your weekly running varies a lot",
                        f"Weekly running ranged from {fmt_dur(min(vol))} to {fmt_dur(max(vol))} (average {fmt_dur(avg)}). "
                        f"The biggest jump was +{fmt_dur(big[1])} in the week of {big[0].isoformat()[5:]}.",
-                       n=8, effect=effect, method=method, chart=chart, confounders=["Travel, illness or a second sport aren't visible here."],
+                       n=len(weeks), effect=effect, method=method, chart=chart, confounders=["Travel, illness or a second sport aren't visible here."],
                        practical="Steadier weekly volume is generally easier to absorb than big swings.")
     return insight("consistency", q, "training", "no_clear_pattern", "Your weekly running is fairly steady",
-                   f"Average {fmt_dur(avg)} per week over 8 weeks.", n=8, effect=effect, method=method, chart=chart)
+                   f"Average {fmt_dur(avg)} per week over {len(weeks)} weeks.", n=len(weeks), effect=effect, method=method, chart=chart)
 
 
 # ---------------------------------------------------------------- I7 durability (drift on steady runs)
 
 def durability(drifts: list[tuple[str, str, float]]) -> dict:
     q = "Does your heart rate drift on steady runs?"
-    method = "Pace:HR decoupling on eligible steady runs (≥30 min after a 10-min warm-up, ≥90% HR coverage)."
+    method = "Pace:HR decoupling on eligible steady runs (≥20 min after a 10-min warm-up, ≥90% HR coverage)."
     if len(drifts) < 4:
         return insight("durability", q, "running", "not_enough_data", "Not enough long steady runs yet",
                        f"Needs 4 eligible runs (about 40+ min, steady); {len(drifts)} so far.", n=len(drifts), method=method)

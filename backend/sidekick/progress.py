@@ -10,13 +10,16 @@ from statistics import median
 
 from . import reports as rp
 
-PROGRESS_VERSION = "progress-1.1"  # 1.1: a VO2 estimate dip alone never makes "declining"
+PROGRESS_VERSION = "progress-1.2"  # 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
 EFFICIENCY_S_PER_MONTH = 3.0   # a pace change smaller than this at the same heart rate is "stable"
 EFFICIENCY_MIN_RUNS = 6
 EFFICIENCY_MAX_AGE_DAYS = 45   # the trend must reach into the last 6 weeks
 DRIFT_PP = 1.0                 # a change in median drift smaller than this is "stable"
 DRIFT_MIN_RUNS = 3
 VO2_STEP = 0.5                 # a 4-week VO2 change smaller than this is "stable"
+VO2_FRESH_DAYS = 14            # the newer reading must be from the last 2 weeks
+VO2_MIN_GAP_DAYS = 21          # and at least 3 weeks after the older one (two different measurements)
+VO2_OLDEST_DAYS = 56           # the older one no more than 8 weeks back
 
 
 def signal(sid: str, title: str, direction: str | None, say: str, note: str) -> dict:
@@ -30,11 +33,13 @@ def vo2_signal(conn, source: str, today: date) -> dict:
     note = ("Garmin's VO₂ max estimate now against 4 weeks ago; a change under 0.5 counts as stable. A device estimate "
             "trend: heat, hills, fatigue or a run of easy weeks can lower it for a while without any loss of fitness")
     title = "Garmin VO₂ estimate"
-    if not now or not then:
-        return signal("vo2", title, None, "Needs two VO₂ max readings 4 weeks apart", note)
+    # Two different, dated measurements: the same old reading twice isn't evidence of stability
+    if not now or not then or now[1] < today - timedelta(days=VO2_FRESH_DAYS) or (now[1] - then[1]).days < VO2_MIN_GAP_DAYS \
+            or then[1] < today - timedelta(days=VO2_OLDEST_DAYS):
+        return signal("vo2", title, None, "Needs a recent VO₂ max reading and one about 4 weeks before it", note)
     d = now[0] - then[0]
     direction = "improving" if d >= VO2_STEP else "declining" if d <= -VO2_STEP else "stable"
-    say = f"Estimate {then[0]:.1f} → {now[0]:.1f} in 4 weeks" + (" (a device estimate dip, not a measured decline)" if direction == "declining" else "")
+    say = f"Estimate {then[0]:.1f} ({then[1].strftime('%-d %b')}) → {now[0]:.1f} ({now[1].strftime('%-d %b')})" + (" (a device estimate dip, not a measured decline)" if direction == "declining" else "")
     return signal("vo2", title, direction, say, note)
 
 
@@ -49,7 +54,10 @@ def efficiency_signal(conn, source: str, today: date) -> dict:
         return signal("efficiency", "Efficiency", None, "Needs 6+ comparable runs on your current watch", note)
     e = max(recent, key=lambda x: x["end"])
     slope = e["slope_s_per_km_per_30d"]
-    direction = "improving" if slope <= -EFFICIENCY_S_PER_MONTH else "declining" if slope >= EFFICIENCY_S_PER_MONTH else "stable"
+    # The insight's own rule: the trend and the half-by-half medians must agree, or it's no clear change
+    faster, slower = e["second_half_median_pace"] < e["first_half_median_pace"], e["second_half_median_pace"] > e["first_half_median_pace"]
+    direction = "improving" if slope <= -EFFICIENCY_S_PER_MONTH and faster else \
+        "declining" if slope >= EFFICIENCY_S_PER_MONTH and slower else "stable"
     lo, hi = eff["effect"]["band_bpm"]
     word = "faster" if slope < 0 else "slower"
     return signal("efficiency", "Efficiency", direction,
@@ -61,10 +69,12 @@ def drift_signal(conn, source: str, today: date) -> dict:
     note = (f"Heart-rate drift (pace:HR decoupling) on steady runs, last 6 weeks against the 6 before; {DRIFT_MIN_RUNS}+ runs in "
             f"each; under {DRIFT_PP:.0f} point counts as stable. Lower drift = efficiency that holds up")
     latest: dict[str, tuple[str, float]] = {}
+    seen: set[str] = set()
     for r in conn.report.find({"type": "post_run", "body.local_date": {"$gte": (today - timedelta(days=84)).isoformat()}},
                               {"subject_key": 1, "revision": 1, "body.local_date": 1, "body.decoupling": 1}).sort("revision", -1):
-        if r["subject_key"] in latest:
-            continue  # the newest revision of each run only
+        if r["subject_key"] in seen:
+            continue  # the newest revision of each run only, eligible or not
+        seen.add(r["subject_key"])
         dc = r["body"].get("decoupling") or {}
         if dc.get("eligible") and dc.get("decoupling_pct") is not None:
             latest[r["subject_key"]] = (r["body"]["local_date"], dc["decoupling_pct"])
