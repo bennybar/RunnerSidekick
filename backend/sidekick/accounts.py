@@ -59,10 +59,22 @@ def create_session(conn: Database, user_id: int, name: str) -> str:
     return token
 
 
+SESSION_IDLE_DAYS = 90  # a sign-in unused this long expires (the app and its background refresh keep yours alive)
+
+
 def verify_session(conn: Database, token: str) -> dict | None:
     digest = _hash(token)
     s = one(conn.sessions, {"token_sha256": digest, "revoked_at": None})
     if s is None or not hmac.compare_digest(s["token_sha256"], digest):
+        return None
+    from datetime import datetime, timedelta, timezone
+    seen = s.get("last_used_at") or s.get("created_at")
+    try:
+        last = datetime.fromisoformat(seen.replace("Z", "+00:00")) if seen else None
+    except ValueError:
+        last = None  # an unreadable stamp (e.g. migrated from SQLite) doesn't end a sign-in
+    if last and last < datetime.now(timezone.utc) - timedelta(days=SESSION_IDLE_DAYS):
+        conn.sessions.update_one({"id": s["id"]}, {"$set": {"revoked_at": utc_now()}})
         return None
     u = one(conn.users, {"id": s["user_id"], "deleted_at": None})
     if u is None:
@@ -83,7 +95,11 @@ def normalise_email(email: str) -> str:
 
 
 def add_invite(conn: Database, email: str) -> None:
-    conn.invites.update_one({"email": normalise_email(email)}, {"$setOnInsert": {"created_at": utc_now(), "used_at": None}}, upsert=True)
+    """Invites an email. An invite used by an account that's since been deleted is renewed, so they can come back."""
+    e = normalise_email(email)
+    conn.invites.update_one({"email": e}, {"$setOnInsert": {"created_at": utc_now(), "used_at": None}}, upsert=True)
+    if one(conn.users, {"email": e, "deleted_at": None}) is None:
+        conn.invites.update_one({"email": e}, {"$set": {"used_at": None}})
 
 
 def remove_invite(conn: Database, email: str) -> int:

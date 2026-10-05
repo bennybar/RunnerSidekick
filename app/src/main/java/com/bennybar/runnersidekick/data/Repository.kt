@@ -158,8 +158,7 @@ class Repository(
         return when (code) {
             200 -> {
                 val r = json.decodeFromString<AuthResult>(body)
-                settings.setBackend(backendUrl, r.token)
-                refreshAll()
+                settings.setBackend(backendUrl, r.token)  // Today loads everything once the app opens
                 null
             }
             403 -> "This Google account hasn't been invited yet. Ask the server owner to run: sidekick invite add <your email>"
@@ -180,6 +179,7 @@ class Repository(
     }
 
     suspend fun signOut() {
+        runCatching { api.post("/v1/auth/logout") }  // the token stops working on the server too (offline: just this phone)
         clearLocal(includeCheckins = false)
         settings.clearToken()
     }
@@ -304,7 +304,10 @@ class Repository(
 
     private suspend fun refreshAllNow(from: Float, to: Float) {
         val steps = listOf<Pair<String, suspend () -> Unit>>(
-            "Checking the connection" to { refreshStatus(); establishAccount(); ensureTimezone(); pushPendingCheckins(); pullCheckins() },
+            "Checking the connection" to {
+                refreshStatus(); establishAccount(); ensureTimezone(); pushPendingCheckins(); pullCheckins()
+                db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
+            },
             "Loading today" to {
                 val todayBody = api.getRaw("/v1/today")
                 put("today", todayBody)

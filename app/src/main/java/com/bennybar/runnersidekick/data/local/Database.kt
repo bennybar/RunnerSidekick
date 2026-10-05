@@ -76,6 +76,10 @@ interface CacheDao {
 
     @Query("DELETE FROM cached_blob")
     suspend fun clear()
+
+    /** Per-run and per-day copies not opened for a while (the main screens' copies are kept, always fresh) */
+    @Query("DELETE FROM cached_blob WHERE fetchedAt < :before AND (`key` LIKE 'activity:%' OR `key` LIKE 'runai:%' OR `key` LIKE 'day:%' OR `key` LIKE 'trends:%')")
+    suspend fun pruneOld(before: Long)
 }
 
 @Dao

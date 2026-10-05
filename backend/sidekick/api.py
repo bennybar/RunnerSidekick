@@ -202,6 +202,31 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     app = FastAPI(title="Runner Sidekick", docs_url=None, redoc_url=None, openapi_url=None)
     api = APIRouter(dependencies=[Depends(current_user)])
 
+    # Rate limit: per device token (or per address without one), a sliding minute. Generous for the app's polling;
+    # stops a runaway client or someone hammering the server. RSK_RATE_LIMIT=0 turns it off.
+    rate_hits: dict[str, list[float]] = {}
+    rate_limit = int(os.getenv("RSK_RATE_LIMIT", "300"))
+
+    @app.middleware("http")
+    async def rate(request, call_next):
+        import hashlib
+        import time as _time
+        if rate_limit:
+            auth = request.headers.get("authorization") or ""
+            key = ("t:" + hashlib.sha256(auth.encode()).hexdigest()[:16]) if auth else ("ip:" + (request.client.host if request.client else "?"))
+            limit = rate_limit if auth else max(10, rate_limit // 10)
+            now = _time.monotonic()
+            hits = [h for h in rate_hits.get(key, []) if now - h < 60]
+            if len(hits) >= limit:
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": "too many requests"}, status_code=429, headers={"Retry-After": "30"})
+            hits.append(now)
+            rate_hits[key] = hits
+            if len(rate_hits) > 10000:  # forget idle clients
+                for k in [k for k, v in rate_hits.items() if now - v[-1] > 60]:
+                    rate_hits.pop(k, None)
+        return await call_next(request)
+
     @app.middleware("http")
     async def etag(request, call_next):
         """Every JSON GET carries an ETag; when the app already has that exact body it gets an empty 304 instead, so
@@ -834,6 +859,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def garmin_disconnect(user=Depends(current_user)):
         sec = secrets(cfg.data_dir)
         return {"disconnected": goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))}
+
+    @api.post("/v1/auth/logout")
+    def logout(user=Depends(current_user)):
+        """Ends this device's sign-in on the server (its token stops working)."""
+        accounts.app_db().sessions.update_one({"id": user["session_id"]}, {"$set": {"revoked_at": utc_now()}})
+        return {"signed_out": True}
 
     @api.get("/v1/me")
     def me(user=Depends(current_user)):

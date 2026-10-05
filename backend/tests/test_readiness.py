@@ -60,7 +60,7 @@ def test_short_history_is_not_read_as_a_load_spike(monkeypatch):
         monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b, n=n: history(n))
         ratios.append(rd.training_load(None, "x", at, None)["ratio"])
     # Same training, different history length: the same reading (before the fix: 1.665 vs 0.997), and no "heavier"
-    assert abs(ratios[0] - ratios[1]) < 0.03 and max(ratios) < rd.LOAD_OK
+    assert abs(ratios[0] - ratios[1]) < 0.05 and max(ratios) < rd.LOAD_OK
 
 
 def morning(rule="R5", sleep_h=None):

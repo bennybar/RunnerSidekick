@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.8"  # 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.9"  # 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -50,12 +50,15 @@ def splits_from_laps(laps: list[dict]) -> list[Split]:
 
 
 def _weights(s: Samples) -> list[float]:
-    """Time each sample represents (to the next sample); 0 across gaps or when stopped."""
+    """Time each sample represents (to the next sample); 0 across gaps or when stopped. A gap is longer than 10 s, or
+    than three times the run's usual sample spacing when Garmin sent it thinned out (very long runs)."""
+    steps = sorted(b - a for a, b in zip(s.t, s.t[1:]) if b > a)
+    gap = max(MAX_SAMPLE_GAP, 3 * steps[len(steps) // 2]) if steps else MAX_SAMPLE_GAP
     w = []
     for i in range(len(s.t)):
         dt = (s.t[i + 1] - s.t[i]) if i + 1 < len(s.t) else 0.0
         sp = s.speed[i]
-        w.append(dt if 0 < dt <= MAX_SAMPLE_GAP and sp is not None and sp >= MOVING_SPEED else 0.0)
+        w.append(dt if 0 < dt <= gap and sp is not None and sp >= MOVING_SPEED else 0.0)
     return w
 
 

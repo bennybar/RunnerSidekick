@@ -130,10 +130,9 @@ fun SignInScreen() {
                     try {
                         // Checked before it's saved: a token the server rejects is never stored
                         error = repo.checkToken(url, token)
-                        if (error == null) {
-                            repo.settings.setBackend(url, token)
-                            runCatching { repo.refreshAll() }  // the app opens either way; the screens report their own errors
-                        }
+                        // Saving the token opens the app; Today loads everything itself (a refresh started here would be
+                        // cancelled as this screen closes, and Today's own would wait on it)
+                        if (error == null) repo.settings.setBackend(url, token)
                     } catch (e: ApiException) {
                         error = e.message
                     } catch (e: kotlinx.coroutines.CancellationException) {

@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.5"  # 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.6"  # 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -120,9 +120,13 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
     # Fading averages per day (a per-day rate, so acute and chronic are comparable)
     # Fading averages start from zero; divided by the share of each one's weight the history actually covers, so a short
     # history doesn't read as a spike (the slower chronic average would otherwise lag far behind)
-    span = (at - ends[0][0]).total_seconds() / 86400 + 1
-    acute = sum(l * exp(-(at - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS / (1 - exp(-span / ACUTE_DAYS))
-    chronic = sum(l * exp(-(at - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS / (1 - exp(-span / CHRONIC_DAYS))
+    # The load ratio is taken as of the end of the local day (with the runs finished so far), so it doesn't drift through
+    # the day as the averages fade by the hour; it changes only when a run comes in
+    tz = ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))
+    day_end = datetime.combine(local + timedelta(days=1), time(0), tz).astimezone(timezone.utc)
+    span = (day_end - ends[0][0]).total_seconds() / 86400 + 1
+    acute = sum(l * exp(-(day_end - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS / (1 - exp(-span / ACUTE_DAYS))
+    chronic = sum(l * exp(-(day_end - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS / (1 - exp(-span / CHRONIC_DAYS))
     typical = median(l for e, l in loads if (at - e).days < 28) if any((at - e).days < 28 for e, _ in loads) else median(l for _, l in loads)
 
     def left(when: datetime) -> float:  # effort still fading at `when`, from runs finished by then

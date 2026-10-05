@@ -19,3 +19,15 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# ---- Runner Sidekick ----
+# Readable stack traces in crash reports
+-keepattributes SourceFile,LineNumberTable,*Annotation*,InnerClasses,Signature
+-renamesourcefileattribute SourceFile
+# kotlinx.serialization: keep the generated serializers of our API models (its own consumer rules cover the library)
+-keepclassmembers @kotlinx.serialization.Serializable class com.bennybar.runnersidekick.** {
+    *** Companion;
+    *** INSTANCE;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep class com.bennybar.runnersidekick.**$$serializer { *; }
+-keepclassmembers class com.bennybar.runnersidekick.** { *** Companion; }

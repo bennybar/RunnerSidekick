@@ -15,8 +15,8 @@ android {
         applicationId = "com.bennybar.runnersidekick"
         minSdk = 35
         targetSdk = 36
-        versionCode = 65
-        versionName = "0.41.0"
+        versionCode = 66
+        versionName = "0.42.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).
@@ -42,7 +42,9 @@ android {
             buildConfigField("String", "DEFAULT_BACKEND_URL", "\"http://10.0.2.2:8765\"")
         }
         release {
-            isMinifyEnabled = false
+            // R8: shrinks code and unused resources (the extended icon set is large); keep rules in proguard-rules.pro
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (releaseStore != null) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "DEFAULT_BACKEND_URL", "\"https://runnersidekick.ibarak.org\"")
             proguardFiles(

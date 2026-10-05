@@ -321,6 +321,9 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
 
 # ---------------------------------------------------------------- connector
 
+DETAIL_POINTS = 10000
+
+
 class GarminConnector:
     source = "garmin"
     synthetic = False
@@ -463,5 +466,7 @@ class GarminConnector:
         splits = details = None
         if summary["sport"] != "other":
             splits = self._call("get_activity_splits", aid)
-            details = self._call("get_activity_details", aid)
+            # Up to 10,000 samples: Garmin's default (2,000) spaces a run over ~5.6 h more than 10 s apart, which the
+            # analysis would read as pauses
+            details = self._call("get_activity_details", aid, DETAIL_POINTS)
         return normalise_activity(a, splits, details)

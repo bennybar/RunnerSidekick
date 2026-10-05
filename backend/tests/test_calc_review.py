@@ -10,6 +10,7 @@ from sidekick.connectors.base import Samples
 from sidekick.db import next_id, utc_now
 
 from test_race import ANCHOR, set_race, synced
+from test_readiness import daily
 
 
 def test_two_runs_on_one_day_both_count_in_the_race_week():
@@ -524,3 +525,54 @@ def test_trends_leave_out_only_runs_hotter_than_your_usual():
     for i, dew in enumerate([19, 20, 19, 21, 20, 19, 25]):  # a humid summer: 19–21 is normal here, 25 isn't
         conn.run_weather.insert_one({"source_id": f"r{i}", "checked_at": utc_now(), "weather": {"temperature_2m": 27.0, "dew_point_2m": float(dew)}})
     assert weather.unusually_hot(conn) == {"r6"}
+
+
+def test_a_very_long_run_with_thinned_samples_keeps_its_analysis():
+    # 6 hours at 12-second spacing (Garmin thins long runs out): still moving time, not one long pause
+    t = [float(x) for x in range(0, 6 * 3600, 12)]
+    s = Samples(t, [140.0] * len(t), [2.8] * len(t), [2.8 * x for x in t], [10.0] * len(t), [168.0] * len(t))
+    assert sum(rn._weights(s)) > 0.99 * t[-1]
+    assert rn.decoupling(s, [], 2.8 * t[-1], 20.0).get("decoupling_pct") is not None
+
+
+def test_the_load_ratio_doesnt_drift_through_the_day(monkeypatch):
+    from sidekick import readiness as rd
+    morning_at = datetime(2026, 10, 2, 5, tzinfo=timezone.utc)
+    evening_at = datetime(2026, 10, 2, 18, tzinfo=timezone.utc)
+    runs = daily(morning_at.replace(hour=4), n=40, hours=0)
+    monkeypatch.setattr(rd, "run_load", lambda conn, a, floors: a["load"])
+    monkeypatch.setattr(rd.rp, "get_setting", lambda conn, k, d: d)
+    monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: runs)
+    r1 = rd.training_load(None, "x", morning_at, None)["ratio"]
+    r2 = rd.training_load(None, "x", evening_at, None)["ratio"]
+    assert abs(r1 - r2) < 1e-9  # same runs, same day: the same ratio morning and evening
+
+
+def test_sessions_expire_logout_works_and_deleted_users_can_be_reinvited(tmp_path):
+    from sidekick import accounts
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    c = client(tmp_path)
+    tok = create_token(tmp_path, "t")
+    h = {"Authorization": f"Bearer {tok}"}
+    assert c.get("/v1/me", headers=h).status_code == 200
+    assert c.post("/v1/auth/logout", headers=h).json() == {"signed_out": True}
+    assert c.get("/v1/me", headers=h).status_code == 401  # signed out on the server, not just on the phone
+    tok2 = create_token(tmp_path, "t2")
+    a = accounts.app_db()
+    a.sessions.update_one({"token_sha256": accounts._hash(tok2)}, {"$set": {"last_used_at": "2026-01-01T00:00:00Z"}})
+    assert c.get("/v1/me", headers={"Authorization": f"Bearer {tok2}"}).status_code == 401  # idle too long
+    accounts.add_invite(a, "gone@example.com")
+    a.invites.update_one({"email": "gone@example.com"}, {"$set": {"used_at": "2026-09-01T00:00:00Z"}})  # used, then the user was deleted
+    accounts.add_invite(a, "gone@example.com")
+    assert a.invites.find_one({"email": "gone@example.com"})["used_at"] is None
+
+
+def test_rate_limit(tmp_path, monkeypatch):
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    monkeypatch.setenv("RSK_RATE_LIMIT", "5")
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    codes = [c.get("/v1/me", headers=h).status_code for _ in range(7)]
+    assert codes[:5] == [200] * 5 and codes[5] == 429

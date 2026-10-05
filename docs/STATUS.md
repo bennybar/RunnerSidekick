@@ -332,6 +332,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Open items closed (2026-10-05, v0.42.0)
+- Sign-ins expire after 90 days unused; `POST /v1/auth/logout` ends this device's sign-in, and Sign out calls it.
+- Rate limit: 300 requests a minute per device token, 30 per address without one (`RSK_RATE_LIMIT`, 0 = off).
+- A deleted user can be invited again (their used invite is renewed).
+- Very long runs: Garmin details are requested with up to 10,000 samples, and a gap is relative to the run's own
+  sample spacing, so a run over ~5.6 h keeps its analysis (running-1.9).
+- The training-load ratio is taken as of the end of the local day, so it no longer drifts through the day
+  (readiness-1.6).
+- App: release builds are shrunk with R8 and resource shrinking (57 MB → 6 MB; the release APK was signed into the
+  live server on an emulator and Today, a run and the AI input all loaded), the cache drops per-run and per-day copies
+  not opened for 30 days, "Get AI input" scrolls to the AI card. Signing in no longer starts a refresh that the closing
+  screen cancelled (with refreshes coalesced, Today's own then waited on it and showed "No briefing yet").
+
 ## Heat and strain (2026-10-05, v0.41.0)
 - Weather for every new run: looked up during sync (Open-Meteo estimate, start area to about 1 km), before the run's
   report; `backfill-weather` for runs of the last 120 days. Each run's checks show the conditions.

@@ -227,7 +227,10 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
     val ai by vm.ai.collectAsStateWithLifecycle()
     val aiScroll = remember { mutableStateOf(0) }
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
-    LaunchedEffect(aiScroll.value) { if (aiScroll.value > 0) runList.animateScrollToItem(1) }
+    // The AI card comes after the header and (when there's one) the decoupling card
+    LaunchedEffect(aiScroll.value) {
+        if (aiScroll.value > 0) runList.animateScrollToItem(1 + if (detail?.value?.report?.decoupling?.decouplingPct != null) 1 else 0)
+    }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
