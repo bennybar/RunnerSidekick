@@ -176,6 +176,7 @@ class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
 
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     val activities = repo.activities.state(null)
+    val status = repo.status.state(null)
     private val _syncResult = MutableStateFlow<String?>(null)
     /** One-off message after a manual sync ("2 new runs", "No new runs"). */
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()

@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -222,3 +223,23 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
 
 /** Room for the floating navigation bar at the bottom of a tab's list: tab pages scroll underneath it. */
 val LocalNavBarPadding = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
+
+
+/** "14:32" in the phone's time zone, from an ISO instant. */
+fun clockOf(iso: String): String = runCatching {
+    java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+}.getOrDefault("")
+
+/** The time a manual Garmin sync is next allowed, while it's still ahead; null once it's allowed (re-checked when it passes). */
+@androidx.compose.runtime.Composable
+fun syncWait(nextAllowedAt: String?): String? {
+    var tick by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val at = nextAllowedAt?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() }
+    androidx.compose.runtime.LaunchedEffect(at, tick) {
+        if (at != null && at.isAfter(java.time.Instant.now())) {
+            kotlinx.coroutines.delay(java.time.Duration.between(java.time.Instant.now(), at).toMillis() + 500)
+            tick++
+        }
+    }
+    return if (at != null && at.isAfter(java.time.Instant.now())) clockOf(nextAllowedAt) else null
+}

@@ -273,3 +273,27 @@ def test_race_caution_drops_the_target_pace(monkeypatch):
     assert nr["caution"] and nr["pace"] is None and nr["pace_s_per_km"] is None
     calm = next_run_with(monkeypatch, rs, score=85, allowed="hard")
     assert calm["caution"] is None and calm["pace"] == "around 5:00 /km"
+
+
+def test_manual_sync_cooldown_by_how_the_last_sync_ended():
+    from datetime import timezone
+    from sidekick.sync import next_manual_sync, set_connection
+    conn = synced()
+    conn.sync_job.delete_many({})
+    now = datetime(2026, 10, 5, 10, 0, tzinfo=timezone.utc)
+    assert next_manual_sync(conn, "fixture", now) is None  # never synced: go ahead
+
+    def finish(outcome, minutes_ago):
+        conn.sync_job.insert_one({"id": next_id(conn, "sync_job"), "source": "fixture", "outcome": outcome,
+                                  "finished_at": (now - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    finish("ok", 5)
+    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=10)  # 15 minutes after a good sync
+    finish("ok", 16)
+    assert next_manual_sync(conn, "fixture", now) is None
+    finish("error", 1)
+    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=1)  # a failure can be retried soon
+    finish("rate_limited", 10)
+    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=20)  # Garmin asked us to slow down
+    finish("ok", 30)
+    set_connection(conn, "fixture", retry_not_before=(now + timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=40)  # Garmin's own back-off wins

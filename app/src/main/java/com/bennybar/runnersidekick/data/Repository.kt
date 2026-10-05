@@ -18,6 +18,9 @@ import com.bennybar.runnersidekick.data.remote.Fitness
 import com.bennybar.runnersidekick.data.remote.FocusState
 import com.bennybar.runnersidekick.data.remote.RunIntent
 import com.bennybar.runnersidekick.data.remote.RunIntentIn
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import com.bennybar.runnersidekick.data.remote.GoogleSignInBody
 import com.bennybar.runnersidekick.data.remote.InsightsReport
 import com.bennybar.runnersidekick.data.remote.Me
@@ -352,7 +355,13 @@ class Repository(
     suspend fun syncNow(pause: suspend (Int) -> Unit) {
         try {
             _progress.value = Progress(0f, "Starting the Garmin sync")
-            api.post("/v1/sync")
+            // The server refuses syncs too close together (it protects the Garmin account): say when the next one can run
+            val started = json.parseToJsonElement(api.post("/v1/sync")).jsonObject
+            started["next_allowed_at"]?.jsonPrimitive?.contentOrNull?.let { at ->
+                refreshStatus()
+                throw com.bennybar.runnersidekick.data.remote.ApiException.Sync(
+                    "Synced with Garmin recently. Next sync from ${com.bennybar.runnersidekick.ui.components.clockOf(at)}, to keep your Garmin account safe.")
+            }
             // The server's own progress fills the first 85%; loading the results fills the rest. Checks back off from
             // 2 s (the caller's pause decides; nothing while the screen is hidden).
             var s = refreshStatus()

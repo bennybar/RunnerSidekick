@@ -332,6 +332,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Manual sync cooldown (2026-10-05, v0.36.0)
+- The server won't call Garmin for a manual sync within 15 minutes of the last sync that ended well (manual or the
+  hourly job), 2 minutes after a failure, 30 minutes after Garmin rate-limited us, or before Garmin's own back-off
+  ends (`sync.next_manual_sync`). It answers with `next_allowed_at`; `/v1/status` carries `sync_next_allowed_at`.
+  Demo data is exempt. Pull-to-refresh only reloads from the server and isn't limited.
+- App: "Sync Garmin" and "Get new runs" show "Next sync 14:32" and stay disabled until then; a refused sync says when.
+
 ## Follow-ups (2026-10-05, v0.35.3)
 - The plan's duration also caps a session made easier when there's no easy-pace estimate: it becomes a time ("about
   10 min") with no guessed distance (a 10-minute plan had become 9 km).

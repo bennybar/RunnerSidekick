@@ -136,6 +136,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
     val syncResult by vm.syncResult.collectAsStateWithLifecycle()
     val listError by vm.error.collectAsStateWithLifecycle()
     LaunchedEffect(syncResult) { syncResult?.let { listSnackbar.showSnackbar(it); vm.clearSyncResult() } }
+    val syncStatus by vm.status.collectAsStateWithLifecycle()
     LaunchedEffect(listError) { listError?.let { listSnackbar.showSnackbar(it); vm.clearError() } }
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -143,12 +144,13 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
             LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = {
                 if (acts?.value?.any { it.synthetic } == true) DemoBadge()
                 // Fetch a run you just finished from Garmin without waiting for the hourly sync
-                androidx.compose.material3.FilledTonalButton(onClick = vm::syncNow, enabled = !busy,
+                val wait = com.bennybar.runnersidekick.ui.components.syncWait(syncStatus?.value?.syncNextAllowedAt)
+                androidx.compose.material3.FilledTonalButton(onClick = vm::syncNow, enabled = !busy && wait == null,
                     contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.padding(end = 8.dp)) {
                     if (busy) androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
                     else Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (busy) "Syncing…" else "Get new runs")
+                    Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: "Get new runs")
                 }
             })
         },

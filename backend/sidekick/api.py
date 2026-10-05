@@ -27,7 +27,7 @@ from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
 from .db import WEEKDAYS, connect, many, one, put, put_if_newer, set_setting, utc_now
-from .sync import get_connection_row, run_sync
+from .sync import get_connection_row, next_manual_sync, run_sync
 
 log = logging.getLogger(__name__)
 MAX_CHART_POINTS = 240  # ~20 s buckets for a 75-min run: readable trend without hiding stops
@@ -285,6 +285,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             "sync_progress": ({"percent": round(100 * (job or {}).get("progress", 0)), "phase": (job or {}).get("phase")}
                               if user["id"] in running else None),
             "last_job": job,
+            "sync_next_allowed_at": (lambda w: w.isoformat().replace("+00:00", "Z") if w else None)(
+                None if synthetic else next_manual_sync(conn, cfg.source)),
             "capabilities": row.get("capabilities", {}) if row else {},
             "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),
         }
@@ -293,6 +295,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def sync_now(conn=Depends(db), user=Depends(current_user)):
         if user["id"] in running:
             return {"started": False, "detail": "sync already running"}
+        # Not too often: Garmin can rate-limit or lock an account hit in bursts (demo data has no such limit)
+        wait = None if synthetic else next_manual_sync(conn, cfg.source)
+        if wait:
+            return {"started": False, "detail": "synced recently", "next_allowed_at": wait.isoformat().replace("+00:00", "Z")}
         threading.Thread(target=do_sync, args=(user_cfg(user), user["id"]), daemon=True).start()
         return {"started": True}
 

@@ -18,6 +18,8 @@ data class Status(
     @SerialName("sync_running") val syncRunning: Boolean = false,
     @SerialName("sync_progress") val syncProgress: SyncProgress? = null,
     @SerialName("last_job") val lastJob: SyncJob? = null,
+    /** When a manual Garmin sync is next allowed (the server's cooldown), or null when it is now */
+    @SerialName("sync_next_allowed_at") val syncNextAllowedAt: String? = null,
     val backfill: Backfill? = null,
     @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
 )

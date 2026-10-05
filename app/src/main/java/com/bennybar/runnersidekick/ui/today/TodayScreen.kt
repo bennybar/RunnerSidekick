@@ -125,9 +125,11 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 title = { Text(report?.localDate?.let { Format.longDate(it) } ?: "Today", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (status?.value?.synthetic == true) DemoBadge()
-                    androidx.compose.material3.TextButton(onClick = vm::syncNow, enabled = !busy) {
+                    // Garmin syncs at most every 15 minutes (the server's cooldown); the button says when the next one can run
+                    val wait = com.bennybar.runnersidekick.ui.components.syncWait(status?.value?.syncNextAllowedAt)
+                    androidx.compose.material3.TextButton(onClick = vm::syncNow, enabled = !busy && wait == null) {
                         Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                        Text(if (busy) "Syncing…" else "Sync Garmin")
+                        Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: "Sync Garmin")
                     }
                 },
                 scrollBehavior = scroll,
