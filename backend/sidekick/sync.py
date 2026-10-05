@@ -131,7 +131,7 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
     set_connection(conn, source)
     row = get_connection_row(conn, source)
     if row["state"] == ConnectionState.REAUTH_REQUIRED.value and not force:
-        return SyncResult("auth_failed", "Re-authentication required; run garmin-login")
+        return SyncResult("auth_failed", "Garmin needs connecting again: Settings → Garmin in the app")
     if row["retry_not_before"] and not force and row["retry_not_before"] > now.isoformat().replace("+00:00", "Z"):
         return SyncResult("deferred", f"Backing off until {row['retry_not_before']}")
     if connector.connection_state() == ConnectionState.NOT_CONFIGURED:

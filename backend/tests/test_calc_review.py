@@ -747,3 +747,51 @@ def test_a_disabled_account_is_signed_out_refused_and_not_synced(tmp_path):
     accounts.set_disabled(a, u["id"], False)
     assert accounts.sign_in_with_google(a, claims)["id"] == u["id"]
     assert accounts.find_user(a, "MEMBER@example.com")["id"] == u["id"] and accounts.find_user(a, str(u["id"]))
+
+
+def test_connecting_garmin_from_a_ticket(tmp_path):
+    from sidekick import garmin_link as gl
+
+    class FakeClient:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def _exchange_service_ticket(self, ticket, service_url):
+            assert service_url == gl.SSO_EMBED
+            if ticket == "ST-expired-0000":
+                raise RuntimeError("DI token exchange failed")
+            self.owner.ticket = ticket
+
+        def dump(self, path):
+            (Path(path) / gl.TOKEN_FILE).write_text('{"di_token": "t"}')
+
+    profiles = {"ST-mine-00000001": 111, "ST-theirs-0000001": 222}
+    last = {}
+
+    class FakeGarmin:
+        def __init__(self):
+            self.client, self.profile_id, self.display_name = FakeClient(self), None, None
+
+        def login(self, tokenstore):
+            self.profile_id = profiles[last["ticket"]]
+
+    def factory():
+        g = FakeGarmin()
+        orig = g.client._exchange_service_ticket
+        g.client._exchange_service_ticket = lambda t, service_url: (last.update(ticket=t), orig(t, service_url))
+        return g
+    from pathlib import Path
+    users = tmp_path / "users"
+    mine, theirs = users / "1" / "garmin_tokens", users / "2" / "garmin_tokens"
+    assert not gl.linked(mine)
+    assert gl.link(mine, "ST-mine-00000001", users, 1, factory)["profile_id"] == 111
+    assert gl.linked(mine) and gl.profile_of(mine) == 111
+    import pytest
+    with pytest.raises(gl.LinkError, match="another Runner Sidekick account"):
+        gl.link(theirs, "ST-mine-00000001", users, 2, factory)  # one Garmin account, one app user
+    assert not gl.linked(theirs)
+    with pytest.raises(gl.LinkError, match="expired"):
+        gl.link(mine, "ST-expired-0000", users, 1, factory)
+    assert gl.linked(mine) and gl.profile_of(mine) == 111  # a failed relink never breaks the working one
+    assert not list((users / "1").glob(".garmin-link-*"))  # no temporary folders left behind
+    assert gl.unlink(mine) and not gl.linked(mine)

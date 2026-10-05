@@ -20,6 +20,7 @@ from dataclasses import replace
 
 from . import accounts
 from . import garmin_oauth as goauth
+from . import garmin_link
 from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, secrets
 from fastapi.responses import HTMLResponse
 from .config import SOURCE_FIXTURE, Config
@@ -83,6 +84,10 @@ class FocusIn(BaseModel):
 
 class InsightStateIn(BaseModel):
     state: Literal["dismissed", "working_on"] | None
+
+
+class GarminTicketIn(BaseModel):
+    ticket: str = Field(pattern=r"^ST-[A-Za-z0-9._\-]{8,300}$")
 
 
 class SettingsIn(BaseModel):
@@ -346,6 +351,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             "sync_next_allowed_at": (lambda w: w.isoformat().replace("+00:00", "Z") if w else None)(
                 None if synthetic else next_manual_sync(conn, cfg.source)),
             "capabilities": row.get("capabilities", {}) if row else {},
+            "garmin_linked": synthetic or garmin_link.linked(user_cfg(user).garmin_token_dir),
             "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),
         }
 
@@ -874,10 +880,25 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             raise HTTPException(409, str(e))
         return {"connected": True}
 
+    @api.post("/v1/garmin/ticket")
+    def garmin_ticket(body: GarminTicketIn, user=Depends(current_user)):
+        """Connects Garmin from the app's sign-in page: exchanges its one-time ticket, then starts the first sync."""
+        if synthetic:
+            raise HTTPException(409, "This server uses demo data; there's no Garmin to connect.")
+        ucfg = user_cfg(user)
+        try:
+            garmin_link.link(ucfg.garmin_token_dir, body.ticket, cfg.data_dir / "users", user["id"])
+        except garmin_link.LinkError as e:
+            raise HTTPException(409, str(e))
+        if user["id"] not in running:
+            threading.Thread(target=do_sync, args=(ucfg, user["id"]), daemon=True).start()
+        return {"connected": True}
+
     @api.delete("/v1/garmin/connection")
     def garmin_disconnect(user=Depends(current_user)):
         sec = secrets(cfg.data_dir)
-        return {"disconnected": goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))}
+        official = goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))
+        return {"disconnected": garmin_link.unlink(user_cfg(user).garmin_token_dir) or official}
 
     @api.post("/v1/auth/logout")
     def logout(user=Depends(current_user)):

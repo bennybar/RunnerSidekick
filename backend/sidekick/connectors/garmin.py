@@ -345,12 +345,12 @@ class GarminConnector:
             self._client = self._factory()
             return self._client
         if not (self.token_dir / "garmin_tokens.json").exists():
-            raise AuthRequired("No Garmin tokens. Run: python -m sidekick garmin-login")
+            raise AuthRequired("Garmin isn't connected: connect it in the app (Settings → Garmin)")
         api = Garmin()
         try:
             api.login(tokenstore=str(self.token_dir))
         except GarminConnectAuthenticationError as e:
-            raise AuthRequired("Stored Garmin session was rejected; run garmin-login again") from e
+            raise AuthRequired("Garmin ended this connection: connect it again in the app (Settings → Garmin)") from e
         except GarminConnectTooManyRequestsError as e:
             raise RateLimited(str(e)) from e
         except Exception as e:  # network etc. Message only; never the token
