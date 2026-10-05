@@ -332,6 +332,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## "Aerobic decoupling" everywhere (2026-10-05, v0.34.1)
+- The "How it went" check, the run's analysis item, the durability signal, the durability insight and the export now
+  say "Aerobic decoupling" instead of "Heart-rate drift" / "Drift"; explanations keep "heart-rate drift" as the plain
+  description (report-2.5).
+
 ## Readiness cap, Garmin cross-check, layout (2026-10-05, v0.34.0)
 - Readiness 82 "High" the morning after a threshold run (Garmin: 1, 52 h recovery): the weakest part now caps the score
   25 points above it (was 40), giving 70 "Moderate". Garmin's own readiness and the time left on its recovery timer

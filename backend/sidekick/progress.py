@@ -84,10 +84,10 @@ def drift_signal(conn, source: str, today: date) -> dict:
     if len(now) < DRIFT_MIN_RUNS:
         return signal("drift", "Durability", None, f"Needs {DRIFT_MIN_RUNS} steady runs in 6 weeks ({len(now)} so far)", note)
     if len(before) < DRIFT_MIN_RUNS:
-        return signal("drift", "Durability", None, f"Drift {median(now):.1f}% on recent steady runs; nothing to compare yet", note)
+        return signal("drift", "Durability", None, f"Aerobic decoupling {median(now):.1f}% on recent steady runs; nothing to compare yet", note)
     a, b = median(before), median(now)
     direction = "improving" if b <= a - DRIFT_PP else "declining" if b >= a + DRIFT_PP else "stable"
-    return signal("drift", "Durability", direction, f"Drift {a:.1f}% → {b:.1f}% on steady runs ({len(before)} and {len(now)} runs)", note)
+    return signal("drift", "Durability", direction, f"Aerobic decoupling {a:.1f}% → {b:.1f}% on steady runs ({len(before)} and {len(now)} runs)", note)
 
 
 def build(conn, source: str, today: date) -> dict:

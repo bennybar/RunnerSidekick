@@ -364,10 +364,10 @@ def durability(drifts: list[tuple[str, str, float]]) -> dict:
     med = median(vals)
     effect = {"median_pct": round(med, 1), "values": [{"date": d, "pct": v} for d, _, v in drifts]}
     if med <= 5:
-        return insight("durability", q, "running", "no_clear_pattern", f"Heart rate holds steady on longer runs (median drift {med:.1f}%)",
+        return insight("durability", q, "running", "no_clear_pattern", f"Heart rate holds steady on longer runs (median aerobic decoupling {med:.1f}%)",
                        f"Across {len(vals)} eligible runs, efficiency changed little between halves.", n=len(vals), effect=effect,
                        evidence=[s for _, s, _ in drifts], method=method, confounders=["Only runs of about 40 minutes or more qualify."])
-    return insight("durability", q, "running", "pattern", f"Heart rate tends to drift on longer runs (median {med:.1f}%)",
+    return insight("durability", q, "running", "pattern", f"Heart rate tends to drift on longer runs (median aerobic decoupling {med:.1f}%)",
                    f"Across {len(vals)} eligible runs, efficiency dropped in the second half.", n=len(vals), effect=effect,
                    evidence=[s for _, s, _ in drifts], method=method, confounders=["Heat and hydration also cause drift."])
 

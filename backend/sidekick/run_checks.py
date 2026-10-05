@@ -1,5 +1,5 @@
 """How a run went, as a few plain checks, each with a verdict (good / ok / low) or "info" where there's nothing to
-judge: pacing, effort against what the run was meant to be, cadence, heart-rate drift, hills and Garmin's training
+judge: pacing, effort against what the run was meant to be, cadence, aerobic decoupling (heart-rate drift), hills and Garmin's training
 effect. Calculated from the run's report when the run is opened; no language model, and stored reports don't change."""
 
 from __future__ import annotations
@@ -75,12 +75,12 @@ def build(conn, source: str, report: dict) -> list[dict]:
         v = "good" if steady and avg >= 165 else "ok"
         out.append(check("cadence", "Cadence", f"{'Steady' if steady else 'Varied'} at {avg} steps/min", v))
 
-    # Heart-rate drift on steady runs
+    # Aerobic decoupling (heart-rate drift) on steady runs
     dc = report.get("decoupling") or {}
     if dc.get("eligible") and dc.get("decoupling_pct") is not None:
         d = dc["decoupling_pct"]
         v = "good" if d <= 5 else "ok" if d <= 10 else "low"
-        out.append(check("drift", "Heart-rate drift", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'})", v))
+        out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'})", v))
 
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0

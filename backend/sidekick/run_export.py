@@ -306,7 +306,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("")
 
     # 8. Decoupling, with the numbers behind it
-    add("## Decoupling (heart-rate drift)")
+    add("## Aerobic decoupling (heart-rate drift)")
     f1, f2 = dc.get("first_half") or {}, dc.get("second_half") or {}
     if dc.get("decoupling_pct") is not None and f1 and f2:
         add(f"Warm-up excluded: **first 10 min of moving time** · Analysed: **{clock(dc.get('segment_moving_s'))}**, "
@@ -398,7 +398,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
                 ("Average HR", a.get("avg_hr"), med([x.get("avg_hr") for x in sims]), " bpm", None),
                 ("Power", g.get("avgPower"), med([x["power"] for x in sims]), " W", None),
                 ("Cadence", a.get("avg_cadence_spm"), med([x["cadence"] for x in sims]), " spm", None),
-                ("Drift (pace:HR)", dc.get("decoupling_pct") if dc.get("eligible") else None, med([x["drift"] for x in sims]), " points", True)):
+                ("Aerobic decoupling (pace:HR)", dc.get("decoupling_pct") if dc.get("eligible") else None, med([x["drift"] for x in sims]), " points", True)):
             if mine is not None and theirs is not None:
                 d = mine - theirs
                 deltas.append(f"{label}: **{signed(d, '{:+.1f}' if unit == ' points' else '{:+.0f}', unit)}**"
@@ -407,7 +407,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             add("### Compared with the median of these runs")
             L.extend(f"{x}  " for x in deltas)
             add("")
-        add("| Date | Distance | Pace | HR | Power | Drift | Cadence |")
+        add("| Date | Distance | Pace | HR | Power | Decoupling | Cadence |")
         add("|---|---:|---:|---:|---:|---:|---:|")
         add(f"| **This run** | {num(km, '{:.2f}', ' km')} | {pace(r.get('pace_moving_s_per_km'))} | {num(a.get('avg_hr'))} | "
             f"{num(g.get('avgPower'), unit=' W')} | {num(dc.get('decoupling_pct') if dc.get('eligible') else None, '{:.1f}', '%')} | "

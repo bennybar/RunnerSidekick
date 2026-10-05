@@ -19,7 +19,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.4"  # 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.5"  # 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -441,7 +441,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     if dc["eligible"]:
         v = dc["decoupling_pct"]
         findings.append({
-            "id": f"r:{sid}:decoupling", "category": "running", "metric": "pace_hr_decoupling", "title": "Heart-rate drift",
+            "id": f"r:{sid}:decoupling", "category": "running", "metric": "pace_hr_decoupling", "title": "Aerobic decoupling",
             "observed": {"value": v, "unit": "%"}, "comparison": {"kind": "heuristic", "value": 5.0},
             "delta": None, "status": "outside" if v > 5 else "within", "priority": 2,
             "statement": (f"Efficiency (speed per heartbeat) was {abs(v):.1f}% "
@@ -641,7 +641,7 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
     if cls["kind"] == "variable" and structured:
         return "Interval-style session: drift analysis doesn't apply. Compare the repeated efforts with each other instead."
     if dc.get("eligible") and dc["decoupling_pct"] > 5:
-        return "See whether heart-rate drift repeats on your next comparable steady run before reading much into it."
+        return "See whether aerobic decoupling stays above 5% on your next comparable steady run before reading much into it."
     if kind in STEADY_KINDS:
         return ("Pace follows effort on a run like this. On the next comparable run, watch whether the same heart rate gives "
                 "a faster pace or lower drift.")

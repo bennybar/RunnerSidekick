@@ -24,7 +24,7 @@ def test_export_v2_sections_in_order_and_the_layers_kept_apart():
     conn, sid = synced()
     name, md = run_export.markdown(conn, "fixture", sid, app_version="0.30.0", fetch=no_net)
     assert name.endswith("-running.md") and md.startswith("# Running")
-    order = ["## How it went", "## Pace and splits", "## Decoupling (heart-rate drift)", "## AI input",
+    order = ["## How it went", "## Pace and splits", "## Aerobic decoupling (heart-rate drift)", "## AI input",
              "## App-generated interpretation", "## Minute by minute", "## Data provenance"]
     assert [md.index(s) for s in order] == sorted(md.index(s) for s in order)
     assert "## Athlete context" not in md  # nothing entered: no section, no placeholders
