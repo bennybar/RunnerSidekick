@@ -11,7 +11,7 @@ from statistics import median
 from . import reports as rp
 
 PROGRESS_VERSION = "progress-1.3"  # 1.3: one moving signal is an early sign; signal agreement; 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
-EFFICIENCY_S_PER_MONTH = 3.0   # a pace change smaller than this at the same heart rate is "stable"
+from .analytics.insights import TREND_MEANINGFUL_S_PER_KM_PER_MONTH as EFFICIENCY_S_PER_MONTH  # the efficiency insight's own step
 EFFICIENCY_MIN_RUNS = 6
 EFFICIENCY_MAX_AGE_DAYS = 45   # the trend must reach into the last 6 weeks
 DRIFT_PP = 1.0                 # a change in median drift smaller than this is "stable"

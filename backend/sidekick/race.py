@@ -47,7 +47,7 @@ def phase(dist: str, days_to_go: int) -> str | None:
         return "recovery" if -days_to_go <= RECOVERY_DAYS[dist] else None
     if days_to_go <= 6:
         return "race_week"
-    weeks = (days_to_go + 6) // 7
+    weeks = (days_to_go - 7) // 7 + 1  # whole weeks before race week: 7–13 days out is week 1
     taper = TAPER_WEEKS[dist]
     if weeks <= taper:
         return "taper"
@@ -143,7 +143,10 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
     g = get_setting(conn, "garmin_fitness", None) or {}
     ts = g.get("training_status") or {}
     over = ts.get("acute_load") and ts.get("chronic_max") and ts["acute_load"] > ts["chronic_max"]
-    factor = VOLUME_FACTOR[st["phase"]]
+    # The week's phase, from its first day (or race week when the race falls in it), so the plan doesn't change mid-week
+    # on the day the phase changes
+    wk_phase = "race_week" if days[0] <= race_day <= days[-1] else (phase(st["distance"], (race_day - days[0]).days) or st["phase"])
+    factor = VOLUME_FACTOR[wk_phase]
     guard = None
     if (held or over) and factor > 1:
         factor, guard = 1.0, ("Volume held at your recent level: " + ("Garmin rates your load above its range" if over else
@@ -155,13 +158,15 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
         acts.setdefault(a["local_date"], []).append(a)
     # Session kinds: race day fixed; long run on the last running day before the weekend ends; quality spread out
     kinds: dict[date, str] = {}
-    usable = [d for d in run_days if d != race_day and d < race_day + timedelta(days=1) or race_day > days[-1]]
+    # Running days this week: all of them before a race in a later week or after one that's past (recovery runs too),
+    # only those before it in race week
+    usable = [d for d in run_days if race_day > days[-1] or race_day < days[0] or d < race_day]
     if days[0] <= race_day <= days[-1]:
         kinds[race_day] = "race"
         usable = [d for d in usable if d < race_day]
-    if usable and st["phase"] not in ("race_week", "recovery"):
+    if usable and wk_phase not in ("race_week", "recovery"):
         kinds[usable[-1]] = "long"
-    for q, d in zip(QUALITY[st["phase"]], [d for d in usable if d not in kinds][::2]):
+    for q, d in zip(QUALITY[wk_phase], [d for d in usable if d not in kinds][::2]):
         kinds[d] = q
     for d in usable:
         kinds.setdefault(d, "easy")
@@ -236,7 +241,7 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
                 if sum(y["minutes"] for y in todo if not y["optional"]) <= left:
                     break
                 x["optional"] = True  # easy days first, the long run last
-    return {"week_start": ws.isoformat(), "phase": st["phase"], "target_minutes": round(target_s / 60) if target_s else None,
+    return {"week_start": ws.isoformat(), "phase": wk_phase, "target_minutes": round(target_s / 60) if target_s else None,
             "recent_minutes": round(recent / 60) if recent else None, "done_minutes": round(done / 60), "sessions": sessions,
             "guardrail": guard, "basis": "Rules of thumb by phase from your running days and recent volume; not a personal "
                                          "coaching plan. Durations, not paces. Missed sessions aren't made up later in the week."}

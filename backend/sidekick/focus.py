@@ -16,7 +16,7 @@ FOCUS_VERSION = "focus-1.0"
 FADE_TARGET_S = 5.0          # "even" = second half no more than 5 s/km slower than the first
 EASY_SHARE = 0.7             # an easy run spends >= 70% of moving time below the zone-3 floor
 VOLUME_BAND = 0.15           # steady volume = within ±15% of the previous week
-MIN_HR_COVERAGE = 0.5        # a run's intensity is judged only if valid HR covers at least half its moving time
+from .analytics.running import MIN_ZONE_COVERAGE  # the one rule for everything judged from time in zones
 
 KINDS = {
     "even_pacing": "Start slower and finish even",
@@ -62,7 +62,9 @@ def zone_shares(conn, a: dict, floors: list[float]) -> dict | None:
     r = ins.RunData(a["source_id"], a["local_date"], datetime.min, None, a["distance_m"], a["moving_s"], None, s, [], "steady")
     zt = ins.zone_time(r, floors)
     tot = sum(zt)
-    if not tot or (a["moving_s"] and tot < MIN_HR_COVERAGE * a["moving_s"]):
+    # The same coverage rule as the intensity insight: samples cover most of the run, heart rate most of the samples
+    moving = sum(w for w in rn._weights(s) if w > 0)
+    if not tot or moving < MIN_ZONE_COVERAGE * (a["moving_s"] or moving) or tot < MIN_ZONE_COVERAGE * moving:
         return None
     return {"easy": (zt[0] + zt[1] + zt[2]) / tot, "hard": (zt[4] + zt[5]) / tot}
 

@@ -21,6 +21,7 @@ from statistics import median
 
 from . import focus as fc
 from . import reports as rp
+from .analytics.insights import EVENING_HOUR
 from .analytics import running as rn
 from .db import first_weekday, many, next_id, one, plain, utc_now
 from .narrative import OpenAIProvider
@@ -214,7 +215,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
         pace = rn.moving_pace(a["distance_m"], a["moving_s"])
         intent = (body.get("intent") or {})
         b.item(f"run:{n}", "run", recency=n, weekday=local.strftime("%A"), time_of_day="morning" if local.hour < 12 else
-               "afternoon" if local.hour < 17 else "evening", distance=f"{(a['distance_m'] or 0) / 1000:.1f} km",
+               "afternoon" if local.hour < EVENING_HOUR else "evening", distance=f"{(a['distance_m'] or 0) / 1000:.1f} km",
                moving_pace=rp.fmt_pace(pace) if pace else None, avg_hr=round(a["avg_hr"]) if a["avg_hr"] else None,
                intended=intent.get("kind"), effort_type=(body.get("classification") or {}).get("kind"),
                drift_pct=(body.get("decoupling") or {}).get("decoupling_pct") if (body.get("decoupling") or {}).get("eligible") else None,
@@ -235,7 +236,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
     sleep = [v for k, v in rp.series(conn, source, "sleep_duration", today.isoformat()).items() if k >= (today - timedelta(days=28)).isoformat()]
     cis = many(conn.checkin, {"deleted": False, "local_date": {"$gte": (today - timedelta(days=28)).isoformat()}})
     b.item("habits:summary", "habits", runs_last_6_weeks=len(hours),
-           evening_runs_share=f"{round(100 * sum(1 for h in hours if h >= 17) / len(hours))}%" if hours else None,
+           evening_runs_share=f"{round(100 * sum(1 for h in hours if h >= EVENING_HOUR) / len(hours))}%" if hours else None,
            check_ins_last_4_weeks=len(cis), pain_or_illness_days=sum(1 for c in cis if c["pain"] or c["illness"]),
            nights_with_sleep_data=len(sleep))
     if beds:

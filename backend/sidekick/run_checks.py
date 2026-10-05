@@ -32,12 +32,11 @@ def build(conn, source: str, report: dict) -> list[dict]:
     # Pacing: second half against the first, on complete kilometres, hill-adjusted where the samples allow it so a late
     # climb doesn't read as slowing
     if len(splits) >= 4:
-        h = len(splits) // 2
-        p = [s.get("gap_pace_s_per_km") or s["pace_s_per_km"] for s in splits]
-        fade = mean(p[-h:]) - mean(p[:h])
-        if fade <= -3:
+        from .analytics import running as rn
+        fade = rn.fade([s.get("gap_pace_s_per_km") or s["pace_s_per_km"] for s in splits])
+        if fade < -rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", f"Faster second half ({round(-fade)} s/km quicker)", "good"))
-        elif fade <= 5:
+        elif fade <= rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", "Even all the way", "good"))
         else:
             out.append(check("pacing", "Pacing", f"Slowed {round(fade)} s/km in the second half", "ok" if fade <= 15 else "low"))

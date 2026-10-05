@@ -18,7 +18,7 @@ ANCHOR = date(2026, 9, 30)
 @pytest.mark.parametrize("dist,days,expected", [
     ("half", 100, "base"), ("half", 60, "build"), ("half", 30, "sharpen"), ("half", 12, "taper"), ("half", 5, "race_week"),
     ("half", 0, "race_week"), ("half", -5, "recovery"), ("half", -30, None),
-    ("marathon", 20, "taper"), ("5k", 10, "sharpen"), ("5k", 6, "race_week"),
+    ("marathon", 20, "taper"), ("5k", 10, "taper"), ("5k", 14, "sharpen"), ("5k", 6, "race_week"),
 ])
 def test_phases_by_weeks_to_go(dist, days, expected):
     assert race.phase(dist, days) == expected

@@ -10,14 +10,15 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.6"  # 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.7"  # 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
 WARMUP_EXCLUDE_S = 600.0    # drift analysis ignores the first 10 minutes of moving time
 MIN_SEGMENT_S = 1200.0      # eligible steady segment must be >= 20 min of moving time (20–30 min flagged as short)
 RELIABLE_SEGMENT_S = 1800.0
-MIN_HR_COVERAGE = 0.90      # share of moving time with a valid HR sample
+MIN_HR_COVERAGE = 0.90      # aerobic decoupling: valid HR over 90% of the segment (it compares the halves' averages)
+MIN_ZONE_COVERAGE = 0.75    # time in zones (intensity, effort checks, focus): a short HR dropout still leaves a fair picture
 MAX_GAIN_PER_KM = 40.0      # m/km; drift uses grade-adjusted speed, so only very hilly runs are excluded
 STEADY_MAX_CV = 0.08        # coefficient of variation of 1-min moving speed blocks
 HR_VALID = (60.0, 220.0)
@@ -141,6 +142,14 @@ def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, ga
         (first if acc < half else second).append(i)
         acc += w[i]
     hr_set = set(hr_ok)
+    # An out-and-back on a hill (up then down) makes the halves incomparable even with grade adjustment
+    def net_grade(idx: list[int]) -> float | None:
+        pts = [(raw.dist[i], raw.elev[i]) for i in idx if raw.dist[i] is not None and raw.elev[i] is not None]
+        return (pts[-1][1] - pts[0][1]) / (pts[-1][0] - pts[0][0]) if len(pts) >= 2 and pts[-1][0] > pts[0][0] else None
+    g1, g2 = net_grade(first), net_grade(second)
+    # (a climb is handled by grade adjustment; descent is where the model is least reliable, so that's what's refused)
+    if g1 is not None and g2 is not None and abs(g1 - g2) > HALF_GRADE_DIFF and min(g1, g2) < -0.01:
+        reasons.append(f"the halves climb differently ({100 * g1:+.1f}% vs {100 * g2:+.1f}% net grade)")
 
     def ef(idx: list[int], values: list) -> tuple[float, float, float] | None:
         valid = [i for i in idx if i in hr_set and values[i] is not None]
@@ -232,6 +241,10 @@ def as_dict(x) -> dict:
 
 GRADE_WINDOW_M = 50.0   # grade measured over ~50 m of distance to smooth GPS/barometer noise
 GRADE_CLAMP = 0.30      # outside ±30% the energy-cost model isn't reliable; clamp
+# Downhill, Minetti's energy cost falls to ~60% of flat at −10%, far more credit than runners get: heart-rate-based
+# grade adjustment (Strava's, 2017) bottoms out near 85% of flat. So a descent counts as at most 15% easier than flat.
+DOWNHILL_FLOOR = 0.85
+HALF_GRADE_DIFF = 0.015  # decoupling: when a half descends overall, the halves' net grades may differ by at most 1.5 points
 
 
 def minetti_cost(i: float) -> float:
@@ -259,7 +272,8 @@ def gap_speeds(s: Samples) -> list[float | None]:
     c0 = minetti_cost(0.0)
     out = []
     for sp, g in zip(s.speed, grades(s)):
-        out.append(None if sp is None else sp * (minetti_cost(g) / c0 if g is not None else 1.0))
+        ratio = minetti_cost(g) / c0 if g is not None else 1.0
+        out.append(None if sp is None else sp * max(ratio, DOWNHILL_FLOOR))
     return out
 
 
@@ -352,12 +366,31 @@ def split_details(s: Samples | None, laps: list[dict], floors: list[float] | Non
     return out
 
 
+FADE_S_PER_KM = 5.0  # within ±5 s/km the halves count as even, everywhere the app talks about a fade
+
+
+def halves(paces: list[float]) -> tuple[float, float] | None:
+    """Mean pace of the first and the last half of complete splits (the middle one left out when the count is odd):
+    the one definition of a run's halves behind every fade, negative split and "even" in the app."""
+    h = len(paces) // 2
+    if h == 0:
+        return None
+    return sum(paces[:h]) / h, sum(paces[-h:]) / h
+
+
+def fade(paces: list[float]) -> float | None:
+    """Second half minus first half, s/km (positive = slowed). Pass hill-adjusted paces where the samples allow it."""
+    hv = halves(paces)
+    return hv[1] - hv[0] if hv else None
+
+
 def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     """A few deterministic sentences describing how the run unfolded. Complete splits only."""
     full = [(s, d) for s, d in zip(splits, details or [{}] * len(splits)) if s.complete and s.pace_s_per_km]
     if len(full) < 3:
         return []
     paces = [s.pace_s_per_km for s, _ in full]
+    adj = [d.get("gap_pace_s_per_km") or s.pace_s_per_km for s, d in full]  # hill-adjusted where known, for the fade
     # Laps are only called kilometres when they are about a kilometre long (mile or workout laps are just "laps")
     unit = "km" if all(s.distance_m and 950 <= s.distance_m <= 1050 for s, _ in full) else "lap"
     out = []
@@ -366,13 +399,13 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     out.append(f"Fastest {unit} was #{fastest.idx + 1} ({fmt_pace(fastest.pace_s_per_km)}); slowest was #{slowest.idx + 1} "
                f"({fmt_pace(slowest.pace_s_per_km)}).")
     h = len(paces) // 2
-    fade = sum(paces[h:]) / (len(paces) - h) - sum(paces[:h]) / h
-    if fade > 5:
-        mean_first = sum(paces[:h]) / h
-        k = next((s.idx for s, _ in full[h:] if s.pace_s_per_km > mean_first + 5), None)
-        out.append(f"You faded by about {fade:.0f} s/km in the second half" + (f", from {unit} #{k + 1}." if k is not None else "."))
-    elif fade < -5:
-        out.append(f"You finished strongly: the second half was {abs(fade):.0f} s/km faster (a negative split).")
+    f = fade(adj)
+    if f > FADE_S_PER_KM:
+        mean_first = halves(adj)[0]
+        k = next((s.idx for (s, _), p in zip(full[h:], adj[h:]) if p > mean_first + FADE_S_PER_KM), None)
+        out.append(f"You faded by about {f:.0f} s/km in the second half" + (f", from {unit} #{k + 1}." if k is not None else "."))
+    elif f < -FADE_S_PER_KM:
+        out.append(f"You finished strongly: the second half was {abs(f):.0f} s/km faster (a negative split).")
     else:
         out.append("Pacing was even from start to finish.")
     zones = [d.get("zone") for _, d in full if d.get("zone") is not None]

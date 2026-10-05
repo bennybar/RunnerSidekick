@@ -332,6 +332,20 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Metric fixes (2026-10-05, v0.38.0)
+From the full-code review, batch 2:
+- Readiness: leftover effort is compared with the same weekday over the last 6 weeks (a regular Saturday long run makes
+  Sunday normal for you); one weak overnight reading alone can hold the day to easy (50) but never to rest (readiness-1.4).
+- Hill-adjusted pace: downhill credit is limited to 15% easier than flat (Minetti alone gave −10% at 4:00/km as
+  6:41 flat); decoupling isn't valid when a half descends and the halves' net grades differ by over 1.5 points (an
+  out-and-back hill) (running-1.7).
+- Race week: the week after a race keeps its easy running days; taper and other phases count whole weeks before race
+  week (a 5k taper had lasted one day); a week's plan uses the phase of its first day, so it doesn't change mid-week.
+- One fade: every "faded", "negative split" and "even" uses the same halves (first and last half of complete splits)
+  and ±5 s/km, on hill-adjusted pace where the samples allow it.
+- Shared thresholds: the efficiency step (5 s/km a month), the evening cutoff (18:00), and coverage: 90% heart rate
+  for decoupling, 75% for anything judged from time in zones.
+
 ## Robustness and security (2026-10-05, v0.37.0)
 From the full-code review, batch 1:
 - Sync: one day or activity Garmin sends in a shape we can't read is skipped and noted ("Skipped 1 record…"); any other

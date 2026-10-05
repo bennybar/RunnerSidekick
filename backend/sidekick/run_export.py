@@ -285,9 +285,11 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             h = len(full) // 2
             add(f"Best km: **{pace(best['pace_s_per_km'])}** (km {best['idx'] + 1})  ")
             if h:
-                first = sum(x["pace_s_per_km"] for x in full[:h]) / h
-                second = sum(x["pace_s_per_km"] for x in full[-h:]) / h
-                add(f"First half: **{pace(first)}** · Second half: **{pace(second)}** ({signed(second - first, unit=' s/km')})  ")
+                from .analytics import running as rn
+                first, second = rn.halves([x["pace_s_per_km"] for x in full])
+                adj = rn.fade([x.get("gap_pace_s_per_km") or x["pace_s_per_km"] for x in full])
+                add(f"First half: **{pace(first)}** · Second half: **{pace(second)}** ({signed(second - first, unit=' s/km')}; "
+                    f"hill-adjusted {signed(adj, unit=' s/km')})  ")
             hilly = max(full, key=lambda x: x.get("elevation_gain_m") or 0)
             if (hilly.get("elevation_gain_m") or 0) >= 10 and hilly.get("gap_pace_s_per_km"):
                 add(f"Hilliest km: **km {hilly['idx'] + 1}**, +{hilly['elevation_gain_m']:.0f} m: **{pace(hilly['pace_s_per_km'])}** "

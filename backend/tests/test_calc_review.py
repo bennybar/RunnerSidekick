@@ -340,3 +340,61 @@ def test_one_bad_record_doesnt_stop_the_sync_and_syncs_dont_overlap():
     assert run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3).outcome == "deferred"
     release_lease(conn)
     assert run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3).outcome == "ok"
+
+
+def test_a_regular_weekly_long_run_doesnt_read_as_tired_the_day_after(monkeypatch):
+    from sidekick import readiness as rd
+    # 12 weeks of three 45-minute runs and a 90-minute Saturday; it's Sunday morning
+    at = datetime(2026, 10, 4, 7, tzinfo=timezone.utc)  # a Sunday
+    runs, k = [], 0
+    for day in range(84, 0, -1):
+        d = at - timedelta(days=day)
+        wd = d.weekday()
+        if wd in (1, 3, 5) or wd == 0:
+            mins = 90 if wd == 5 else 45
+            start = d.replace(hour=6)
+            runs.append({"id": k, "source_id": str(k), "moving_s": mins * 60, "elapsed_s": mins * 60, "load": mins * 2.0,
+                         "local_date": d.date().isoformat(), "start_utc": start.strftime("%Y-%m-%dT%H:%M:%SZ")})
+            k += 1
+    monkeypatch.setattr(rd, "run_load", lambda conn, a, floors: a["load"])
+    monkeypatch.setattr(rd.rp, "get_setting", lambda conn, kk, d: d)
+    monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: runs)
+    tl = rd.training_load(None, "x", at, None)
+    assert tl["fatigue"] < 0.15  # Sunday after the usual Saturday long run is normal for this runner
+
+
+def test_one_short_night_holds_to_easy_not_rest(monkeypatch):
+    from sidekick import readiness as rd
+    from test_readiness import morning, TODAY
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd, "moment", lambda conn, d: None)
+    monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: None)
+    monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.0, "fatigue": 0.0, "left_now": 0.5, "left_usual": 0.5,
+                                                                      "last_when": None})
+    r = rd.build(None, "x", TODAY, morning(sleep_h=4.5))
+    assert r["score"] == rd.SINGLE_SIGNAL_FLOOR and r["label"] == "Moderate"  # easy (held below 60), not rest (under 40)
+
+
+def test_downhill_credit_is_limited_and_an_out_and_back_hill_isnt_drift():
+    # 4:00/km at −10%: Minetti alone would call it 6:41 on the flat; floored, at most 15% easier
+    assert rn.DOWNHILL_FLOOR == 0.85 and rn.minetti_cost(-0.10) / rn.minetti_cost(0.0) < 0.6
+    t = [float(x) for x in range(0, 4201, 5)]
+    half = t[len(t) // 2]
+    grade = [0.04 if x < half else -0.04 for x in t]  # up the hill, then back down
+    dist, elev = [0.0], [0.0]
+    for k in range(1, len(t)):
+        dist.append(dist[-1] + 3.0 * 5)
+        elev.append(elev[-1] + 3.0 * 5 * grade[k - 1])
+    s = Samples(t, [150.0] * len(t), [3.0] * len(t), dist, elev, [170.0] * len(t))
+    r = rn.decoupling(s, [], dist[-1], 84.0)
+    assert not r["eligible"] and any("climb differently" in x for x in r["reasons"])
+
+
+def test_the_week_after_a_race_keeps_easy_running_days():
+    conn = synced()
+    set_race(conn, -3, dist="half")  # raced three days ago: recovery phase
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    assert w["phase"] == "recovery"
+    kinds = [s["kind"] for s in w["sessions"]]
+    assert "easy" in kinds and "long" not in kinds  # not seven rest days, and nothing long or hard
+    assert not any(s["status"] == "extra" for s in w["sessions"] if s["kind"] != "rest")

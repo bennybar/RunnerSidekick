@@ -94,11 +94,11 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
         # A truncated file (a few seconds of samples for a 45-minute run) isn't the run's intensity either
         moving = sum(w for w in rn._weights(r.samples) if w > 0)
         whole = r.moving_s or moving
-        return moving >= rn.MIN_HR_COVERAGE * whole and sum(zone_time(r, floors)) >= rn.MIN_HR_COVERAGE * moving
+        return moving >= rn.MIN_ZONE_COVERAGE * whole and sum(zone_time(r, floors)) >= rn.MIN_ZONE_COVERAGE * moving
     usable = [r for r in runs if r.samples and covered(r)]
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",
-                       f"Needs {MIN_RUNS} runs with heart rate over at least {rn.MIN_HR_COVERAGE:.0%} of the run; {len(usable)} so far.",
+                       f"Needs {MIN_RUNS} runs with heart rate over at least {rn.MIN_ZONE_COVERAGE:.0%} of the run; {len(usable)} so far.",
                        n=len(usable), method="time in Garmin HR zones")
     totals = [0.0] * 6
     hard_runs = 0
@@ -222,17 +222,18 @@ def pacing_pattern(runs: list[RunData]) -> dict:
     for r in runs:
         sp = [s.pace_s_per_km for s in r.splits if s.complete and s.pace_s_per_km]
         if len(sp) >= 4 and r.classification == "steady":
-            h = len(sp) // 2
-            data.append((r, mean(sp[:h]), mean(sp[h:]), sp[0], mean(sp[1:])))
+            first, second = rn.halves(sp)  # the app's one definition of the halves (recorded pace: no samples per split here)
+            data.append((r, first, second, sp[0], mean(sp[1:])))
     if len(data) < MIN_RUNS:
         return insight("pacing", q, "running", "not_enough_data", "Not enough steady runs yet",
                        f"Needs {MIN_RUNS} steady runs with at least 4 full splits; {len(data)} so far.", n=len(data), method="split comparison")
-    pos = sum(1 for _, a, b, _, _ in data if b > a + 3)
-    neg = sum(1 for _, a, b, _, _ in data if b < a - 3)
+    pos = sum(1 for _, a, b, _, _ in data if b > a + rn.FADE_S_PER_KM)
+    neg = sum(1 for _, a, b, _, _ in data if b < a - rn.FADE_S_PER_KM)
     fast_start = sum(1 for _, _, _, f, rest in data if f < rest - 5)
     n = len(data)
     fade = median(b - a for _, a, b, _, _ in data)
-    method = "Complete splits only. Positive split = second half >3 s/km slower than the first; fast start = first km >5 s/km faster than the rest."
+    method = ("Complete splits only, recorded pace. Positive split = last half >5 s/km slower than the first (the same rule as "
+              "each run's pacing check); fast start = first km >5 s/km faster than the rest.")
     conf = ["Route profile (e.g. uphill finish) and planned progression runs affect splits."]
     effect = {"positive": pos, "negative": neg, "even": n - pos - neg, "fast_start": fast_start, "median_fade_s_per_km": round(fade, 1)}
     if pos / n >= 0.6:

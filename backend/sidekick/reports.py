@@ -425,8 +425,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     complete = [s for s in splits if s.complete and s.pace_s_per_km]
     if len(complete) >= 4 and an["classification"]["kind"] == "steady":
         paces = [s.pace_s_per_km for s in complete]
-        half = len(paces) // 2
-        first, second = sum(paces[:half]) / half, sum(paces[half:]) / (len(paces) - half)
+        first, second = rn.halves(paces)  # the app's one definition of the halves (recorded pace here)
         cv = pstdev(paces) / (sum(paces) / len(paces))
         findings.append({
             "id": f"r:{sid}:pacing", "category": "running", "metric": "split_consistency", "title": "Pacing",
@@ -655,10 +654,9 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
     if len(pairs) >= 4 and kind not in ("progression",):
         # Hill-adjusted pace where the samples allow it, so a climb late in the run doesn't read as a fade
         paces = [d.get("gap_pace_s_per_km") or s.pace_s_per_km for s, d in pairs]
-        h = len(paces) // 2
-        first = sum(paces[:h]) / h
-        fade = sum(paces[h:]) / (len(paces) - h) - first
-        if fade > 8:
+        first = rn.halves(paces)[0]
+        fade = rn.fade(paces)
+        if fade > rn.FADE_S_PER_KM:
             return (f"You faded by about {fade:.0f} s/km (hill-adjusted). Next time, try starting 5–10 s/km slower than "
                     f"{fmt_pace(first)} and see if the second half holds.")
     if zones and sum(1 for z in zones if z >= 4) >= 0.8 * len(zones):

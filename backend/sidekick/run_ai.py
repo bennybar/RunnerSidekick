@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from . import coach as ch
 from . import reports as rp
+from .analytics.insights import EVENING_HOUR
 from .db import first_weekday, next_id, one, plain, utc_now
 from .narrative import OpenAIProvider, finish_call, reserve_call
 
@@ -80,7 +81,7 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
     intent = r.get("intent") or {}
     dc = r.get("decoupling") or {}
     findings = {f.get("metric"): f for f in r.get("findings", [])}
-    b.item("run:this", "run", weekday=local.strftime("%A"), time_of_day="morning" if local.hour < 12 else "afternoon" if local.hour < 17 else "evening",
+    b.item("run:this", "run", weekday=local.strftime("%A"), time_of_day="morning" if local.hour < 12 else "afternoon" if local.hour < EVENING_HOUR else "evening",
            days_ago=(today - date.fromisoformat(a["local_date"])).days, meant_to_be=intent.get("kind"),
            meant_to_be_source=intent.get("source"), effort_type=(r.get("classification") or {}).get("kind"),
            data_based_type=(r.get("classified") or {}).get("kind"),

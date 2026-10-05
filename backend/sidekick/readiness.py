@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.3"  # 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.4"  # 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -24,6 +24,7 @@ LOAD_OK, LOAD_SLOPE = 1.1, 160      # acute/chronic up to 1.1 scores 100; 1.35 �
 RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining effort / typical run)
 CAP_ABOVE_LOWEST = 25  # the score is never more than 25 points above its weakest part (40 let 82 "High" through the
                        # morning after a threshold run with recovery at 45)
+SINGLE_SIGNAL_FLOOR = 50  # the lowest one weak overnight reading alone can take the score (easy, not rest)
 GARMIN_HOLD_HOURS = 24  # Garmin's recovery timer at or above this holds intensity back (a cross-check, not in the score)
 HARD_SHARE = 0.3
 OVERNIGHT = {"hrv", "resting_hr", "sleep"}
@@ -79,7 +80,7 @@ def run_load(conn, a: dict, floors: list[float] | None) -> float:
     if key in _load_cache:
         return _load_cache[key]
     from .analytics import insights as ins
-    from .focus import MIN_HR_COVERAGE
+    from .analytics.running import MIN_ZONE_COVERAGE as MIN_HR_COVERAGE  # time in zones: the shared zone rule
     mins = (a.get("moving_s") or 0) / 60
     load = 2 * mins
     s = rp.samples_for(conn, a["id"]) if floors else None
@@ -126,9 +127,11 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
 
     def left(when: datetime) -> float:  # effort still fading at `when`, from runs finished by then
         return sum(l * exp(-(when - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads if e <= when)
-    # What's normally still there at this time of day (median of the last 4 weeks): a steady daily routine always leaves
-    # some, and that's your normal, not unrecovered effort. Only what's above it counts.
-    usual = median(left(at - timedelta(days=k)) for k in range(1, 29))
+    # What's normally still there at this time on this weekday (median of the same weekday over the last 6 weeks): a
+    # steady routine, including a weekly long run, always leaves some, and that's your normal, not unrecovered effort.
+    # Only what's above it counts. With under 3 such weekdays in the history, the last 4 weeks' days instead.
+    same_day = [left(at - timedelta(days=7 * k)) for k in range(1, 7) if at - timedelta(days=7 * k) >= ends[0][0]]
+    usual = median(same_day) if len(same_day) >= 3 else median(left(at - timedelta(days=k)) for k in range(1, 29))
     now = left(at)
     fatigue = max(0.0, now - usual) / typical if typical else 0
     days = (local - ends[-1][0].astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()).days
@@ -228,8 +231,14 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     if out["status"] == "ok":
         # One very low part (a big jump in running, a short night) limits the whole score
         low = min(p["points"] for p in parts if p.get("points") is not None)
-        if out["score"] > low + CAP_ABOVE_LOWEST:
-            out["score"], out["capped_by"] = low + CAP_ABOVE_LOWEST, next(p["id"] for p in parts if p.get("points") == low)
+        cap = low + CAP_ABOVE_LOWEST
+        # One overnight reading on its own (a short night, resting HR a few beats up) is likely noise (as rule R3 says): it
+        # can hold the day to easy, never to rest. Two weak parts, or weak load or recovery, cap as usual.
+        weak = [p for p in parts if p.get("points") is not None and p["points"] < 60]
+        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT:
+            cap = max(cap, SINGLE_SIGNAL_FLOOR)
+        if out["score"] > cap:
+            out["score"], out["capped_by"] = cap, next(p["id"] for p in parts if p.get("points") == low)
         out["label"] = label(out["score"])
         out["headline"] = {"High": "Ready to train", "Moderate": "Fine for an easy run", "Low": "Take it easy or rest"}[out["label"]]
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 85]
