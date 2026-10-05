@@ -3,6 +3,9 @@ package com.bennybar.runnersidekick.ui.today
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.outlined.CenterFocusStrong
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -114,6 +117,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val listState = rememberLazyListState()
     val coach by vm.coach.collectAsStateWithLifecycle()
     val checkins by vm.checkins.collectAsStateWithLifecycle()
+    val focus by vm.focus.collectAsStateWithLifecycle()
 
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
     val report = today?.value
@@ -161,6 +165,9 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     NextRunCard(if (pending) n.copy(date = todayDate, dayLabel = "Today", kind = "rest", title = "Rest or a short walk", distanceKm = null,
                         minutes = null, hr = null, pace = null, paceSPerKm = null, optional = false, caution = null,
                         why = listOf("you're not feeling well")) else n, units) } }
+                // This week: the race week (with a race goal) and the weekly focus, compact; the full cards open in a sheet
+                report.race?.let { r -> r.week?.let { w -> animatedItem(key = "raceweek") { RaceWeekStrip(r, w) { sheet = "race" } } } }
+                focus?.value?.let { f -> animatedItem(key = "focus") { FocusLine(f) { sheet = "focus" } } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
@@ -200,6 +207,10 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
             }
         }
         "briefing" -> report?.let { BriefingSheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
+        "race" -> report?.race?.let { r -> r.week?.let { w -> SheetColumn(onDismiss = { sheet = null }) {
+            RaceWeekCard(r, w) { id -> sheet = null; onOpenRun(id) } } } }
+        "focus" -> focus?.value?.let { f -> SheetColumn(onDismiss = { sheet = null }) {
+            FocusCard(f, onChoose = { k -> vm.chooseFocus(k) }, onOpenRun = { id -> sheet = null; onOpenRun(id) }) } }
     }
     evidence?.let { f -> EvidenceSheet(f, today?.value?.readingNotes?.get(f.metric)) { evidence = null } }
 }
@@ -693,6 +704,84 @@ private fun LastRunCard(run: com.bennybar.runnersidekick.data.remote.RecentRun, 
             run.avgHr?.let {
                 Surface(shape = RoundedCornerShape(12.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
                     Text("${it.roundToInt()} bpm", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+            }
+        }
+    }
+}
+
+
+/** The race week at a glance: one dot per day (done, missed, today, planned, rest) and the week's minutes. Tap for the
+ *  sessions. */
+@Composable
+private fun RaceWeekStrip(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
+                          onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()
+        .semantics(mergeDescendants = true) { contentDescription = "This week toward ${race.title ?: race.headline}: ${w.doneMinutes} minutes done. Tap for the sessions." }) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("This week · ${race.phase.replace('_', ' ')}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    Text(race.title ?: race.headline, style = MaterialTheme.typography.titleMedium)
+                }
+                Text(race.daysToGo.let { if (it > 0) "$it days" else if (it == 0) "Today" else "Done" }, style = MaterialTheme.typography.labelLarge,
+                    color = cs.primary)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                w.sessions.forEach { s ->
+                    val day = LocalDate.parse(s.date).dayOfWeek.name.take(1)
+                    val done = s.status in setOf("done", "moved", "extra")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.size(32.dp).then(
+                            when {
+                                done -> Modifier.background(cs.primary, CircleShape)
+                                s.status == "today" -> Modifier.border(2.dp, cs.primary, CircleShape)
+                                s.status == "missed" -> Modifier.background(cs.tertiaryContainer, CircleShape)
+                                s.kind == "rest" -> Modifier
+                                else -> Modifier.background(cs.secondaryContainer, CircleShape)
+                            }), contentAlignment = Alignment.Center) {
+                            when {
+                                done -> Icon(Icons.Outlined.Check, null, tint = cs.onPrimary, modifier = Modifier.size(18.dp))
+                                s.kind == "rest" -> Box(Modifier.size(6.dp).background(cs.outlineVariant, CircleShape))
+                                s.kind == "race" -> Icon(Icons.Outlined.EmojiEvents, null, tint = cs.primary, modifier = Modifier.size(18.dp))
+                                else -> Unit
+                            }
+                        }
+                        Text(day, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                    }
+                }
+            }
+            w.targetMinutes?.let { t ->
+                Text("${w.doneMinutes} of $t min this week", style = MaterialTheme.typography.bodyMedium)
+                Box(Modifier.fillMaxWidth().height(8.dp).background(cs.secondaryContainer, CircleShape)) {
+                    Box(Modifier.fillMaxWidth((w.doneMinutes.toFloat() / t).coerceIn(0f, 1f)).height(8.dp).background(cs.primary, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+/** This week's focus as one line with its progress. Tap for the details, or to choose one. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun FocusLine(state: com.bennybar.runnersidekick.data.remote.FocusState, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val cur = state.current
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            com.bennybar.runnersidekick.ui.components.ShapeBadge(Icons.Outlined.CenterFocusStrong, MaterialShapes.Sunny, Modifier.size(40.dp),
+                container = cs.secondaryContainer, content = cs.onSecondaryContainer)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("This week's focus", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                Text(cur?.title ?: "Choose one", style = MaterialTheme.typography.titleMedium)
+                cur?.summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2) }
+            }
+            cur?.let {
+                Surface(shape = CircleShape, color = if (it.status == "achieved") cs.primary else cs.secondaryContainer,
+                    contentColor = if (it.status == "achieved") cs.onPrimary else cs.onSecondaryContainer) {
+                    Text(statusLabel(it.status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
         }

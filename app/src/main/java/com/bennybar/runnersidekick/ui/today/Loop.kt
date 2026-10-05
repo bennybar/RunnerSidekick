@@ -71,7 +71,7 @@ fun PlanCard(plan: DayPlan?, onSet: (String?, Int?) -> Unit) {
     }
 }
 
-private fun statusLabel(s: String?) = when (s) {
+internal fun statusLabel(s: String?) = when (s) {
     "achieved" -> "Done"
     "partly" -> "Partly"
     "missed" -> "Not this time"

@@ -332,6 +332,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Race week and focus on Today (2026-10-05, v0.39.0)
+- Today: readiness, the next run, then (with a race goal) the race week as one row of the week's days (done, today,
+  missed, planned, rest) with the minutes done against the target, and this week's focus as one line with its status.
+  Each opens its full card in a sheet (sessions; focus details or choosing one). Then Health and Fitness.
+- Insights no longer shows them: it's for looking back (stats, coach, fitness, weekly review, insights, Compare, Trends).
+
 ## Metric fixes (2026-10-05, v0.38.0)
 From the full-code review, batch 2:
 - Readiness: leftover effort is compared with the same weekday over the last 6 weeks (a regular Saturday long run makes

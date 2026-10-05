@@ -99,6 +99,9 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
     }
     fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
     val checkins = repo.checkins.state(emptyList())
+    // The week's focus lives on Today (with the race week, in the report)
+    val focus = repo.focus.state(null)
+    fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
     // The coach's advice was written before this: ask again so it can't sit next to a changed recommendation
     fun setUnwell(date: String, on: Boolean) = launchIo { repo.setUnwell(date, on); updateCoach() }
 }
@@ -126,9 +129,6 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val weekly = repo.weekly.state(null)
     val fitness = repo.fitness.state(null)
     val compare = repo.compare.state(null)
-    val today = repo.today.state(null)
-    val focus = repo.focus.state(null)
-    fun chooseFocus(kind: String) = launchIo { repo.chooseFocus(kind) }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
     // The visible sub-tab (0 Insights, 1 Compare, 2 Trends): Compare and Trends poll only while they're shown
     private val tab = MutableStateFlow(0)
