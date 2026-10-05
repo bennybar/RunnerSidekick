@@ -376,7 +376,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             from .decide import decide
             dec = decide(conn, cfg.source, d, body)
             body["race"], body["readiness"], body["next_run"] = dec["race"], dec["readiness"], dec["next_run"]
-            body["decision"] = {"hold_back": dec["hold_back"], "hold_reason": dec["hold_reason"], "today_kind": dec["today_kind"]}
+            body["decision"] = {"hold_back": dec["hold_back"], "hold_reason": dec["hold_reason"], "today_kind": dec["today_kind"],
+                                "unwell_applied": dec["unwell_applied"]}
             from . import scores
             body["scores"] = scores.build(conn, cfg.source, d, hold_back=dec["hold_back"])
             body["changes"] = changes.since_yesterday(conn, body, d, cfg.source)

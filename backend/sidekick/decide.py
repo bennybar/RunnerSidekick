@@ -57,4 +57,6 @@ def decide(conn, source: str, d: date, morning: dict) -> dict:
     today_kind = nxt["kind"] if nxt and nxt["date"] == d.isoformat() else None
     return {"readiness": ready, "next_run": nxt, "race": rs, "hold_reason": reason, "allows": allowed,
             # Today's run (if any) is easy or rest, or intensity is held back: no "harder" advice anywhere
-            "hold_back": reason is not None or today_kind in ("rest", "easy"), "today_kind": today_kind}
+            "hold_back": reason is not None or today_kind in ("rest", "easy"), "today_kind": today_kind,
+            # Reported pain or illness is already applied: the app needn't apply "not feeling well" itself
+            "unwell_applied": rec["rule_id"] == "R0"}

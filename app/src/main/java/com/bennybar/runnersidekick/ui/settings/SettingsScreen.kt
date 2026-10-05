@@ -116,23 +116,40 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     fun loadRemote() = launchIo { remote.value = repo.remoteSettings() }
 
-    fun saveBackend(url: String, token: String, onSaved: () -> Unit) = launchIo {
-        // A new token is checked before it replaces the working one
-        if (token.isNotBlank()) repo.checkToken(url, token)?.let { throw com.bennybar.runnersidekick.data.remote.ApiException.Http(401, it) }
+    /** Which section sheet is open, and why its last save failed. Kept here, not in the screen, so a save that ends after
+     *  a rotation still closes its sheet, and only its own. */
+    val open = MutableStateFlow<String?>(null)
+    val sheetError = MutableStateFlow<String?>(null)
+    fun openSheet(id: String) { sheetError.value = null; open.value = id }
+    fun closeSheet() { sheetError.value = null; open.value = null }
+
+    /** Runs a sheet's save. Success: closes that sheet (if still open), says [done], refreshes in the background (a
+     *  failed refresh doesn't turn the save into an error). Failure: the sheet stays open with its edits and the error. */
+    private fun saveFrom(sheet: String?, done: String, after: suspend () -> Unit = { repo.refreshAll() }, save: suspend () -> Unit) =
+        viewModelScope.launch {
+            var ok = false
+            runIo { save(); ok = true }
+            if (!ok) {
+                if (sheet != null && open.value == sheet) { sheetError.value = error.value; clearError() }
+                return@launch
+            }
+            if (sheet != null && open.value == sheet) closeSheet()
+            message.value = done
+            launch { runCatching { after() } }  // its errors aren't this save's
+        }
+
+    fun saveBackend(url: String, token: String) = saveFrom("backend", "Connected",
+        after = { repo.refreshAll(); remote.value = repo.remoteSettings() }) {
+        // The saved token never goes to a new address: a new server needs its own token (the sheet asks for one), and
+        // whatever is saved is checked there first, so a wrong address or token can't sign you out
+        val sameHost = url.trimEnd('/') == repo.settings.credentials()?.first?.trimEnd('/')
+        val use = token.ifBlank { if (sameHost) repo.settings.credentials()?.second ?: "" else "" }
+        if (use.isBlank()) throw com.bennybar.runnersidekick.data.remote.ApiException.Http(400, "Enter the device token for this server.")
+        repo.checkToken(url, use)?.let { throw com.bennybar.runnersidekick.data.remote.ApiException.Http(401, it) }
         repo.settings.setBackend(url, token)
-        onSaved()
-        repo.refreshAll()
-        remote.value = repo.remoteSettings()
-        message.value = "Connected"
     }
 
-    /** [onSaved] runs once the server has the change: a sheet stays open (with its edits) when saving fails. */
-    fun saveRemote(s: SettingsDto, onSaved: () -> Unit = {}) = launchIo {
-        remote.value = repo.saveRemoteSettings(s)
-        onSaved()
-        repo.refreshAll()
-        message.value = "Saved"
-    }
+    fun saveRemote(s: SettingsDto, sheet: String? = null) = saveFrom(sheet, "Saved") { remote.value = repo.saveRemoteSettings(s) }
 
     fun setOwnAiKey(key: String?) = launchIo {
         repo.settings.setOwnAiKey(key)
@@ -173,14 +190,15 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     val snackbar = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     var confirm by remember { mutableStateOf<String?>(null) }
-    var open by rememberSaveable { mutableStateOf<String?>(null) }  // which section sheet is open
+    val open by vm.open.collectAsStateWithLifecycle()  // which section sheet is open (kept in the view model)
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let { vm.export(ctx, it) } }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         vm.setNotifications(granted)
         if (!granted) vm.message.value = "Notifications permission denied"
     }
-    LaunchedEffect(error, open) { if (open == null) error?.let { snackbar.showSnackbar(it); vm.clearError() } }
-    val close = { open = null; vm.clearError() }
+    LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
+    val sheetError by vm.sheetError.collectAsStateWithLifecycle()
+    val close = vm::closeSheet
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -196,10 +214,18 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                 item {
                     Group {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
-                            supporting = when {
-                                st == "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
-                                me?.value?.role == "member" -> "Your Garmin connection has to be renewed: tap Connect next to Garmin below. Syncing is paused until then."
-                                else -> "The server's Garmin sign-in has expired and has to be renewed there. Syncing is paused until then."
+                            supporting = run {
+                                val member = me?.value?.role == "member"
+                                val canConnect = status?.value?.garminOfficial?.available == true
+                                when {
+                                    st == "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
+                                    member && canConnect -> (if (st == "not_configured") "Garmin isn't connected yet" else "Your Garmin connection has to be renewed") +
+                                        ": tap Connect next to Garmin below. Syncing is paused until then."
+                                    member -> (if (st == "not_configured") "Garmin isn't connected for your account yet" else "Garmin's sign-in has expired") +
+                                        ". Connecting your own Garmin account opens once Garmin approves this app; until then, ask the server owner."
+                                    st == "not_configured" -> "Garmin isn't signed in on the server yet: run sidekick garmin-login there. Syncing is paused until then."
+                                    else -> "The server's Garmin sign-in has expired and has to be renewed there (sidekick garmin-login). Syncing is paused until then."
+                                }
                             },
                             icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
                     }
@@ -227,7 +253,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                             else -> null
                         })
                     row("Server", supporting = local?.backendUrl ?: "", icon = if (s?.connection?.state == "connected") Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { open = "backend" })
+                        iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("backend") })
                     row("Sign out", supporting = "Removes the token and cached data from this phone", icon = Icons.AutoMirrored.Outlined.Logout,
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "signout" })
                     if (m?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
@@ -238,7 +264,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                 Group(title = "Appearance") {
                     row("Theme", supporting = com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(local?.theme).label + " · " +
                         com.bennybar.runnersidekick.ui.theme.Appearance.of(local?.appearance).label,
-                        icon = Icons.Outlined.Palette, iconShape = MaterialShapes.Flower, onClick = { open = "theme" })
+                        icon = Icons.Outlined.Palette, iconShape = MaterialShapes.Flower, onClick = { vm.openSheet("theme") })
                     custom {
                         Text("Units", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -257,16 +283,16 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                                 r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
                                 GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
                                 r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
-                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { open = "training" })
+                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { vm.openSheet("training") })
                         row("Race", supporting = r.raceDate?.let { d ->
                                 listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
                                     r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
-                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { open = "race" })
+                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { vm.openSheet("race") })
                         row("About you", supporting = listOfNotNull(
                                 (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
                                 (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
-                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { open = "about" })
+                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
                     }
                 }
             }
@@ -290,7 +316,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     remote?.let { r ->
                         row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
                             "or at the end of the window as provisional", icon = Icons.Outlined.Schedule, iconShape = MaterialShapes.Cookie4Sided,
-                            onClick = { open = "window" })
+                            onClick = { vm.openSheet("window") })
                     }
                 }
             }
@@ -307,11 +333,11 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                             trailing = { Switch(checked = r.aiEnabled, enabled = !busy && (r.aiAvailable || ownKey || r.aiEnabled),
                                 onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it)) }) })
                         if (r.aiEnabled) row("Model", supporting = r.aiModel, icon = Icons.Outlined.Tune, iconShape = MaterialShapes.Cookie4Sided,
-                            onClick = { open = "model" })
+                            onClick = { vm.openSheet("model") })
                         row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone" else "Optional", icon = Icons.Outlined.Key,
-                            iconShape = MaterialShapes.Cookie4Sided, onClick = { open = "key" })
+                            iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("key") })
                         row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
-                            icon = Icons.Outlined.Info, iconShape = MaterialShapes.Circle, onClick = { open = "ai_info" })
+                            icon = Icons.Outlined.Info, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("ai_info") })
                     }
                 }
                 item {
@@ -350,16 +376,16 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     }
     val r = remote
     when (open) {
-        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, error, onClose = close) { url, token ->
-            vm.saveBackend(url, token, close) }
+        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, sheetError, onClose = close) { url, token ->
+            vm.saveBackend(url, token) }
         "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = close) {
             ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
-        "training" -> r?.let { TrainingSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
-        "race" -> r?.let { RaceSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
-        "about" -> r?.let { AboutYouSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
-        "window" -> r?.let { WindowSheet(it, busy, error, onClose = close) { s -> vm.saveRemote(s, close) } }
-        "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, onClose = close) { m -> vm.saveRemote(it.copy(aiModel = m), close) } }
-        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); open = null }
+        "training" -> r?.let { TrainingSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "training") } }
+        "race" -> r?.let { RaceSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "race") } }
+        "about" -> r?.let { AboutYouSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "about") } }
+        "window" -> r?.let { WindowSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "window") } }
+        "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, sheetError, onClose = close) { m -> vm.saveRemote(it.copy(aiModel = m), "model") } }
+        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); close() }
         "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = close) {
             Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per sync, never for older " +
                 "history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. This uses the server's key; with only " +
@@ -476,11 +502,13 @@ private fun Label(text: String, hint: String? = null) {
 private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (String, String) -> Unit) {
     var url by rememberSaveable { mutableStateOf(current) }
     var token by remember { mutableStateOf("") }
-    SectionSheet("Server", dirty = url != current || token.isNotBlank(), canSave = !busy && url.isNotBlank() && (token.isNotBlank() || hasToken),
+    val newHost = url.trim().trimEnd('/') != current.trimEnd('/')
+    SectionSheet("Server", dirty = url != current || token.isNotBlank(), canSave = !busy && url.isNotBlank() && (token.isNotBlank() || (hasToken && !newHost)),
         onSave = { onSave(url, token) }, onClose = onClose, error = error) {
         OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
-        OutlinedTextField(token, { token = it }, label = { Text(if (hasToken) "Device token (saved, enter to replace)" else "Device token") },
+        OutlinedTextField(token, { token = it }, label = { Text(if (hasToken && !newHost) "Device token (saved, enter to replace)" else "Device token for this server") },
+            supportingText = if (newHost && hasToken) ({ Text("Your saved token isn't sent to a new server; enter the one for it.") }) else null,
             singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
     }
@@ -619,7 +647,7 @@ private fun WindowSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: 
 }
 
 @Composable
-private fun ModelDialog(r: SettingsDto, ownKey: Boolean, onClose: () -> Unit, onPick: (String) -> Unit) {
+private fun ModelDialog(r: SettingsDto, ownKey: Boolean, error: String?, onClose: () -> Unit, onPick: (String) -> Unit) {
     var other by remember { mutableStateOf(if (r.aiModel !in r.aiModels) r.aiModel else "") }
     AlertDialog(onDismissRequest = onClose, title = { Text("AI model") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -635,6 +663,7 @@ private fun ModelDialog(r: SettingsDto, ownKey: Boolean, onClose: () -> Unit, on
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             else Text("Add your own OpenAI key to use other models.", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
         }
     }, confirmButton = { if (ownKey) TextButton(onClick = { onPick(other) }, enabled = Regex("^[A-Za-z0-9._:\\-]{1,64}$").matches(other)) { Text("Use") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Close") } })

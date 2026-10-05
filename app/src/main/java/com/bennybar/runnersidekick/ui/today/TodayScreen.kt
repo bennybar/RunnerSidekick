@@ -157,7 +157,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 val todayDate = LocalDate.now().toString()
                 val mark = checkins.firstOrNull { it.localDate == todayDate }
                 val unwell = mark?.illness == true
-                val pending = unwell && (report.localDate != todayDate || report.recommendation.ruleId != "R0")
+                val pending = unwell && (report.localDate != todayDate || report.decision?.unwellApplied != true)
                 report.readiness?.let { r -> animatedItem(key = "readiness") {
                     val shown = if (pending) r.copy(score = null, label = "Low", headline = "Take it easy or rest", holdReason = "you're not feeling well", allows = "rest") else r
                     ReadinessCard(shown, unwell, pending, onUnwell = { vm.setUnwell(todayDate, !unwell) }) { sheet = "readiness" } } }
@@ -441,7 +441,7 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
         custom {
             Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
                 style = MaterialTheme.typography.titleMedium)
-            w.targetMinutes?.let { t ->
+            w.targetMinutes?.takeIf { it > 0 }?.let { t ->  // a zero target would be a NaN progress
                 androidx.compose.material3.LinearProgressIndicator(progress = { (w.doneMinutes.toFloat() / t).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             }
@@ -752,7 +752,7 @@ private fun RaceWeekStrip(race: com.bennybar.runnersidekick.data.remote.RaceStat
                     }
                 }
             }
-            w.targetMinutes?.let { t ->
+            w.targetMinutes?.takeIf { it > 0 }?.let { t ->
                 Text("${w.doneMinutes} of $t min this week", style = MaterialTheme.typography.bodyMedium)
                 Box(Modifier.fillMaxWidth().height(8.dp).background(cs.secondaryContainer, CircleShape)) {
                     Box(Modifier.fillMaxWidth((w.doneMinutes.toFloat() / t).coerceIn(0f, 1f)).height(8.dp).background(cs.primary, CircleShape))

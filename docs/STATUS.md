@@ -332,6 +332,20 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Android review round 4 (2026-10-05, v0.43.1)
+- Server address: the saved token is never sent to a new address. A new server needs its own token (the sheet says
+  so and Save waits for it), and it's checked there before anything is saved, so a wrong address can't sign you out.
+- A save says "Saved" once the server has it; the refresh afterwards runs on its own, so its failure isn't reported
+  as the save's and Save isn't held disabled by it. Which sheet is open, and its error, live in the view model: a save
+  finishing after a rotation still closes its sheet, a slow save never closes a different one, and an old error
+  never shows in a newly opened sheet. The model dialog shows its error too.
+- Sign-in: too many tries reads "Wait a minute and try again". Garmin wording: members are told to tap Connect only
+  when official Garmin sign-in is available (otherwise to ask the owner); "not configured" no longer says expired.
+- "Not feeling well" follows the server's `decision.unwell_applied` instead of checking a rule ID in the app.
+- Remaining big decodes run off the main thread; the ETag map is bounded (200) and cleared with the cache and on
+  sign-out; sign-out waits at most 5 s for the server; a zero weekly target no longer makes a NaN progress bar.
+- Still waiting on you: the Google Web client ID (GOOGLE_WEB_CLIENT_ID) for Google sign-in.
+
 ## Third review round (2026-10-05, v0.43.0)
 - Weather: on by default with a Settings switch (Settings → Weather). Off means nothing is sent to Open-Meteo; estimates
   already kept stay. Each sync now looks up to 30 runs, the sync's own first and then recent runs (30 days) still

@@ -21,6 +21,8 @@ sealed class ApiException(message: String) : Exception(message) {
     class Sync(val detail: String) : ApiException(detail)
 }
 
+private const val MAX_ETAGS = 200
+
 class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -33,6 +35,9 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     // Last body and ETag per GET URL: an unchanged answer comes back as an empty 304 instead of the full JSON
     private val etags = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+
+    /** Drops the remembered bodies (sign-out, a cleared cache): nothing of one session is answered to the next. */
+    fun forget() = etags.clear()
 
     /** Returns the raw JSON body so callers can cache exactly what the backend said. */
     suspend fun getRaw(path: String, query: Map<String, String> = emptyMap(), headers: Map<String, String> = emptyMap()): String =
@@ -104,7 +109,10 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
                                 ?.let { (it as kotlinx.serialization.json.JsonPrimitive).content }
                         }.getOrNull())
                         else -> resp.body.string().also { text ->
-                            if (method == "GET") resp.header("ETag")?.let { etags[key] = it to text } ?: etags.remove(key)
+                            if (method == "GET") resp.header("ETag")?.let {
+                                if (etags.size >= MAX_ETAGS && !etags.containsKey(key)) etags.clear()  // bounded: many per-run pages add up
+                                etags[key] = it to text
+                            } ?: etags.remove(key)
                         }
                     }
                 }

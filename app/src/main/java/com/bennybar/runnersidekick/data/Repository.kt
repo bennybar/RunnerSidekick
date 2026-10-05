@@ -58,6 +58,9 @@ class Repository(
     // the request, so the server could never turn AI off or clear a field
     private val withNulls = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = true; encodeDefaults = true }
 
+    /** Big reports are decoded off the main thread (the callers' coroutines resume on Main after the network call). */
+    private suspend fun <T> offMain(block: suspend () -> T): T = kotlinx.coroutines.withContext(Dispatchers.Default) { block() }
+
     private fun <T> observe(key: String, decode: (String) -> T): Flow<Cached<T>?> =
         settings.settings.map { it.currentMode }.flatMapLatest { mode ->
             if (mode == null) flowOf(null)
@@ -92,7 +95,7 @@ class Repository(
     suspend fun refreshCompare(): Boolean {
         val body = api.getRaw("/v1/compare", headers = aiHeaders())
         put("compare", body)
-        return json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body).aiSummary?.status == "pending"
+        return offMain { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body) }.aiSummary?.status == "pending"
     }
 
     /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
@@ -108,7 +111,7 @@ class Repository(
         // The runner's own key goes only with this request, never with any other call
         val body = api.getRaw("/v1/coach", headers = aiHeaders())
         put("coach", body)
-        return json.decodeFromString<CoachView>(body).status
+        return offMain { json.decodeFromString<CoachView>(body) }.status
     }
 
     suspend fun refreshFocus() = put("focus", api.getRaw("/v1/focus"))
@@ -120,7 +123,7 @@ class Repository(
         val body = if (kind == null) api.delete("/v1/plan/$date", emptyMap())
         else api.putRaw("/v1/plan/$date", json.encodeToString(DayPlanIn(kind, minutes, Instant.now().toString())))
         put("today", body)
-        val r = json.decodeFromString<MorningReport>(body)
+        val r = offMain { json.decodeFromString<MorningReport>(body) }
         cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, body)
     }
 
@@ -143,6 +146,7 @@ class Repository(
     suspend fun checkToken(backendUrl: String, token: String): String? = when (api.getWithToken(backendUrl, "/v1/me", token).first) {
         200 -> null
         401, 403 -> "The server didn't accept this device token."
+        429 -> "Too many tries from this network. Wait a minute and try again."
         else -> "The server answered with an error. Check the address."
     }
 
@@ -163,6 +167,7 @@ class Repository(
             }
             403 -> "This Google account hasn't been invited yet. Ask the server owner to run: sidekick invite add <your email>"
             503 -> "Google sign-in isn't set up on this server yet."
+            429 -> "Too many tries from this network. Wait a minute and try again."
             else -> "Sign-in failed (HTTP $code)."
         }
     }
@@ -190,7 +195,8 @@ class Repository(
     }
 
     suspend fun signOut() {
-        runCatching { api.post("/v1/auth/logout") }  // the token stops working on the server too (offline: just this phone)
+        // The token stops working on the server too; offline or slow, signing out here doesn't wait long for it
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { runCatching { api.post("/v1/auth/logout") } }
         clearLocal(includeCheckins = false)
         settings.clearToken()
     }
@@ -201,7 +207,7 @@ class Repository(
     suspend fun refreshTrends(days: Int): Boolean {
         val body = api.getRaw("/v1/trends", mapOf("days" to "$days"), aiHeaders())
         put("trends:$days", body)
-        return json.decodeFromString<Trends>(body).aiSummary?.status == "pending"
+        return offMain { json.decodeFromString<Trends>(body) }.aiSummary?.status == "pending"
     }
     suspend fun refreshDay(date: String) = put("day:$date", api.getRaw("/v1/today", mapOf("date" to date)))
     suspend fun refreshWeekly() {
@@ -211,7 +217,7 @@ class Repository(
 
     /** Earlier revisions of a report, newest first. Opening one caches it like any other report. */
     suspend fun revisions(type: String, key: String): List<RevisionInfo> =
-        json.decodeFromString(ListSerializer(RevisionInfo.serializer()), api.getRaw("/v1/reports/$type/$key/revisions"))
+        offMain { json.decodeFromString(ListSerializer(RevisionInfo.serializer()), api.getRaw("/v1/reports/$type/$key/revisions")) }
 
     suspend fun cacheRevision(id: Long, type: String, key: String, date: String, revision: Int) {
         if (db.reports().get(id)?.json != null) return
@@ -237,7 +243,7 @@ class Repository(
      */
     private suspend fun establishAccount(): String {
         val body = api.getRaw("/v1/me")
-        val me = json.decodeFromString<Me>(body)
+        val me = offMain { json.decodeFromString<Me>(body) }
         val key = "${settings.settings.first().backendUrl.trimEnd('/')}#${me.id}"
         val previous = settings.settings.first().account
         if (previous != key) {
@@ -289,7 +295,7 @@ class Repository(
     /** Status first: it tells us the backend mode, and a mode change wipes the other mode's cache. */
     suspend fun refreshStatus(): Status {
         val body = api.getRaw("/v1/status")
-        val s = json.decodeFromString<Status>(body)
+        val s = offMain { json.decodeFromString<Status>(body) }
         val current = settings.settings.first().currentMode
         if (current != s.mode) {
             db.cache().deleteOtherModes(s.mode)
@@ -326,7 +332,7 @@ class Repository(
             "Loading today" to {
                 val todayBody = api.getRaw("/v1/today")
                 put("today", todayBody)
-                val r = json.decodeFromString<MorningReport>(todayBody)
+                val r = offMain { json.decodeFromString<MorningReport>(todayBody) }
                 cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, todayBody)
             },
             "Loading your runs" to { put("activities", api.getRaw("/v1/activities")) },
@@ -354,7 +360,7 @@ class Repository(
     }
 
     suspend fun refreshJournal() {
-        val list = json.decodeFromString(ListSerializer(ReportListItem.serializer()), api.getRaw("/v1/reports", mapOf("limit" to "200")))
+        val list = offMain { json.decodeFromString(ListSerializer(ReportListItem.serializer()), api.getRaw("/v1/reports", mapOf("limit" to "200"))) }
         // One transaction for the whole list; rows that didn't change are skipped in cacheReport
         db.withTransaction { list.forEach { cacheReport(it.id, it.type, it.subjectKey, it.localDate, it.revision, it.title, it.state, null) } }
     }
@@ -385,7 +391,7 @@ class Repository(
     suspend fun refreshRunAi(id: String, request: Boolean = false): String {
         val body = if (request) api.postRaw("/v1/activities/$id/ai", aiHeaders()) else api.getRaw("/v1/activities/$id/ai", headers = aiHeaders())
         put("runai:$id", body)
-        return json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body).status
+        return offMain { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body) }.status
     }
 
     /** Syncs with Garmin now and says how many new runs arrived. */
@@ -484,7 +490,7 @@ class Repository(
                 illness = c.illness, notes = c.notes, tags = json.decodeFromString(ListSerializer(String.serializer()), c.tagsJson),
                 clientUpdatedAt = c.clientUpdatedAt,
             )
-            val stored = json.decodeFromString<CheckinDto>(api.putRaw("/v1/checkins/${c.id}", json.encodeToString(dto)))
+            val stored = offMain { json.decodeFromString<CheckinDto>(api.putRaw("/v1/checkins/${c.id}", json.encodeToString(dto))) }
             // A newer version on the server wins; keep that one instead of ours
             if (stored.clientUpdatedAt != c.clientUpdatedAt) mergeServerCheckin(stored, acct) else db.checkins().markSynced(c.id, c.clientUpdatedAt)
         }
@@ -493,7 +499,7 @@ class Repository(
     /** Pulls the account's check-ins so a reinstall or second phone shows the same history. Last write wins. */
     suspend fun pullCheckins() {
         val acct = settings.settings.first().account ?: return
-        json.decodeFromString(ListSerializer(CheckinDto.serializer()), api.getRaw("/v1/checkins")).forEach { mergeServerCheckin(it, acct) }
+        offMain { json.decodeFromString(ListSerializer(CheckinDto.serializer()), api.getRaw("/v1/checkins")) }.forEach { mergeServerCheckin(it, acct) }
     }
 
     private suspend fun mergeServerCheckin(s: CheckinDto, acct: String) {
@@ -508,11 +514,11 @@ class Repository(
         ))
     }
 
-    suspend fun remoteSettings(): SettingsDto = json.decodeFromString(api.getRaw("/v1/settings"))
+    suspend fun remoteSettings(): SettingsDto = offMain { json.decodeFromString(api.getRaw("/v1/settings")) }
 
     suspend fun saveRemoteSettings(s: SettingsDto): SettingsDto =
         // Nulls are sent on purpose: a cleared goal or usual time must clear it on the server too
-        json.decodeFromString(api.putRaw("/v1/settings", withNulls.encodeToString(s)))
+        offMain { json.decodeFromString(api.putRaw("/v1/settings", withNulls.encodeToString(s))) }
 
     suspend fun exportJson(): String = api.getRaw("/v1/export")
 
@@ -524,6 +530,7 @@ class Repository(
     suspend fun clearLocal(includeCheckins: Boolean) {
         db.cache().clear()
         db.reports().clear()
+        api.forget()
         if (includeCheckins) db.checkins().clear()
     }
 }

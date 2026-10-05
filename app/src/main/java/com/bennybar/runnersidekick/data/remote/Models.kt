@@ -215,6 +215,7 @@ data class MorningReport(
     val scores: Scores? = null,
     val readiness: Score? = null,
     @SerialName("next_run") val nextRun: NextRun? = null,
+    val decision: Decision? = null,
     @SerialName("reading_notes") val readingNotes: Map<String, ReadingNote> = emptyMap(),
 )
 
@@ -471,6 +472,10 @@ data class CheckinDto(
     @SerialName("client_updated_at") val clientUpdatedAt: String,
     val deleted: Boolean = false,
 )
+
+/** Today's decision, as far as the app needs it. [unwellApplied]: the server already acted on reported pain or illness. */
+@Serializable
+data class Decision(@SerialName("unwell_applied") val unwellApplied: Boolean = false)
 
 @Serializable
 data class SettingsDto(

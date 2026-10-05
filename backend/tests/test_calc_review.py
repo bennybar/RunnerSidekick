@@ -715,3 +715,13 @@ def test_junk_tokens_dont_get_a_bucket_of_their_own(tmp_path, monkeypatch):
     codes = [c.get("/v1/me", headers={"Authorization": f"Bearer junk{i}"}).status_code for i in range(10)]
     assert codes == [401] * 10
     assert c.get("/v1/me", headers=good).status_code == 429  # 10 rejected tries from this address: it waits, whatever the token
+
+
+def test_the_decision_says_when_reported_illness_is_applied(monkeypatch):
+    from sidekick import decide as dc
+    monkeypatch.setattr(dc.rd, "build", lambda conn, s, d, m: {"status": "ok", "score": 80})
+    monkeypatch.setattr(dc.rd, "next_run", lambda *a, **k: None)
+    monkeypatch.setattr(dc.race, "status", lambda conn, d: None)
+    for rule, want in (("R0", True), ("R1", False)):
+        out = dc.decide(None, "x", date(2026, 10, 5), {"recommendation": {"rule_id": rule, "state": "normal"}})
+        assert out["unwell_applied"] is want and (out["allows"] == "rest") is want
