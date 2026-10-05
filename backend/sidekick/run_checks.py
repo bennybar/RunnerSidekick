@@ -39,7 +39,9 @@ def build(conn, source: str, report: dict) -> list[dict]:
         elif fade <= rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", "Even all the way", "good"))
         else:
-            out.append(check("pacing", "Pacing", f"Slowed {round(fade)} s/km in the second half", "ok" if fade <= 15 else "low"))
+            hot = (report.get("heat") or {}).get("hot")
+            out.append(check("pacing", "Pacing", f"Slowed {round(fade)} s/km in the second half" + (" (a warm, humid day)" if hot else ""),
+                             "ok" if fade <= 15 or hot else "low"))
 
     # Effort against what the run was meant to be
     zones = rp.hr_zones(conn)
@@ -79,7 +81,12 @@ def build(conn, source: str, report: dict) -> list[dict]:
     if dc.get("eligible") and dc.get("decoupling_pct") is not None:
         d = dc["decoupling_pct"]
         v = "good" if d <= 5 else "ok" if d <= 10 else "low"
-        out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'})", v))
+        hot = (report.get("heat") or {}).get("hot")
+        if hot and v != "good":
+            # Heat raises heart rate at the same effort: on a hot, humid day drift isn't read as poor durability
+            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% (rose as you went; expected more on a warm, humid day)", "ok"))
+        else:
+            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'})", v))
 
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0
@@ -90,6 +97,12 @@ def build(conn, source: str, report: dict) -> list[dict]:
                                                f" ({rp.fmt_pace(hilly['gap_pace_s_per_km'])} on the flat)", "info"))
         else:
             out.append(check("hills", "Hills", f"+{round(climb)} m in total", "info"))
+
+    # Conditions: the weather estimate, with whether it was hot enough to matter
+    ht = report.get("heat")
+    if ht:
+        out.append(check("conditions", "Conditions (estimate)", ht["say"] + (" · warm and humid: heart rate runs higher" if ht["hot"] else ""),
+                         "info"))
 
     # Garmin's training effect, in Garmin's own words
     te = (report.get("garmin_metrics") or {}).get("aerobicTrainingEffect")

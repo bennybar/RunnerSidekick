@@ -224,6 +224,9 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 c = make_connector(conn, ucfg)
                 res = run_sync(conn, c, today(conn), cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days, force=force)
                 from .sync import report_progress
+                if not synthetic:
+                    from . import weather
+                    weather.for_new_runs(conn, c.source, res.changed_activities)
                 report_progress(conn, res.job_id, 0.92, "Updating your reports")
                 with lock_reports:
                     rp.regenerate(conn, c.source, synthetic, res.changed_dates, res.changed_activities, today(conn))

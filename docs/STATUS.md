@@ -332,6 +332,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Heat and strain (2026-10-05, v0.41.0)
+- Weather for every new run: looked up during sync (Open-Meteo estimate, start area to about 1 km), before the run's
+  report; `backfill-weather` for runs of the last 120 days. Each run's checks show the conditions.
+- Heat: a dew point of 18 °C+ or feels-like 27 °C+ marks a run hot. Its drift and fade verdicts say so and aren't read
+  as poor durability; next focus says heat raises heart rate; hot runs are left out of the durability trend and the
+  durability insight (report-2.6). No numeric "heat correction": the models are rough, so the app says it instead.
+- Strain warning (`strain.py`): two or more of a load jump (1.3×), the same load every day (monotony 2+ in a heavier
+  week), cadence 3+ spm lower or heart rate 5+ bpm higher at your usual paces (hot runs left out), runs feeling hard
+  while heart rate stayed easy. Shown first in "Stands out"; a nudge toward an easier day, never a diagnosis.
+
 ## Re-review fixes (2026-10-05, v0.40.1)
 - Sync: a day Garmin can't read is skipped for real (days are read lazily, so the guard now covers the reading), and
   the backfill goes day by day past it instead of failing every hour. A sync only frees its own lease.

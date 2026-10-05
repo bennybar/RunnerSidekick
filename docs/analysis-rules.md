@@ -505,3 +505,16 @@ your normal. Runs are found by the local calendar day and end at start + elapsed
 The overall readiness score is never more than 25 points above its weakest part. Garmin's recovery timer (from its
 morning training readiness, counted down to now) isn't in the score; at 24 h or more it holds intensity back in
 `decide.hold_reason`.
+
+## Heat — `weather.py`
+
+Hot = dew point ≥ 18 °C or feels-like ≥ 27 °C (Open-Meteo estimate for the run's start area and middle hour). Hot runs:
+drift above 5% reads "expected more on a warm, humid day" (ok, not low); a fade is marked as a warm day; excluded from
+the durability trend and insight. Pace and drift are never numerically "heat-corrected".
+
+## Strain — `strain.py` (`strain-1.0`)
+
+Last 7 days against the 4 weeks before; a warning only when 2+ of: acute/chronic load ≥ 1.3; Foster monotony
+(mean/sd of daily load over 7 days) ≥ 2.0 in a week heavier than the 4-week average; cadence ≥ 3 spm lower or heart
+rate ≥ 5 bpm higher (hot runs excluded) than earlier runs within 10 s/km of the same pace (2+ runs each); 2+ of the
+last 10 days' rated runs (3+ rated) felt moderately hard or harder (6/10) with under 20% in zones 4–5.

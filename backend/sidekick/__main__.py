@@ -108,6 +108,9 @@ def cmd_sync(cfg, loop: bool) -> int:
     while True:
         c, today = make_connector(cfg, conn)
         res = run_sync(conn, c, today, cfg.backfill_days, cfg.refetch_days, cfg.raw_retention_days)
+        if not c.synthetic:
+            from . import weather
+            weather.for_new_runs(conn, c.source, res.changed_activities)
         rp.regenerate(conn, c.source, c.synthetic, res.changed_dates, res.changed_activities, today)
         auto_run_ai(cfg, conn, c.source, res.changed_activities, today)
         cp = one(conn.sync_checkpoint, {"source": c.source, "stream": "days"})
@@ -217,6 +220,7 @@ def main(argv=None) -> int:
     p = with_user(sub.add_parser("sync", help="sync every connected user (or --user)")); p.add_argument("--loop", action="store_true")
     with_user(sub.add_parser("rebuild-reports"))
     with_user(sub.add_parser("backfill-intensity", help="intensity minutes from stored Garmin day summaries"))
+    with_user(sub.add_parser("backfill-weather", help="Open-Meteo weather estimates for recent runs that have none"))
     with_user(sub.add_parser("backfill-samples", help="re-read run samples (e.g. running power) from stored Garmin details"))
     with_user(sub.add_parser("audit")).add_argument("--out")
     p = sub.add_parser("invite", help="invite-only access by Google email")
@@ -317,6 +321,19 @@ def main(argv=None) -> int:
             conn.activity.update_one({"id": a["id"]}, {"$set": {"updated_at": utc_now(), "garmin_metrics": gm}})  # cached analyses recompute
             n += 1
         print(f"samples re-read for {n} runs")
+        return 0
+    if args.cmd == "backfill-weather":
+        # Weather estimates for runs of the last 120 days that don't have one yet (one Open-Meteo call each)
+        from datetime import date, timedelta
+        from . import weather
+        conn = connect(ucfg.db_name)
+        since = (date.today() - timedelta(days=120)).isoformat()
+        have = set(conn.run_weather.distinct("source_id", {"weather": {"$ne": None}}))
+        n = 0
+        for a in conn.activity.find({"local_date": {"$gte": since}}):
+            if a["source_id"] not in have:
+                n += bool(weather.for_run(conn, a))
+        print(f"weather looked up for {n} runs")
         return 0
     if args.cmd == "rebuild-reports":
         conn = connect(ucfg.db_name)

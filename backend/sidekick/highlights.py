@@ -39,6 +39,13 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
     out: list[dict] = []
     g = rp.get_setting(conn, "garmin_fitness", None) or {}
 
+    # Strain building (two or more signals agreeing over the last week): first, since it's about what to do now
+    from . import strain
+    sw = strain.build(conn, source, today)
+    if sw:
+        out.append({"id": "strain", "tone": "attention", "kind": "recovery", "title": sw["title"], "text": sw["text"],
+                    "target": {"type": "insights"}, "source": "your runs"})
+
     st = g.get("training_status") or {}
     status = (st.get("phrase") or "").split("_")[0]
     if status in ATTENTION_STATUS | GOOD_STATUS:

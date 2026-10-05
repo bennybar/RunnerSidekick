@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.5"  # 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.6"  # 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -538,6 +538,8 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     readiness_day = {"value": tr["value"], "date": a["local_date"], "label": tr.get("label")} if tr and tr.get("value") is not None else None
     week_begin = week_start(d, first_weekday(conn))
     week_acts = activities(conn, source, week_begin.isoformat(), a["local_date"])
+    from . import weather as wx
+    heat = wx.heat(wx.stored(conn, sid))  # the kept estimate only; looking it up happens during sync
     rpe = one(conn.activity_effort, {"activity_source_id": sid})
     effort = None
     if rpe and a["moving_s"]:
@@ -559,14 +561,15 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "classification": an["classification"], "decoupling": dc,
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_begin.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
-        "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None, a.get("avg_hr")),
+        "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None, a.get("avg_hr"), heat),
+        "heat": heat,
         # What the data alone says, kept beside a stated intent (never in its place)
         "intent": intent, "classified": intent if intent and intent["source"] == "inferred" else infer_intent(conn, a),
         "narrative": None,
     }
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
-              "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day}
+              "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day, "heat": heat}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
 
 
@@ -624,7 +627,7 @@ def hr_cap(target: str | None) -> int | None:
 
 
 def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent: dict | None = None,
-               easy_ceiling: float | None = None, avg_hr: float | None = None) -> str:
+               easy_ceiling: float | None = None, avg_hr: float | None = None, heat: dict | None = None) -> str:
     """One practical focus from this run, most specific first, judged against what the runner meant the run to be when
     they said so. No pace or HR prescriptions beyond the run's own numbers and the runner's own target."""
     pairs = [(s, d) for s, d in zip(splits or [], details or [{}] * len(splits or [])) if s.complete and s.pace_s_per_km]
@@ -649,6 +652,9 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
     if cls["kind"] == "variable" and structured:
         return "Interval-style session: drift analysis doesn't apply. Compare the repeated efforts with each other instead."
     if dc.get("eligible") and dc["decoupling_pct"] > 5:
+        if heat and heat.get("hot"):
+            return (f"Heart rate drifted on a warm, humid day ({heat['say']}); heat alone raises it at the same effort. "
+                    "Compare with your next cooler steady run before reading anything into it.")
         return "See whether aerobic decoupling stays above 5% on your next comparable steady run before reading much into it."
     if kind in STEADY_KINDS:
         return ("Pace follows effort on a run like this. On the next comparable run, watch whether the same heart rate gives "
@@ -692,7 +698,9 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
         runs.append(ins.RunData(a["source_id"], a["local_date"], local.replace(tzinfo=None), a.get("device_id"), a["distance_m"],
                                 a["moving_s"], (a["garmin_metrics"] or {}).get("activityTrainingLoad"),
                                 samples_for(conn, a["id"]), rn.splits_from_laps(laps_for(conn, a["id"])), an["classification"]["kind"]))
-        if an["decoupling"]["eligible"]:
+        # Hot runs (high dew point or feels-like) are left out: heat raises drift, so they'd read as lost durability
+        from . import weather as wx
+        if an["decoupling"]["eligible"] and not (wx.heat(wx.stored(conn, a["source_id"])) or {}).get("hot"):
             drifts.append((a["local_date"], a["source_id"], an["decoupling"]["decoupling_pct"]))
     since = (today - timedelta(days=120)).isoformat()
     obs: dict[str, dict[str, float]] = {}

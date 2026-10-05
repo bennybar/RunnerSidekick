@@ -67,15 +67,17 @@ def efficiency_signal(conn, source: str, today: date) -> dict:
 
 def drift_signal(conn, source: str, today: date) -> dict:
     note = (f"Heart-rate drift (pace:HR decoupling) on steady runs, last 6 weeks against the 6 before; {DRIFT_MIN_RUNS}+ runs in "
-            f"each; under {DRIFT_PP:.0f} point counts as stable. Lower drift = efficiency that holds up")
+            f"each; under {DRIFT_PP:.0f} point counts as stable. Hot, humid runs are left out. Lower drift = efficiency that holds up")
     latest: dict[str, tuple[str, float]] = {}
     seen: set[str] = set()
     for r in conn.report.find({"type": "post_run", "body.local_date": {"$gte": (today - timedelta(days=84)).isoformat()}},
-                              {"subject_key": 1, "revision": 1, "body.local_date": 1, "body.decoupling": 1}).sort("revision", -1):
+                              {"subject_key": 1, "revision": 1, "body.local_date": 1, "body.decoupling": 1, "body.heat": 1}).sort("revision", -1):
         if r["subject_key"] in seen:
             continue  # the newest revision of each run only, eligible or not
         seen.add(r["subject_key"])
         dc = r["body"].get("decoupling") or {}
+        if (r["body"].get("heat") or {}).get("hot"):
+            continue  # heat raises drift: hot runs would read as lost durability
         if dc.get("eligible") and dc.get("decoupling_pct") is not None:
             latest[r["subject_key"]] = (r["body"]["local_date"], dc["decoupling_pct"])
     cut = (today - timedelta(days=42)).isoformat()

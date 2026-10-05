@@ -7,7 +7,7 @@ from sidekick import reports as rp
 from sidekick.analytics import insights as ins
 from sidekick.analytics import running as rn
 from sidekick.connectors.base import Samples
-from sidekick.db import next_id
+from sidekick.db import next_id, utc_now
 
 from test_race import ANCHOR, set_race, synced
 
@@ -456,3 +456,56 @@ def test_absurd_dates_are_refused_before_anything_changes(tmp_path):
     h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
     assert c.get("/v1/today", params={"date": "0001-01-01"}, headers=h).status_code == 422
     assert c.delete("/v1/plan/junk", headers=h).status_code == 422
+
+
+def test_a_hot_humid_run_is_said_to_be_hot_and_its_drift_isnt_poor_durability():
+    from sidekick import run_checks, weather
+    conn, sid = None, None
+    conn = synced()
+    a = rp.activities(conn, "fixture", "2026-09-01", ANCHOR.isoformat())[-1]
+    sid = a["source_id"]
+    conn.run_weather.update_one({"source_id": sid}, {"$set": {"checked_at": utc_now(), "weather": {
+        "temperature_2m": 29.0, "dew_point_2m": 21.0, "apparent_temperature": 32.0, "relative_humidity_2m": 60}}}, upsert=True)
+    r = rp.build_post_run(conn, "fixture", sid, False)
+    assert r["heat"]["hot"] and r["heat"]["say"] == "29°C, dew point 21°C"
+    cond = next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "conditions")
+    assert "warm and humid" in cond["say"]
+    r["decoupling"].update(eligible=True, decoupling_pct=8.0)
+    drift = next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "drift")
+    assert drift["verdict"] == "ok" and "warm, humid" in drift["say"]  # not "low" on a hot day
+    assert weather.heat({"temperature_2m": 18.0, "dew_point_2m": 9.0})["hot"] is False
+
+
+def strain_runs(today, recent_hr, recent_cad, recent_load=60.0):
+    """4 weeks of steady runs at 5:30/km, 150 bpm, 170 spm, then a last week with the given heart rate and cadence."""
+    out = []
+    for k, day in enumerate(range(33, -1, -1)):
+        if day % 2:
+            continue
+        d = today - timedelta(days=day)
+        recent = day <= 6
+        out.append({"id": k, "source_id": f"s{k}", "source": "x", "local_date": d.isoformat(), "distance_m": 8000.0, "moving_s": 2640.0,
+                    "elapsed_s": 2640.0, "avg_hr": recent_hr if recent else 150.0, "avg_cadence_spm": recent_cad if recent else 170.0,
+                    "start_utc": f"{d.isoformat()}T06:00:00Z", "load": recent_load if recent else 60.0})
+    return out
+
+
+def test_strain_needs_two_signals(monkeypatch):
+    from sidekick import strain
+    today = date(2026, 10, 5)
+    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr("sidekick.readiness.training_load", lambda conn, s, at, z: {"ratio": 1.0})
+    monkeypatch.setattr("sidekick.readiness.moment", lambda conn, d: None)
+    monkeypatch.setattr("sidekick.readiness.run_load", lambda conn, a, floors: a["load"])
+    monkeypatch.setattr(strain.wx, "stored", lambda conn, sid: None)
+
+    class C:
+        class _C:
+            def find_one(self, *a, **k):
+                return None
+        run_intent = activity_effort = _C()
+    for hr, cad, want in ((157.0, 170.0, None), (157.0, 166.0, {"heart_rate", "cadence"})):
+        monkeypatch.setattr(strain.rp, "activities", lambda conn, s, a, b, hr=hr, cad=cad: strain_runs(today, hr, cad))
+        out = strain.build(C(), "x", today)
+        assert (out and {s["id"] for s in out["signals"]}) == (want or None)  # one signal alone is never a warning
+    assert "Consider an easier day" in out["text"] and "injur" not in out["text"].lower()

@@ -1,6 +1,9 @@
 """Weather around a run, as an Open-Meteo estimate for the run's place and hour, never watch data. Only the start
-position rounded to 0.01° (about 1 km) and the date go to Open-Meteo. Looked up when a run is exported, then kept with
-the run; a failed lookup is tried again after a day. Indoor runs and runs without GPS get none."""
+position rounded to 0.01° (about 1 km) and the date go to Open-Meteo. Looked up for new runs during a sync (and on
+export), then kept with the run; a failed lookup is tried again after a day. Indoor runs and runs without GPS get none.
+
+Heat: a dew point of 18 °C or more, or a feels-like temperature of 27 °C or more, raises heart rate at the same effort
+noticeably. Such runs are marked hot: their drift and fade verdicts say so, and they're left out of the durability trend."""
 
 from __future__ import annotations
 
@@ -55,3 +58,36 @@ def for_run(conn, a: dict, fetch=httpx.get) -> dict | None:
     w = lookup(round(p["startLatitude"], 2), round(p["startLongitude"], 2), mid.replace(minute=0, second=0, microsecond=0), fetch)
     conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"weather": w, "checked_at": utc_now()}}, upsert=True)
     return w
+
+
+HOT_DEW_POINT_C = 18.0
+HOT_FEELS_LIKE_C = 27.0
+SYNC_LOOKUPS = 10  # at most this many lookups per sync
+
+
+def heat(w: dict | None) -> dict | None:
+    """{"hot": bool, "say": "25°C, dew point 19°C"} from a stored estimate, or None without one."""
+    if not w or w.get("temperature_2m") is None:
+        return None
+    dew, feels = w.get("dew_point_2m"), w.get("apparent_temperature")
+    hot = (dew is not None and dew >= HOT_DEW_POINT_C) or (feels is not None and feels >= HOT_FEELS_LIKE_C)
+    say = f"{w['temperature_2m']:.0f}°C" + (f", dew point {dew:.0f}°C" if dew is not None else "")
+    return {"hot": hot, "say": say, "temperature_c": w["temperature_2m"], "dew_point_c": dew}
+
+
+def stored(conn, source_id: str) -> dict | None:
+    """The kept estimate for a run, without looking anything up."""
+    r = one(conn.run_weather, {"source_id": source_id})
+    return (r or {}).get("weather")
+
+
+def for_new_runs(conn, source: str, sids: list[str], fetch=httpx.get) -> None:
+    """Looks up weather for a sync's new or changed runs, before their reports are built."""
+    from . import reports as rp
+    for sid in sids[:SYNC_LOOKUPS]:
+        a = rp.activity_by_source_id(conn, source, sid)
+        if a:
+            try:
+                for_run(conn, a, fetch)
+            except Exception as e:  # weather is a nicety: never a failed sync
+                log.warning("weather for %s: %s", sid, e)
