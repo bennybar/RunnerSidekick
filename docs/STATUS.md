@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Settings redesign (2026-10-05, v0.40.0)
+- Settings is a short list of sections (Account, Appearance, Training, Notifications, AI coach, Your data, About);
+  only a Garmin problem shows at the top. Training, Race, About you, the morning window, the server and your own AI key
+  each open a sheet with its own Save; closing one with unsaved edits asks "Discard changes?". Switches, units, theme
+  and the AI on/off save at once.
+- Proper pickers: race date and birth date (Material date picker), the morning window (time picker), the race target
+  as h / min / s, the AI model from the server's allowed list (`ai_models` in /v1/settings; any model with your own
+  key), and the time zone with "Use this phone's".
+
 ## Race week and focus on Today (2026-10-05, v0.39.0)
 - Today: readiness, the next run, then (with a race goal) the race week as one row of the week's days (done, today,
   missed, planned, rest) with the minutes done against the target, and this week's focus as one line with its status.

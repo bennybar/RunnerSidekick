@@ -694,6 +694,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "goal_type": rp.get_setting(conn, "goal_type", None),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
+                "ai_models": sorted(nv.server_models()),  # what the server's key may run; your own key may use any
                 "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
                 "morning_window_start": rp.get_setting(conn, "morning_window_start", "06:00"),
                 "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00"),

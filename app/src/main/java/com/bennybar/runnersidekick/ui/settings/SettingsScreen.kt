@@ -1,6 +1,20 @@
 package com.bennybar.runnersidekick.ui.settings
 
 import android.Manifest
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.material.icons.outlined.EventNote
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectable
@@ -136,17 +150,9 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 }
 
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-private val TIME = Regex("^([01]\\d|2[0-3]):[0-5]\\d$")
-/** "1:40:00" or "45:30" → seconds; null if malformed or outside 10 min–10 h. */
-private fun parseHms(t: String): Int? {
-    val p = t.split(":").map { it.toIntOrNull() ?: return null }
-    val s = when (p.size) { 2 -> p[0] * 60 + p[1]; 3 -> p[0] * 3600 + p[1] * 60 + p[2]; else -> return null }
-    return s.takeIf { p.drop(1).all { v -> v in 0..59 } && it in 600..36000 }
-}
-
+private val GOALS = listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
+private val RACES = listOf("5k" to "5K", "10k" to "10K", "half" to "Half", "marathon" to "Marathon")
 private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
-
-private val BIRTH = Regex("^(19|20)\\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -161,7 +167,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     val snackbar = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     var confirm by remember { mutableStateOf<String?>(null) }
-    var editBackend by remember { mutableStateOf(false) }
+    var open by rememberSaveable { mutableStateOf<String?>(null) }  // which section sheet is open
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let { vm.export(ctx, it) } }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         vm.setNotifications(granted)
@@ -178,46 +184,30 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
             verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            item {
-                val s = status?.value
-                val ok = s?.connection?.state == "connected"
-                Group(title = "Connection") {
-                    row(
-                        if (s == null) "Not connected" else if (s.synthetic) "Demo data source" else "Garmin (unofficial connector)",
-                        supporting = s?.let {
-                            "${it.connection.state.replace('_', ' ').replaceFirstChar(Char::uppercase)} · last fetch ${Format.ago(it.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
-                                (it.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
-                        } ?: "Enter the backend address and device token.",
-                        icon = if (ok) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff, iconShape = MaterialShapes.Cookie9Sided,
-                    )
-                    if (s?.connection?.state == "reauth_required" || s?.connection?.state == "not_configured") {
-                        row("Garmin sign-in needed", supporting = "Garmin asked for a new sign-in. Reconnect it below; syncing is paused until then.")
-                    }
-                    row("Backend", supporting = local?.backendUrl ?: "", onClick = { editBackend = !editBackend })
-                    if (editBackend || local?.hasToken == false) custom {
-                        var url by remember(local?.backendUrl) { mutableStateOf(local?.backendUrl ?: "") }
-                        var token by remember { mutableStateOf("") }
-                        OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
-                        OutlinedTextField(token, { token = it }, label = { Text(if (local?.hasToken == true) "Device token (saved, enter to replace)" else "Device token") },
-                            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                        FilledTonalButton(onClick = { vm.saveBackend(url, token); token = ""; editBackend = false },
-                            enabled = !busy && url.isNotBlank() && (token.isNotBlank() || local?.hasToken == true),
-                            modifier = Modifier.padding(top = 12.dp)) { Text("Save and test") }
+            // Only a Garmin problem is shown up here; everything else lives in its own section
+            status?.value?.connection?.state?.takeIf { it == "reauth_required" || it == "not_configured" || it == "error" }?.let { st ->
+                item {
+                    Group {
+                        row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
+                            supporting = if (st == "error") (status?.value?.connection?.detail ?: "The last sync failed; it retries on its own.")
+                                else "Garmin asked for a new sign-in. Reconnect it under Account; syncing is paused until then.",
+                            icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
                     }
                 }
             }
             item {
                 val m = me?.value
-                val g = status?.value?.garminOfficial
+                val s = status?.value
+                val g = s?.garminOfficial
                 Group(title = "Account") {
                     row(m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in",
                         supporting = when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
                         icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle)
                     row("Garmin", supporting = when {
+                        s?.synthetic == true -> "Demo data source"
                         g?.connected == true -> "Connected with Garmin's official sign-in. " + (g.dataImport ?: "")
-                        status?.value?.connection?.state == "connected" && m?.role == "owner" -> "Connected (owner's direct connection)"
+                        s?.connection?.state == "connected" -> "Connected · last fetch ${Format.ago(s.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
+                            (s.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
                         g?.available == true -> "Not connected"
                         else -> "Garmin sign-in for members opens once Garmin approves this app"
                     }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided,
@@ -226,6 +216,8 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
                             else -> null
                         })
+                    row("Server", supporting = local?.backendUrl ?: "", icon = if (s?.connection?.state == "connected") Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
+                        iconShape = MaterialShapes.Cookie4Sided, onClick = { open = "backend" })
                     row("Sign out", supporting = "Removes the token and cached data from this phone", icon = Icons.AutoMirrored.Outlined.Logout,
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "signout" })
                     if (m?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
@@ -233,8 +225,10 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                 }
             }
             item {
-                Group(title = "Display") {
-                    custom { ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
+                Group(title = "Appearance") {
+                    row("Theme", supporting = com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(local?.theme).label + " · " +
+                        com.bennybar.runnersidekick.ui.theme.Appearance.of(local?.appearance).label,
+                        icon = Icons.Outlined.Palette, iconShape = MaterialShapes.Flower, onClick = { open = "theme" })
                     custom {
                         Text("Units", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -248,170 +242,62 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
             }
             remote?.let { r ->
                 item {
-                    var tz by remember(r) { mutableStateOf(r.timezone) }
-                    var days by remember(r) { mutableStateOf(r.runningDays.toSet()) }
-                    var goal by remember(r) { mutableStateOf(r.goal ?: "") }
-                    var minutes by remember(r) { mutableStateOf(r.availableMinutes?.toString() ?: "") }
-                    var zones by remember(r) { mutableStateOf(r.hrZoneSource) }
-                    var goalType by remember(r) { mutableStateOf(r.goalType) }
-                    var start by remember(r) { mutableStateOf(r.morningWindowStart) }
-                    var end by remember(r) { mutableStateOf(r.morningWindowEnd) }
-                    var aiOn by remember(r) { mutableStateOf(r.aiEnabled) }
-                    var model by remember(r) { mutableStateOf(r.aiModel) }
-                    var sex by remember(r) { mutableStateOf(r.profileSex) }
-                    var birth by remember(r) { mutableStateOf(r.profileBirthDate ?: "") }
-                    val birthOk = birth.isEmpty() || BIRTH.matches(birth)
-                    var weekStart by remember(r) { mutableStateOf(r.weekStartDay) }
-                    var raceName by remember(r) { mutableStateOf(r.raceName ?: "") }
-                    var raceDate by remember(r) { mutableStateOf(r.raceDate ?: "") }
-                    var raceDist by remember(r) { mutableStateOf(r.raceDistance) }
-                    var raceTarget by remember(r) { mutableStateOf(r.raceTargetS?.let(::hms) ?: "") }
-                    val raceDateOk = raceDate.isEmpty() || BIRTH.matches(raceDate)
-                    val raceTargetS = parseHms(raceTarget)
-                    val raceOk = raceDateOk && (raceTarget.isEmpty() || raceTargetS != null) && (raceDate.isEmpty() == (raceDist == null))
-                    val valid = TIME.matches(start) && TIME.matches(end) && start < end && model.isNotBlank() && birthOk && raceOk
-                    val edited = SettingsDto(tz.trim(), days.sorted(), goal.ifBlank { null }, minutes.toIntOrNull(), zones, goalType, aiOn, model.trim(),
-                        r.aiAvailable, start, end, profileSex = sex, profileBirthDate = birth.ifBlank { null }, profileDetected = r.profileDetected,
-                        raceDate = raceDate.ifBlank { null }, raceDistance = raceDist, raceTargetS = raceTargetS, raceName = raceName.trim().ifBlank { null },
-                        weekStartDay = weekStart, weekStartEffective = r.weekStartEffective)
-                    val dirty = edited != r
-                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        Group(title = "Training profile") {
-                            custom {
-                                Text("Main goal", style = MaterialTheme.typography.titleMedium)
-                                Text("Orders the weekly focus suggestions.", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)) {
-                                    listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
-                                        .forEach { (k, l) -> FilterChip(goalType == k, { goalType = if (goalType == k) null else k }, { Text(l) }) }
-                                }
-                                Text("Week starts on", style = MaterialTheme.typography.titleMedium)
-                                Text(if (weekStart == null) "Now: ${r.weekStartEffective.replaceFirstChar(Char::uppercase)} (from Garmin, or Monday)."
-                                    else "Used for weekly reviews, the weekly focus, Activities and charts. Past reviews keep their weeks.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)) {
-                                    listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
-                                        .forEach { (k, l) -> FilterChip(weekStart == k, { weekStart = k }, { Text(l) }) }
-                                }
-                                Text("Running days", style = MaterialTheme.typography.titleMedium)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                    DAYS.forEachIndexed { i, d -> FilterChip(i in days, { days = if (i in days) days - i else days + i }, { Text(d) }) }
-                                }
-                                OutlinedTextField(goal, { goal = it }, label = { Text("Goal in your words (optional)") },
-                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
-                                OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit) }, label = { Text("Usual time per run (min)") }, singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                                OutlinedTextField(tz, { tz = it }, label = { Text("Time zone (e.g. Asia/Jerusalem)") }, singleLine = true,
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                                Text("Race goal (optional)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-                                Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                    listOf("5k" to "5K", "10k" to "10K", "half" to "Half", "marathon" to "Marathon")
-                                        .forEach { (k, l) -> FilterChip(raceDist == k, { raceDist = if (raceDist == k) null else k }, { Text(l) }) }
-                                }
-                                OutlinedTextField(raceDate, { raceDate = it.filter { c -> c.isDigit() || c == '-' }.take(10) },
-                                    label = { Text("Race date (YYYY-MM-DD)") }, singleLine = true,
-                                    isError = !raceDateOk || (raceDate.isEmpty() != (raceDist == null)),
-                                    supportingText = { if (raceDate.isEmpty() != (raceDist == null)) Text("Set both a distance and a date, or neither") },
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                                OutlinedTextField(raceTarget, { raceTarget = it.filter { c -> c.isDigit() || c == ':' }.take(8) },
-                                    label = { Text("Target time (h:mm:ss, optional)") }, singleLine = true,
-                                    isError = raceTarget.isNotEmpty() && raceTargetS == null, modifier = Modifier.fillMaxWidth())
-                                OutlinedTextField(raceName, { raceName = it.take(60) }, label = { Text("Race name (optional)") }, singleLine = true,
-                                    modifier = Modifier.fillMaxWidth())
-                                if (raceDist != null || raceDate.isNotEmpty()) TextButton(onClick = {
-                                    raceDist = null; raceDate = ""; raceTarget = ""; raceName = ""
-                                }) { Text("Clear race goal") }
-                                Text("For age and sex comparisons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-                                val det = r.profileDetected
-                                Text(if (det?.sex != null || det?.birthDate != null)
-                                    "From Garmin: ${listOfNotNull(det.sex, det.birthDate).joinToString(", ")}. Set these only to override Garmin."
-                                    else "Garmin didn't provide these; set them to see comparisons.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                    listOf(null to "As in Garmin", "male" to "Male", "female" to "Female")
-                                        .forEach { (k, l) -> FilterChip(sex == k, { sex = k }, { Text(l) }) }
-                                }
-                                OutlinedTextField(birth, { birth = it.filter { c -> c.isDigit() || c == '-' }.take(10) },
-                                    label = { Text("Birth date (YYYY-MM-DD, optional)") }, singleLine = true, isError = !birthOk,
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                                Text("Heart-rate zones", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
-                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                    listOf("garmin" to "From Garmin", "none" to "Don't use").forEachIndexed { i, (k, l) ->
-                                        SegmentedButton(zones == k, { zones = k }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
-                                    }
-                                }
-                            }
-                        }
-                        Group(title = "Notifications") {
-                            row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
-                                icon = Icons.Outlined.Notifications, iconShape = MaterialShapes.Sunny,
-                                trailing = {
-                                    Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
-                                        if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
-                                    })
+                    Group(title = "Training") {
+                        row("Training", supporting = listOfNotNull(
+                                r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
+                                GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
+                                r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
+                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { open = "training" })
+                        row("Race", supporting = r.raceDate?.let { d ->
+                                listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
+                                    r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
+                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { open = "race" })
+                        row("About you", supporting = listOfNotNull(
+                                (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
+                                (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
+                                if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
+                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { open = "about" })
+                    }
+                }
+                item {
+                    Group(title = "Notifications") {
+                        row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
+                            icon = Icons.Outlined.Notifications, iconShape = MaterialShapes.Sunny,
+                            trailing = {
+                                Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
+                                    if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
                                 })
-                            row("Background refresh", supporting = if (local?.notificationsEnabled == true)
-                                    "Already on with notifications (about hourly)."
-                                else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
-                                icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
-                                trailing = {
-                                    Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
-                                        enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
-                                })
-                            custom {
-                                Text("Morning window", style = MaterialTheme.typography.titleMedium)
-                                Text("The briefing is sent once your sleep has synced, or at the end of the window as provisional.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                    OutlinedTextField(start, { start = it.take(5) }, label = { Text("From") }, singleLine = true, isError = !TIME.matches(start),
-                                        modifier = Modifier.weight(1f))
-                                    OutlinedTextField(end, { end = it.take(5) }, label = { Text("Until") }, singleLine = true, isError = !TIME.matches(end) || start >= end,
-                                        modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                        val ownKey = local?.hasOwnAiKey == true
-                        Group(title = "AI coach and summaries (optional)") {
-                            row("AI coach and report summaries", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
-                                supporting = when {
-                                    ownKey -> "Uses OpenAI with your own key."
-                                    r.aiAvailable -> "Uses OpenAI. Off by default."
-                                    else -> "Add your own OpenAI key below to use it."
-                                },
-                                trailing = { Switch(checked = aiOn, enabled = r.aiAvailable || ownKey || aiOn, onCheckedChange = { aiOn = it }) })
-                            custom {
-                                Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per " +
-                                    "sync, never for older history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. " +
-                                    "This uses the server's key; with only your own key, input is written when you ask.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = 8.dp))
-                                Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. " +
-                                    "Numbers in the summary are filled in from the report, not written by the AI. If its output doesn't pass checks, " +
-                                    "no summary is shown and the report is unchanged.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                OutlinedTextField(model, { model = it }, label = { Text("Model") }, singleLine = true, enabled = aiOn,
-                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
-                            }
-                            custom {
-                                var key by remember { mutableStateOf("") }
-                                Text("Your own OpenAI key (optional)", style = MaterialTheme.typography.titleSmall)
-                                Text("Encrypted on this phone and sent only with AI requests. The server uses it for that request and never stores it.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                OutlinedTextField(key, { key = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    label = { Text(if (ownKey) "Saved · enter a new key to replace" else "sk-…") },
-                                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                                    FilledTonalButton(onClick = { vm.setOwnAiKey(key); key = "" }, enabled = key.startsWith("sk-")) { Text("Save key") }
-                                    if (ownKey) TextButton(onClick = { vm.setOwnAiKey(null) }) { Text("Remove") }
-                                }
-                            }
-                        }
-                        Button(
-                            enabled = !busy && valid && dirty, modifier = Modifier.fillMaxWidth(),
-                            onClick = { vm.saveRemote(edited) },
-                        ) { Text(if (dirty) "Save changes" else "Saved") }
+                            })
+                        row("Background refresh", supporting = if (local?.notificationsEnabled == true)
+                                "Already on with notifications (about hourly)."
+                            else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
+                            icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
+                            trailing = {
+                                Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
+                                    enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
+                            })
+                        row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
+                            "or at the end of the window as provisional", icon = Icons.Outlined.Schedule, iconShape = MaterialShapes.Cookie4Sided,
+                            onClick = { open = "window" })
+                    }
+                }
+                item {
+                    val ownKey = local?.hasOwnAiKey == true
+                    Group(title = "AI coach (optional)") {
+                        row("AI coach and summaries", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
+                            supporting = when {
+                                ownKey -> "Uses OpenAI with your own key."
+                                r.aiAvailable -> "Uses OpenAI. Off by default."
+                                else -> "Add your own OpenAI key to use it."
+                            },
+                            trailing = { Switch(checked = r.aiEnabled, enabled = !busy && (r.aiAvailable || ownKey || r.aiEnabled),
+                                onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it)) }) })
+                        if (r.aiEnabled) row("Model", supporting = r.aiModel, icon = Icons.Outlined.Tune, iconShape = MaterialShapes.Cookie4Sided,
+                            onClick = { open = "model" })
+                        row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone" else "Optional", icon = Icons.Outlined.Key,
+                            iconShape = MaterialShapes.Cookie4Sided, onClick = { open = "key" })
+                        row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
+                            icon = Icons.Outlined.Info, iconShape = MaterialShapes.Circle, onClick = { open = "ai_info" })
                     }
                 }
             }
@@ -438,6 +324,27 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         icon = Icons.Outlined.Straighten, iconShape = MaterialShapes.Circle)
                 }
             }
+        }
+    }
+    val r = remote
+    when (open) {
+        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, onClose = { open = null }) { url, token ->
+            vm.saveBackend(url, token); open = null }
+        "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = { open = null }) {
+            ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
+        "training" -> r?.let { TrainingSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
+        "race" -> r?.let { RaceSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
+        "about" -> r?.let { AboutYouSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
+        "window" -> r?.let { WindowSheet(it, busy, onClose = { open = null }) { s -> vm.saveRemote(s); open = null } }
+        "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, onClose = { open = null }) { m -> vm.saveRemote(it.copy(aiModel = m)); open = null } }
+        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = { open = null }) { k -> vm.setOwnAiKey(k); open = null }
+        "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = { open = null }) {
+            Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per sync, never for older " +
+                "history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. This uses the server's key; with only " +
+                "your own key, input is written when you ask.", style = MaterialTheme.typography.bodyMedium)
+            Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. Numbers in " +
+                "summaries are filled in from the report, not written by the AI. If its output doesn't pass checks, nothing is shown.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     confirm?.let { scope ->
@@ -505,4 +412,252 @@ private fun ThemePicker(theme: String?, appearance: String?, onTheme: (com.benny
             SegmentedButton(now == a, { onAppearance(a) }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(a.label) }
         }
     }
+}
+
+
+/** One section's sheet with its own Save. Closing it with unsaved edits asks first, so nothing is lost silently. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SectionSheet(title: String, dirty: Boolean, canSave: Boolean, onSave: () -> Unit, onClose: () -> Unit,
+                         content: @Composable ColumnScope.() -> Unit) {
+    var ask by remember { mutableStateOf(false) }
+    val dirtyNow by androidx.compose.runtime.rememberUpdatedState(dirty)
+    val state = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { v ->
+        if (v == androidx.compose.material3.SheetValue.Hidden && dirtyNow) { ask = true; false } else true
+    })
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { if (dirtyNow) ask = true else onClose() }, sheetState = state) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall)
+            content()
+            if (canSave || dirty) Button(onClick = onSave, enabled = canSave && dirty, modifier = Modifier.fillMaxWidth()) {
+                Text(if (dirty) "Save" else "Saved")
+            }
+        }
+    }
+    if (ask) AlertDialog(onDismissRequest = { ask = false }, title = { Text("Discard changes?") },
+        text = { Text("Your edits in $title haven't been saved.") },
+        confirmButton = { TextButton(onClick = { ask = false; onClose() }) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = { ask = false }) { Text("Keep editing") } })
+}
+
+@Composable
+private fun Label(text: String, hint: String? = null) {
+    Column {
+        Text(text, style = MaterialTheme.typography.titleMedium)
+        hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable
+private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, onClose: () -> Unit, onSave: (String, String) -> Unit) {
+    var url by remember { mutableStateOf(current) }
+    var token by remember { mutableStateOf("") }
+    SectionSheet("Server", dirty = url != current || token.isNotBlank(), canSave = !busy && url.isNotBlank() && (token.isNotBlank() || hasToken),
+        onSave = { onSave(url, token) }, onClose = onClose) {
+        OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
+        OutlinedTextField(token, { token = it }, label = { Text(if (hasToken) "Device token (saved, enter to replace)" else "Device token") },
+            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TrainingSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var days by remember { mutableStateOf(r.runningDays.toSet()) }
+    var goalType by remember { mutableStateOf(r.goalType) }
+    var goal by remember { mutableStateOf(r.goal ?: "") }
+    var minutes by remember { mutableStateOf(r.availableMinutes?.toString() ?: "") }
+    var weekStart by remember { mutableStateOf(r.weekStartDay) }
+    var zones by remember { mutableStateOf(r.hrZoneSource) }
+    var tz by remember { mutableStateOf(r.timezone) }
+    val phoneTz = java.time.ZoneId.systemDefault().id
+    val tzOk = runCatching { java.time.ZoneId.of(tz.trim()) }.isSuccess
+    val edited = r.copy(runningDays = days.sorted(), goalType = goalType, goal = goal.ifBlank { null }, availableMinutes = minutes.toIntOrNull(),
+        weekStartDay = weekStart, hrZoneSource = zones, timezone = tz.trim())
+    SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose) {
+        Label("Running days")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            DAYS.forEachIndexed { i, d -> FilterChip(i in days, { days = if (i in days) days - i else days + i }, { Text(d) }) }
+        }
+        Label("Main goal", "Orders the weekly focus suggestions.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            GOALS.forEach { (k, l) -> FilterChip(goalType == k, { goalType = if (goalType == k) null else k }, { Text(l) }) }
+        }
+        OutlinedTextField(goal, { goal = it.take(200) }, label = { Text("Goal in your words (optional)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, label = { Text("Usual time per run (min)") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+        Label("Week starts on", if (weekStart == null) "Now: ${r.weekStartEffective.replaceFirstChar(Char::uppercase)} (from Garmin, or Monday)."
+            else "Used for weekly reviews, the weekly focus, Activities and charts.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
+                .forEach { (k, l) -> FilterChip(weekStart == k, { weekStart = k }, { Text(l) }) }
+        }
+        Label("Heart-rate zones")
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            listOf("garmin" to "From Garmin", "none" to "Don't use").forEachIndexed { i, (k, l) ->
+                SegmentedButton(zones == k, { zones = k }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
+            }
+        }
+        Label("Time zone", "Decides when your day starts and ends.")
+        OutlinedTextField(tz, { tz = it }, singleLine = true, isError = !tzOk, modifier = Modifier.fillMaxWidth(),
+            supportingText = { if (!tzOk) Text("Not a time zone name, e.g. Europe/London") })
+        if (tz.trim() != phoneTz) TextButton(onClick = { tz = phoneTz }) { Text("Use this phone's ($phoneTz)") }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun RaceSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var dist by remember { mutableStateOf(r.raceDistance) }
+    var date by remember { mutableStateOf(r.raceDate) }
+    var name by remember { mutableStateOf(r.raceName ?: "") }
+    val t0 = r.raceTargetS ?: 0
+    var h by remember { mutableStateOf(if (r.raceTargetS != null) "${t0 / 3600}" else "") }
+    var m by remember { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 3600 / 60) else "") }
+    var s by remember { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 60) else "") }
+    var picking by remember { mutableStateOf(false) }
+    val target = if (h.isBlank() && m.isBlank() && s.isBlank()) null
+        else ((h.toIntOrNull() ?: 0) * 3600 + (m.toIntOrNull() ?: 0) * 60 + (s.toIntOrNull() ?: 0)).takeIf { (m.toIntOrNull() ?: 0) < 60 && (s.toIntOrNull() ?: 0) < 60 && it in 600..36000 }
+    val targetOk = (h.isBlank() && m.isBlank() && s.isBlank()) || target != null
+    val edited = r.copy(raceDistance = dist, raceDate = date, raceName = name.trim().ifBlank { null }, raceTargetS = target)
+    SectionSheet("Race", dirty = edited != r, canSave = !busy && targetOk && ((date == null) == (dist == null)), onSave = { onSave(edited) }, onClose = onClose) {
+        Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Label("Distance")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            RACES.forEach { (k, l) -> FilterChip(dist == k, { dist = if (dist == k) null else k }, { Text(l) }) }
+        }
+        Label("Date")
+        OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(date?.let { Format.longDate(it) } ?: "Choose the race date")
+        }
+        if ((date == null) != (dist == null)) Text("Set both a distance and a date, or neither", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+        Label("Target time (optional)")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(Triple(h, "h") { v: String -> h = v }, Triple(m, "min") { v: String -> m = v }, Triple(s, "s") { v: String -> s = v })
+                .forEach { (v, l, set) ->
+                    OutlinedTextField(v, { set(it.filter(Char::isDigit).take(2)) }, label = { Text(l) }, singleLine = true, isError = !targetOk,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+        }
+        OutlinedTextField(name, { name = it.take(60) }, label = { Text("Race name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (dist != null || date != null) TextButton(onClick = { dist = null; date = null; h = ""; m = ""; s = ""; name = "" }) { Text("Remove race") }
+    }
+    if (picking) DateDialog(date, future = true, onClose = { picking = false }) { date = it; picking = false }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AboutYouSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var sex by remember { mutableStateOf(r.profileSex) }
+    var birth by remember { mutableStateOf(r.profileBirthDate) }
+    var picking by remember { mutableStateOf(false) }
+    val edited = r.copy(profileSex = sex, profileBirthDate = birth)
+    SectionSheet("About you", dirty = edited != r, canSave = !busy, onSave = { onSave(edited) }, onClose = onClose) {
+        val det = r.profileDetected
+        Text(if (det?.sex != null || det?.birthDate != null) "From Garmin: ${listOfNotNull(det.sex, det.birthDate).joinToString(", ")}. Set these only to override Garmin."
+            else "Garmin didn't provide these; set them to see age and sex comparisons.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Label("Sex")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(null to "As in Garmin", "male" to "Male", "female" to "Female").forEach { (k, l) -> FilterChip(sex == k, { sex = k }, { Text(l) }) }
+        }
+        Label("Birth date")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f)) { Text(birth?.let { Format.longDate(it) } ?: "As in Garmin") }
+            if (birth != null) TextButton(onClick = { birth = null }) { Text("Use Garmin's") }
+        }
+    }
+    if (picking) DateDialog(birth ?: "1985-01-01", future = false, onClose = { picking = false }) { birth = it; picking = false }
+}
+
+@Composable
+private fun WindowSheet(r: SettingsDto, busy: Boolean, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var start by remember { mutableStateOf(r.morningWindowStart) }
+    var end by remember { mutableStateOf(r.morningWindowEnd) }
+    var picking by remember { mutableStateOf<String?>(null) }
+    val edited = r.copy(morningWindowStart = start, morningWindowEnd = end)
+    SectionSheet("Morning window", dirty = edited != r, canSave = !busy && start < end, onSave = { onSave(edited) }, onClose = onClose) {
+        Text("The briefing is sent once your sleep has synced, or at the end of the window as provisional.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { picking = "start" }, modifier = Modifier.weight(1f)) { Text("From $start") }
+            OutlinedButton(onClick = { picking = "end" }, modifier = Modifier.weight(1f)) { Text("Until $end") }
+        }
+        if (start >= end) Text("The window has to end after it starts", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    }
+    picking?.let { which ->
+        TimeDialog(if (which == "start") start else end, onClose = { picking = null }) { v -> if (which == "start") start = v else end = v; picking = null }
+    }
+}
+
+@Composable
+private fun ModelDialog(r: SettingsDto, ownKey: Boolean, onClose: () -> Unit, onPick: (String) -> Unit) {
+    var other by remember { mutableStateOf(if (r.aiModel !in r.aiModels) r.aiModel else "") }
+    AlertDialog(onDismissRequest = onClose, title = { Text("AI model") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            r.aiModels.ifEmpty { listOf(r.aiModel) }.forEach { mm ->
+                Row(Modifier.fillMaxWidth().selectable(mm == r.aiModel, role = androidx.compose.ui.semantics.Role.RadioButton) { onPick(mm) }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(selected = mm == r.aiModel, onClick = null)
+                    Spacer(Modifier.width(12.dp)); Text(mm)
+                }
+            }
+            // Any other model only runs on your own key; the server's key runs the list above
+            if (ownKey) OutlinedTextField(other, { other = it.trim() }, label = { Text("Another model (your key)") }, singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            else Text("Add your own OpenAI key to use other models.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }, confirmButton = { if (ownKey) TextButton(onClick = { onPick(other) }, enabled = Regex("^[A-Za-z0-9._:\\-]{1,64}$").matches(other)) { Text("Use") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Close") } })
+}
+
+@Composable
+private fun KeySheet(ownKey: Boolean, onClose: () -> Unit, onSave: (String?) -> Unit) {
+    var key by remember { mutableStateOf("") }
+    SectionSheet("Your own OpenAI key", dirty = key.isNotBlank(), canSave = key.startsWith("sk-"), onSave = { onSave(key) }, onClose = onClose) {
+        Text("Encrypted on this phone and sent only with AI requests. The server uses it for that request and never stores it.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(key, { key = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text(if (ownKey) "Saved · enter a new key to replace" else "sk-…") }, visualTransformation = PasswordVisualTransformation())
+        if (ownKey) TextButton(onClick = { onSave(null) }) { Text("Remove saved key") }
+    }
+}
+
+/** A Material date picker for a "YYYY-MM-DD" value. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateDialog(value: String?, future: Boolean, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val start = value?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+    val today = java.time.LocalDate.now()
+    val state = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = start?.atStartOfDay(java.time.ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                val d = Instant.ofEpochMilli(utcTimeMillis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                return if (future) !d.isBefore(today.minusDays(30)) else d.isBefore(today)
+            }
+        })
+    androidx.compose.material3.DatePickerDialog(onDismissRequest = onClose,
+        confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { ms ->
+            onPick(Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()) } }, enabled = state.selectedDateMillis != null) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } }) {
+        androidx.compose.material3.DatePicker(state)
+    }
+}
+
+/** A Material time picker for an "HH:MM" value. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeDialog(value: String, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val (h0, m0) = value.split(":").let { (it.getOrNull(0)?.toIntOrNull() ?: 6) to (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+    val state = androidx.compose.material3.rememberTimePickerState(initialHour = h0, initialMinute = m0, is24Hour = true)
+    AlertDialog(onDismissRequest = onClose, text = { androidx.compose.material3.TimePicker(state) },
+        confirmButton = { TextButton(onClick = { onPick("%02d:%02d".format(state.hour, state.minute)) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } })
 }

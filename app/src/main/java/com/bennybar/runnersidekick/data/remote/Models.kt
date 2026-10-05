@@ -494,6 +494,8 @@ data class SettingsDto(
     @SerialName("race_name") val raceName: String? = null,
     @SerialName("week_start_day") val weekStartDay: String? = null,
     @SerialName("week_start_effective") val weekStartEffective: String = "monday",
+    /** Models the server's key may run (read-only; your own key may use any) */
+    @SerialName("ai_models") val aiModels: List<String> = emptyList(),
 )
 
 @Serializable
