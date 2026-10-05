@@ -418,7 +418,7 @@ private fun RunHero(r: PostRunReport, units: Units) {
                     row.forEach { (v, l) ->
                         Column(Modifier.weight(1f).fillMaxHeight().background(hero.tile, RoundedCornerShape(18.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
                             Text(v, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-                            Text(l, style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.85f))
+                            Text(l, style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.85f), minLines = 2, maxLines = 2)
                         }
                     }
                 }
@@ -435,18 +435,18 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
     Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DecouplingTitle(cs.onSurface)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct to "power:HR · best on hills").forEach { (v, l) ->
-                    Column(Modifier.weight(1f).background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                listOf(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct to "power:HR").forEach { (v, l) ->
+                    Column(Modifier.weight(1f).fillMaxHeight().background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {
                         Text(v?.let { "%.1f%%".format(it) } ?: "—", style = MaterialTheme.typography.headlineMedium, color = cs.onSecondaryContainer)
-                        Text(if (v == null && l.startsWith("power")) "no power recorded" else l, style = MaterialTheme.typography.labelMedium,
-                            color = cs.onSecondaryContainer.copy(alpha = 0.85f))
+                        Text(if (v == null && l.startsWith("power")) "no power" else l, style = MaterialTheme.typography.labelMedium,
+                            color = cs.onSecondaryContainer.copy(alpha = 0.85f), maxLines = 1)
                     }
                 }
             }
             Text(if (!dc.eligible) "Indicative here: " + (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady"
                 else dc.reasons.firstOrNull() ?: "not a steady run") + "."
-                else "Under 5% means heart rate kept pace with the effort. Lower is better.",
+                else "Under 5% means heart rate kept pace with the effort. Lower is better; on hills, power:HR is the better read.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }

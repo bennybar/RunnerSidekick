@@ -332,6 +332,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Run screen alignment (2026-10-05, v0.35.1)
+- Run header: every tile label takes two lines, so all six tiles are the same height. Aerobic decoupling: one-line
+  labels and equal-height tiles; the "power:HR on hills" note moved to the line below.
+
 ## One decision policy, coverage, race week, "Not feeling well" (2026-10-05, v0.35.0)
 From the v0.34.1 review:
 - One policy decides what today allows (rest, easy, steady, hard: `decide.allows`), and both the readiness headline
