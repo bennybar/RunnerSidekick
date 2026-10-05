@@ -72,6 +72,7 @@ def test_no_score_without_overnight_data_and_pain_overrides(monkeypatch):
     monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: None)
     monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.0, "fatigue": 0.0, "left_now": 0.5, "left_usual": 0.5, "last_when": None})
+    monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: None)
     assert rd.build(None, "x", TODAY, morning())["status"] == "unavailable"  # load and recovery alone aren't enough
     ok = rd.build(None, "x", TODAY, morning(sleep_h=8))
     assert ok["status"] == "ok" and ok["score"] == 100
@@ -118,3 +119,36 @@ def test_runs_are_found_by_local_date_and_end_on_elapsed_time(monkeypatch):
                  "start_utc": (at - timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%SZ")})
     monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: runs)
     assert rd.training_load(None, "x", at, None)["last_when"] != "today"
+
+
+def test_the_weakest_part_caps_the_score_closer(monkeypatch):
+    # The morning after a threshold run: HRV, resting HR and sleep normal, load 122% of usual, recovery 45 points
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd, "moment", lambda conn, d: None)
+    monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: {"score": 1, "level": "poor", "recovery_hours": 52})
+    monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.22, "fatigue": 0.68, "left_now": 1.19, "left_usual": 0.5,
+                                                                      "last_when": "yesterday"})
+    r = rd.build(None, "x", TODAY, morning(sleep_h=7.1))
+    rec = next(p for p in r["components"] if p["id"] == "recovery")["points"]
+    assert r["score"] == rec + rd.CAP_ABOVE_LOWEST and r["label"] == "Moderate" and r["garmin"]["recovery_hours"] == 52
+
+
+def test_garmin_recovery_timer_holds_intensity_back():
+    from sidekick import decide
+    rec = {"rule_id": "R5", "state": "usual_plan"}
+    assert decide.hold_reason(rec, {"score": 80, "garmin": {"recovery_hours": 52}}).startswith("Garmin's recovery timer")
+    assert decide.hold_reason(rec, {"score": 80, "garmin": {"recovery_hours": 10}}) is None
+    assert decide.hold_reason(rec, {"score": 80, "garmin": None}) is None
+
+
+def test_garmin_check_counts_down_the_recovery_timer():
+    from datetime import datetime, timezone
+
+    class Raw:
+        def find_one(self, q, *a, **k):
+            return {"payload": {"score": 1, "level": "POOR", "recoveryTime": 3142, "timestamp": "2026-10-02T03:45:33.0"}}
+
+    class Conn:
+        raw_payload = Raw()
+    g = rd.garmin_check(Conn(), "garmin", TODAY, datetime(2026, 10, 2, 13, 45, 33, tzinfo=timezone.utc))
+    assert g == {"score": 1, "level": "poor", "recovery_hours": 42}  # 52 h at 03:45 UTC, ten hours later

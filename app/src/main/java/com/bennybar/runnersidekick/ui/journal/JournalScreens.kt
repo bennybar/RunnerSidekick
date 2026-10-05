@@ -82,7 +82,7 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
         topBar = { LargeTopAppBar(title = { Text("Journal") }, scrollBehavior = scroll) },
     ) { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // The app no longer asks for check-ins; the tab only stays for people who logged some earlier
                 if (checkins.isNotEmpty()) item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

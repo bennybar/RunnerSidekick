@@ -11,9 +11,10 @@ from zoneinfo import ZoneInfo
 from statistics import median
 
 from . import reports as rp
+from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.2"  # 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.3"  # 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -21,7 +22,9 @@ ZONE_WEIGHT = [0.5, 1, 2, 3, 4, 5]
 ACUTE_DAYS, CHRONIC_DAYS, RECOVERY_HOURS = 7, 28, 48
 LOAD_OK, LOAD_SLOPE = 1.1, 160      # acute/chronic up to 1.1 scores 100; 1.35 → 60; 1.6 → 20
 RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining effort / typical run)
-CAP_ABOVE_LOWEST = 40  # the score is never more than 40 points above its weakest part
+CAP_ABOVE_LOWEST = 25  # the score is never more than 25 points above its weakest part (40 let 82 "High" through the
+                       # morning after a threshold run with recovery at 45)
+GARMIN_HOLD_HOURS = 24  # Garmin's recovery timer at or above this holds intensity back (a cross-check, not in the score)
 HARD_SHARE = 0.3
 OVERNIGHT = {"hrv", "resting_hr", "sleep"}
 PAIN_CAP = 35  # reported pain or illness: never above this  # a run with at least 30% of its time in zones 4–5 counts as hard
@@ -134,6 +137,22 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
             "last_when": "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago" if days < 7 else None}
 
 
+def garmin_check(conn, source: str, today: date, at: datetime | None) -> dict | None:
+    """Garmin's own training readiness for the day and what's left on its recovery timer now, for comparison and as a
+    safety cross-check. None when Garmin sent nothing for the day."""
+    raw = one(conn.raw_payload, {"source": source, "kind": "training_readiness", "source_key": today.isoformat()})
+    p = (raw or {}).get("payload")
+    p = p[0] if isinstance(p, list) and p else p
+    if not isinstance(p, dict) or p.get("score") is None:
+        return None
+    left = None
+    if p.get("recoveryTime") is not None and p.get("timestamp") and at is not None:
+        stamp = datetime.fromisoformat(p["timestamp"].split(".")[0]).replace(tzinfo=timezone.utc)
+        left = max(0.0, p["recoveryTime"] / 60 - (at - stamp).total_seconds() / 3600)
+    return {"score": p["score"], "level": (p.get("level") or "").replace("_", " ").lower() or None,
+            "recovery_hours": round(left) if left is not None else None}
+
+
 def build(conn, source: str, today: date, morning: dict) -> dict:
     by = {f["metric"]: f for f in morning["findings"]}
     zones = rp.hr_zones(conn)
@@ -219,9 +238,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         if morning["recommendation"]["rule_id"] == "R0":
             # Reported pain or illness overrides every reading
             out.update(score=min(out["score"], PAIN_CAP), label="Low", headline="Take it easy or rest", held_back_by="What you reported")
-    out.update(algorithm_version=READINESS_VERSION,
-               basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 40 points "
-                     "above it. A guide, not a medical score.")
+    out.update(algorithm_version=READINESS_VERSION, garmin=garmin_check(conn, source, today, at),
+               basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 25 points "
+                     "above it. Garmin's recovery timer is a separate cross-check: while it shows a day or more, nothing harder "
+                     "than easy. A guide, not a medical score.")
     return out
 
 

@@ -139,8 +139,8 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             // A floating, rounded bar over the page background
-            if (onTab) androidx.compose.foundation.layout.Box(Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surface)
-                .navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
+            // Transparent around the pill, so the page shows (and scrolls) underneath it
+            if (onTab) androidx.compose.foundation.layout.Box(Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
                 androidx.compose.material3.Surface(shape = androidx.compose.material3.MaterialTheme.shapes.large,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, shadowElevation = 2.dp) {
                     ShortNavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, windowInsets = WindowInsets(0, 0, 0, 0)) {
@@ -156,6 +156,7 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             }
         },
     ) { padding ->
+        androidx.compose.runtime.CompositionLocalProvider(com.bennybar.runnersidekick.ui.components.LocalNavBarPadding provides padding.calculateBottomPadding()) {
         NavHost(nav, startDestination = "today",
             enterTransition = { quickIn },
             exitTransition = { quickOut },
@@ -163,7 +164,7 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             popExitTransition = { quickOut },
             predictivePopEnterTransition = { _ -> quickIn },
             predictivePopExitTransition = { _ -> quickOut },
-            modifier = Modifier.padding(bottom = padding.calculateBottomPadding()).consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
+            modifier = Modifier.consumeWindowInsets(PaddingValues(bottom = padding.calculateBottomPadding()))) {
             composable("today") {
                 TodayScreen(onOpenRun = { nav.navigate("activity/$it") }, onOpenSettings = { go("settings") }, onOpenInsights = { go("insights") })
             }
@@ -184,6 +185,7 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
                         onOpenReport = { id -> nav.navigate("report/$id") })
                 }
             }
+        }
         }
     }
 }

@@ -240,7 +240,11 @@ data class Score(val status: String, val score: Int? = null, val label: String? 
                  @SerialName("capped_by") val cappedBy: String? = null, val headline: String? = null,
                  @SerialName("held_back_by") val heldBackBy: String? = null, val missing: List<String> = emptyList(),
                  val trend: ScoreTrend? = null, val improve: List<ScoreStep> = emptyList(), val stale: Boolean = false,
-                 val progress: FitnessProgress? = null)
+                 val progress: FitnessProgress? = null, val garmin: GarminReadiness? = null)
+
+/** Garmin's own training readiness and what's left on its recovery timer: shown beside ours, and a cross-check. */
+@Serializable
+data class GarminReadiness(val score: Int, val level: String? = null, @SerialName("recovery_hours") val recoveryHours: Int? = null)
 
 /** Is fitness improving? Three separate signals (aerobic estimate, efficiency, durability), not averaged into the score. */
 @Serializable

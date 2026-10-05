@@ -496,8 +496,12 @@ Open-Meteo, looked up on export only: the start position rounded to 0.01° and t
 forecast API for the last 30 days, the historical (reanalysis) API before that. Kept with the run; a failed lookup is
 retried after a day. Always labelled as an estimate, never as watch data.
 
-## Readiness recovery — `readiness.py` (`readiness-1.2`)
+## Readiness recovery — `readiness.py` (`readiness-1.3`)
 
 Effort left = each finished run's load fading with a 48-hour time constant. What counts is the effort left now above
 the median left at the same time of day over the last 28 days, as a share of your typical run: a regular routine is
 your normal. Runs are found by the local calendar day and end at start + elapsed time.
+
+The overall readiness score is never more than 25 points above its weakest part. Garmin's recovery timer (from its
+morning training readiness, counted down to now) isn't in the score; at 24 h or more it holds intensity back in
+`decide.hold_reason`.

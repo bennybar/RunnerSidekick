@@ -176,7 +176,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
         topBar = { LargeTopAppBar(title = { Text("Settings") }, scrollBehavior = scroll, actions = { if (status?.value?.synthetic == true) DemoBadge() }) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
+        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
             verticalArrangement = Arrangement.spacedBy(20.dp)) {
             item {
                 val s = status?.value

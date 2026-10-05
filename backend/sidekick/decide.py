@@ -23,6 +23,9 @@ def hold_reason(rec: dict, ready: dict) -> str | None:
         return "readiness isn't known yet"
     if score < HOLD_BELOW:
         return "readiness is low for anything harder"
+    g = ready.get("garmin") or {}
+    if (g.get("recovery_hours") or 0) >= rd.GARMIN_HOLD_HOURS:
+        return f"Garmin's recovery timer still shows about {g['recovery_hours']} h"
     return None
 
 

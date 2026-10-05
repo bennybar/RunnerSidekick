@@ -139,15 +139,15 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 NoReport(busy, settings?.hasToken == false, onOpenSettings)
                 return@RefreshBox
             }
-            LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 112.dp),
+            LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
-                // Readiness and the next run answer "what should I do today" first; the details and what changed sit behind a tap
+                // Readiness first, then health and fitness, then the next run; the details and what changed sit behind a tap
                 report.readiness?.let { r -> animatedItem(key = "readiness") { ReadinessCard(r) { sheet = "readiness" } } }
-                report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
+                report.nextRun?.let { n -> animatedItem(key = "nextrun") { NextRunCard(n, units) } }
                 val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
@@ -590,6 +590,14 @@ private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, cha
         s.headline?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
         Group {
             s.components.forEach { c -> row(c.title, supporting = c.say ?: c.value, trailing = { VerdictChip(c.verdict) }) }
+        }
+        // Garmin's own number, side by side: it weighs its recovery timer much more heavily than ours does
+        s.garmin?.let { g ->
+            Group(title = "Garmin's training readiness") {
+                row("${g.score}" + (g.level?.let { " · $it" } ?: ""), supporting = g.recoveryHours?.let {
+                    if (it > 0) "Recovery timer: about $it h left" + if (it >= 24) " · nothing harder than easy until it's under a day" else ""
+                    else "Recovery timer: done" } ?: "Calculated by Garmin")
+            }
         }
         if (changes.isNotEmpty()) Group(title = "Since yesterday") { changes.forEach { c -> row(c) } }
         Text("Calculated from your own data, not Garmin's. A guide, not medical advice.", style = MaterialTheme.typography.bodySmall,

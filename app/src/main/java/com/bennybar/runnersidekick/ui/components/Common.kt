@@ -218,3 +218,7 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
             state = state, isRefreshing = false, modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter))
     }, content = content)
 }
+
+
+/** Room for the floating navigation bar at the bottom of a tab's list: tab pages scroll underneath it. */
+val LocalNavBarPadding = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
