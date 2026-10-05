@@ -130,9 +130,14 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
     days = [ws + timedelta(days=k) for k in range(7)]
     run_days = [d for d in days if d.weekday() in get_setting(conn, "running_days", [0, 2, 4, 5])]
     race_day = date.fromisoformat(st["date"])
+    # The last four weeks, leaving out weeks before synced history began (unknown, not rest); a week with no running
+    # after that is a real break and counts as zero
+    from .scores import history_start
+    began = history_start(conn, source)
     past = [sum(a["moving_s"] or 0 for a in rp.activities(conn, source, (ws - timedelta(days=7 * k)).isoformat(),
-                                                           (ws - timedelta(days=7 * k - 6)).isoformat())) for k in range(1, 5)]
-    ran_weeks = sorted(v for v in past if v > 0)  # weeks without running (e.g. a watch gap) don't count as "typical"
+                                                           (ws - timedelta(days=7 * k - 6)).isoformat()))
+            for k in range(1, 5) if began and ws - timedelta(days=7 * k - 6) >= began]
+    ran_weeks = sorted(past)
     recent = ran_weeks[len(ran_weeks) // 2] if ran_weeks else 0
     g = get_setting(conn, "garmin_fitness", None) or {}
     ts = g.get("training_status") or {}

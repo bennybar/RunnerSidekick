@@ -667,6 +667,12 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
 
 # ---------------------------------------------------------------- insights
 
+def pattern_key(i: dict) -> tuple[str, str]:
+    """An insight's verdict and which way it points: its headline with the numbers masked ("Faster at the same heart rate:
+    about # s/km per month" and "Slower at the same heart rate recently" are both patterns, but not the same one)."""
+    return i["verdict"], re.sub(r"[\d.,]+", "#", i.get("headline") or "")
+
+
 def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
     from datetime import datetime as _dt
     from .analytics import insights as ins
@@ -692,11 +698,12 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
         bedtimes[r["wake_date"]] = st.hour + st.minute / 60 + (24 if st.hour < 12 else 0)
     zones = hr_zones(conn)
     items = ins.compute_all(runs, obs, bedtimes, zones, drifts, today, first_weekday(conn))
-    # Confidence: a pattern is "consistent" only if an insights report from >= 14 days earlier reached the same verdict.
+    # Confidence: "consistent" only if an insights report from >= 14 days earlier reached the same verdict pointing the
+    # same way ("faster" vs "slower" are both patterns): the headline with its numbers masked is that direction
     prev = latest_body(conn, "insights", {"local_date": {"$lte": (today - timedelta(days=14)).isoformat()}})
-    prev_v = {i["id"]: i["verdict"] for i in prev["insights"]} if prev else {}
+    prev_v = {i["id"]: pattern_key(i) for i in prev["insights"]} if prev else {}
     for i in items:
-        i["confidence"] = None if i["verdict"] == "not_enough_data" else ("consistent" if prev_v.get(i["id"]) == i["verdict"] else "emerging")
+        i["confidence"] = None if i["verdict"] == "not_enough_data" else ("consistent" if prev_v.get(i["id"]) == pattern_key(i) else "emerging")
     # Novelty vs the most recent earlier snapshot, and the runner's own dismissals / "working on it"
     last = latest_body(conn, "insights", {"local_date": {"$lt": today.isoformat()}})
     last_i = {i["id"]: i for i in last["insights"]} if last else {}

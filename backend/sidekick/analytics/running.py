@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.5"  # 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.6"  # 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -336,7 +336,7 @@ def split_details(s: Samples | None, laps: list[dict], floors: list[float] | Non
         idx = [i for i, t in enumerate(s.t) if t_start <= t < t_end and w[i] > 0]
         tw = sum(w[i] for i in idx)
         gsp = sum(w[i] * gap[i] for i in idx if gap[i]) / tw if tw else None
-        cads = [s.cad[i] for i in idx if s.cad[i]]
+        cads = [(w[i], s.cad[i]) for i in idx if s.cad[i]]  # time-weighted, so irregular sampling doesn't tilt it
         zone = None
         if floors and idx:
             zt = [0.0] * 6
@@ -346,7 +346,7 @@ def split_details(s: Samples | None, laps: list[dict], floors: list[float] | Non
                     zt[sum(1 for f in floors if h >= f)] += w[i]
             zone = max(range(6), key=lambda k: zt[k]) if sum(zt) else None
         out.append({"idx": lap["idx"], "gap_pace_s_per_km": round(1000.0 / gsp, 1) if gsp else None,
-                    "cadence_spm": round(sum(cads) / len(cads)) if cads else None, "zone": zone,
+                    "cadence_spm": round(sum(a * c for a, c in cads) / sum(a for a, _ in cads)) if cads else None, "zone": zone,
                     "elevation_loss_m": lap.get("elevation_loss_m")})
         t_start = t_end
     return out

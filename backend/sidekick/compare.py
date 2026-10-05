@@ -278,6 +278,10 @@ def build(conn, source: str, today: date) -> dict:
     if missing:
         return out
     g = rp.get_setting(conn, "garmin_fitness", None) or {}
+    # The same VO2 max as the Fitness score: the newest dated reading, nothing older than the score allows
+    from .scores import vo2_on
+    now = vo2_on(conn, source, today, today)
+    g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None}
     vo2 = vo2_item(p["sex"], p["age"], g)
     out["items"] = [vo2, fitness_age_item(p["age"], g, vo2), rhr_item(conn, source, p["sex"], p["age"], today),
                     age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]

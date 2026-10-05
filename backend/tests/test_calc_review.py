@@ -126,3 +126,47 @@ def test_an_even_pace_over_noisy_elevation_is_steady():
     assert rn.speed_cv(graded) > rn.STEADY_MAX_CV  # what made runs "not steady" before
     assert rn.classify(graded, [], s)["kind"] == "steady"
     assert rn.decoupling(s, [], 8100.0, 20.0)["eligible"]
+
+
+def test_insight_confidence_needs_the_same_direction():
+    up = {"verdict": "pattern", "headline": "Faster at the same heart rate: about 6 s/km per month"}
+    up2 = {"verdict": "pattern", "headline": "Faster at the same heart rate: about 9 s/km per month"}
+    down = {"verdict": "pattern", "headline": "Slower at the same heart rate recently"}
+    assert rp.pattern_key(up) == rp.pattern_key(up2) and rp.pattern_key(up) != rp.pattern_key(down)
+
+
+def test_compare_uses_the_same_dated_vo2_as_fitness(monkeypatch):
+    from sidekick import compare
+    from sidekick.db import set_setting
+    conn = synced()
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 52.0, "date": "2026-05-01"}})  # an old snapshot
+    monkeypatch.setattr("sidekick.scores.vo2_on", lambda c, s, d, t: None)
+    item = next(i for i in compare.build(conn, "fixture", ANCHOR)["items"] if i["id"] == "vo2max")
+    assert item["status"] == "unavailable"
+    monkeypatch.setattr("sidekick.scores.vo2_on", lambda c, s, d, t: (47.0, ANCHOR))
+    assert "47" in str(next(i for i in compare.build(conn, "fixture", ANCHOR)["items"] if i["id"] == "vo2max"))
+
+
+def test_race_baseline_skips_unknown_weeks_but_counts_real_breaks(monkeypatch):
+    conn = synced()
+    set_race(conn, 60)
+    full = race.week_plan(conn, "fixture", ANCHOR)["target_minutes"]
+    # History starting last week: only that week is known, so it alone is the baseline
+    monkeypatch.setattr("sidekick.scores.history_start", lambda c, s: date(2026, 9, 21))
+    last_week = sum(a["moving_s"] or 0 for a in rp.activities(conn, "fixture", "2026-09-21", "2026-09-27"))
+    w = race.week_plan(conn, "fixture", ANCHOR)
+    assert abs(w["target_minutes"] * 60 - last_week * race.VOLUME_FACTOR["build"]) < 60 and full is not None
+    # A week with no running inside known history is a real break and lowers the baseline
+    monkeypatch.setattr("sidekick.scores.history_start", lambda c, s: date(2026, 1, 1))
+    conn.activity.delete_many({"local_date": {"$gte": "2026-09-14", "$lte": "2026-09-20"}})
+    conn.activity.delete_many({"local_date": {"$gte": "2026-09-07", "$lte": "2026-09-13"}})
+    assert race.week_plan(conn, "fixture", ANCHOR)["target_minutes"] < full
+
+
+def test_split_cadence_is_time_weighted():
+    # 1 s samples at 160 spm for 3 minutes, then 10 s samples at 180 spm for a minute: 3/4 of the time at 160
+    t = [float(i) for i in range(180)] + [180.0 + 10 * k for k in range(1, 7)]
+    n = len(t)
+    s = Samples(t, [150.0] * n, [3.0] * n, [3.0 * x for x in t], [10.0] * n, [160.0] * 180 + [180.0] * 6)
+    d = rn.split_details(s, [{"idx": 0, "elapsed_s": 250.0}], None)
+    assert 164 <= d[0]["cadence_spm"] <= 165  # an unweighted mean of the samples would say 161

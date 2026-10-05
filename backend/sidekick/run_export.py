@@ -101,7 +101,8 @@ def halves(s, values: list | None) -> tuple[float, float] | None:
 
 
 def minute_table(conn, a: dict) -> list[str]:
-    """One row per minute: distance, pace over that minute, average heart rate, cadence, power and elevation."""
+    """One row per minute: distance, pace over that minute, average heart rate, cadence, power and elevation. Averages are
+    time-weighted (pace, cadence and power over moving time only), so irregular sampling doesn't tilt them."""
     s = rp.samples_for(conn, a["id"])
     if s is None or not s.t:
         return []
@@ -113,17 +114,22 @@ def minute_table(conn, a: dict) -> list[str]:
     for i, t in enumerate(s.t):
         buckets.setdefault(int((t - t0) // 60), []).append(i)
 
-    def mean(xs):
-        xs = [x for x in xs if x is not None]
-        return sum(xs) / len(xs) if xs else None
+    from .analytics.running import _weights
+    moving = _weights(s)
+    held = [min(s.t[i + 1] - s.t[i], 10.0) if i + 1 < len(s.t) else 1.0 for i in range(len(s.t))]  # how long each sample stands for
+
+    def mean(values, idx, w):
+        pts = [(w[i], values[i]) for i in idx if values[i] is not None and w[i] > 0]
+        tw = sum(a for a, _ in pts)
+        return sum(a * v for a, v in pts) / tw if tw else None
     for m in sorted(buckets):
         idx = buckets[m]
         d = [s.dist[i] for i in idx if s.dist[i] is not None]
-        spd = mean([s.speed[i] for i in idx])
+        spd = mean(s.speed, idx, moving)
         rows.append(f"| {m + 1} | {num(d[-1] / 1000 if d else None, '{:.2f}')} | {pace(1000 / spd if spd else None)} | "
-                    f"{num(mean([s.hr[i] for i in idx]))} | {num(mean([s.cad[i] for i in idx]))} | "
-                    + (f"{num(mean([s.power[i] for i in idx]), unit=' W')} | " if power else "")
-                    + f"{num(mean([s.elev[i] for i in idx]), '{:.0f}', ' m')} |")
+                    f"{num(mean(s.hr, idx, held))} | {num(mean(s.cad, idx, moving))} | "
+                    + (f"{num(mean(s.power, idx, moving), unit=' W')} | " if power else "")
+                    + f"{num(mean(s.elev, idx, held), '{:.0f}', ' m')} |")
     return rows
 
 

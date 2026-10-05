@@ -332,6 +332,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Remaining review items (2026-10-05, v0.32.1)
+- Compare uses the same dated VO₂ reading as the Fitness score (`scores.vo2_on`), not Garmin's raw snapshot.
+- Race-week baseline: weeks before synced history are left out; a week with no running after that counts as a break.
+- Time-weighted averages: the export's minute table (pace, cadence, power over moving time; HR and elevation over time)
+  and split cadence (running-1.6).
+- Insight confidence: "consistent" needs the earlier verdict to point the same way (`reports.pattern_key`).
+
 ## Redesign B, "Expressive Tonal" (2026-10-05, v0.32.0)
 - Theme: a fixed deep-green and coral palette on a sage background with white cards (light and dark); dynamic
   wallpaper colours are off. Fonts: Unbounded for numbers and headlines, Plus Jakarta Sans for text (both bundled,
