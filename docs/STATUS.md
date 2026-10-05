@@ -332,6 +332,21 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Re-review fixes (2026-10-05, v0.40.1)
+- Sync: a day Garmin can't read is skipped for real (days are read lazily, so the guard now covers the reading), and
+  the backfill goes day by day past it instead of failing every hour. A sync only frees its own lease.
+- Readiness: back to comparing leftover effort with the usual of all recent days, so the day after a weekly long run
+  or a weekly hard session shows as still recovering; on its own that holds the day to easy (50+), never to rest
+  (readiness-1.5).
+- Hill adjustment: gentle linear rules on shallow grades (about 3.5% harder per 1% up, 2% easier per 1% down, at most
+  15%), never more than Minetti; the weekly focus and the run's pacing finding use the one fade (running-1.8).
+- Garmin linking is finished by the app, signed in: the callback page hands Garmin's answer to the app, and the server
+  links it only to the user who started it, so a forwarded link is refused. The hourly AI job uses the allowed models.
+- App: the device token is checked before it's saved; sign-in errors show a message instead of crashing; the time
+  zone step can't block a refresh and resets for a new account; plain error messages; decoding off the main thread;
+  clearer wording when the server's Garmin sign-in expires.
+- Dates outside 2000 to a year ahead are refused (422) before anything changes.
+
 ## Settings redesign (2026-10-05, v0.40.0)
 - Settings is a short list of sections (Account, Appearance, Training, Notifications, AI coach, Your data, About);
   only a Garmin problem shows at the top. Training, Race, About you, the morning window, the server and your own AI key

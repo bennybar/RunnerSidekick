@@ -425,7 +425,9 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     complete = [s for s in splits if s.complete and s.pace_s_per_km]
     if len(complete) >= 4 and an["classification"]["kind"] == "steady":
         paces = [s.pace_s_per_km for s in complete]
-        first, second = rn.halves(paces)  # the app's one definition of the halves (recorded pace here)
+        first, second = rn.halves(paces)  # the app's one definition of the halves; recorded pace for the numbers shown
+        gap = {d["idx"]: d.get("gap_pace_s_per_km") for d in rn.split_details(samples_for(conn, a["id"]), laps, None)}
+        adj = rn.fade([gap.get(s.idx) or s.pace_s_per_km for s in complete])  # and hill-adjusted for the verdict, as everywhere
         cv = pstdev(paces) / (sum(paces) / len(paces))
         findings.append({
             "id": f"r:{sid}:pacing", "category": "running", "metric": "split_consistency", "title": "Pacing",
@@ -434,10 +436,10 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             "comparison": None, "delta": {"abs": round(second - first, 1), "pct": None},
             "status": "info", "priority": 3,
             "statement": (f"Splits varied by {100 * cv:.1f}% (moving pace). "
-                          + (f"Second half was {abs(second - first):.0f} s/km faster than the first." if second < first - 1 else
-                             f"Second half was {abs(second - first):.0f} s/km slower than the first." if second > first + 1 else
+                          + (f"Second half was {abs(adj):.0f} s/km faster than the first (hill-adjusted)." if adj < -rn.FADE_S_PER_KM else
+                             f"Second half was {abs(adj):.0f} s/km slower than the first (hill-adjusted)." if adj > rn.FADE_S_PER_KM else
                              "Both halves were about even.")),
-            "interpretation": "Describes pacing only; terrain and stops are not adjusted for.",
+            "interpretation": "Describes pacing; hills are adjusted for, stops are not.",
             "evidence": {"record_ids": [f"{source}:{sid}:lap{s.idx}" for s in complete], "date_range": [a["local_date"]] * 2},
             "sample_size": len(complete), "coverage": {"complete_splits": len(complete), "total_splits": len(splits)},
             "limitations": ["Incomplete final split excluded."] if len(complete) < len(splits) else [],

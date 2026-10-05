@@ -3,6 +3,8 @@ package com.bennybar.runnersidekick
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import android.os.Bundle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -61,7 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) openRun.value = route(intent)
+        if (savedInstanceState == null) { openRun.value = route(intent); finishGarmin(intent) }
         val repo = (application as RunnerApp).repository
         val progress = repo.progress
         setContent {
@@ -75,6 +77,20 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         route(intent)?.let { openRun.value = it }
+        finishGarmin(intent)
+    }
+
+    /** Garmin's answer, handed over by the server's callback page: finish linking, signed in as this app's user. */
+    private fun finishGarmin(i: android.content.Intent?) {
+        val data = i?.data?.takeIf { it.scheme == "runnersidekick" && it.host == "garmin-callback" } ?: return
+        val state = data.getQueryParameter("state") ?: return
+        val code = data.getQueryParameter("code") ?: return
+        val repo = (application as RunnerApp).repository
+        lifecycleScope.launch {
+            val msg = runCatching { repo.completeGarmin(state, code); "Garmin connected" }
+                .getOrElse { e -> (e as? com.bennybar.runnersidekick.data.remote.ApiException)?.message ?: "Garmin couldn't be connected. Please try again." }
+            android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun route(i: android.content.Intent?): String? = i?.getStringExtra(EXTRA_OPEN_RUN)?.let { "activity/$it" }

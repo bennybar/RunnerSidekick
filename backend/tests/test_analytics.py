@@ -222,14 +222,14 @@ def test_gap_is_faster_uphill_and_unchanged_on_flat():
     assert all(v == pytest.approx(3.0) for v in rn.gap_speeds(flat))
     hill = Samples(t, [150.0] * len(t), [2.5] * len(t), [2.5 * x for x in t], [0.1 * 2.5 * x for x in t], [170.0] * len(t))  # +10%
     g = [v for v in rn.gap_speeds(hill)[20:] if v is not None]
-    assert g and all(v == pytest.approx(2.5 * rn.minetti_cost(0.1) / 3.6, rel=1e-3) for v in g)
+    assert g and all(v == pytest.approx(2.5 * (1 + rn.UPHILL_PER_GRADE * 0.1), rel=1e-3) for v in g)  # the gentle uphill rule
 
 
 def test_drift_on_a_hill_uses_grade_adjusted_speed():
     # Steady effort: slower up the hill in the second half, but grade-adjusted speed and HR constant -> no drift
     t = [float(x) for x in range(0, 4201, 5)]
     grade = [0.0 if x < 2400 else 0.05 for x in t]
-    speed = [3.0 if g == 0 else 3.0 * 3.6 / rn.minetti_cost(0.05) for g in grade]
+    speed = [3.0 if g == 0 else 3.0 / (1 + rn.UPHILL_PER_GRADE * 0.05) for g in grade]
     dist, elev = [0.0], [0.0]
     for k in range(1, len(t)):
         dist.append(dist[-1] + speed[k - 1] * 5)

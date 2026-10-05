@@ -190,7 +190,7 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     Group {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
                             supporting = if (st == "error") (status?.value?.connection?.detail ?: "The last sync failed; it retries on its own.")
-                                else "Garmin asked for a new sign-in. Reconnect it under Account; syncing is paused until then.",
+                                else "The server's Garmin sign-in has expired and has to be renewed there. Syncing is paused until then.",
                             icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
                     }
                 }

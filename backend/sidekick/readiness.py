@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.4"  # 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.5"  # 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -127,11 +127,10 @@ def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict |
 
     def left(when: datetime) -> float:  # effort still fading at `when`, from runs finished by then
         return sum(l * exp(-(when - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads if e <= when)
-    # What's normally still there at this time on this weekday (median of the same weekday over the last 6 weeks): a
-    # steady routine, including a weekly long run, always leaves some, and that's your normal, not unrecovered effort.
-    # Only what's above it counts. With under 3 such weekdays in the history, the last 4 weeks' days instead.
-    same_day = [left(at - timedelta(days=7 * k)) for k in range(1, 7) if at - timedelta(days=7 * k) >= ends[0][0]]
-    usual = median(same_day) if len(same_day) >= 3 else median(left(at - timedelta(days=k)) for k in range(1, 29))
+    # What's normally still there at this time of day (median of the last 4 weeks): a steady routine always leaves some,
+    # and that's your normal. Only what's above it counts, so the day after a long run or a weekly hard session shows as
+    # still recovering (it is) — and alone it can only hold the day to easy (SINGLE_SIGNAL_FLOOR), never to rest.
+    usual = median(left(at - timedelta(days=k)) for k in range(1, 29))
     now = left(at)
     fatigue = max(0.0, now - usual) / typical if typical else 0
     days = (local - ends[-1][0].astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()).days
@@ -232,10 +231,11 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         # One very low part (a big jump in running, a short night) limits the whole score
         low = min(p["points"] for p in parts if p.get("points") is not None)
         cap = low + CAP_ABOVE_LOWEST
-        # One overnight reading on its own (a short night, resting HR a few beats up) is likely noise (as rule R3 says): it
-        # can hold the day to easy, never to rest. Two weak parts, or weak load or recovery, cap as usual.
+        # One weak part on its own (a short night, resting HR a few beats up, or yesterday's long or hard run still
+        # fading) holds the day to easy, never to rest: alone it's likely noise or simply normal recovery. Two weak
+        # parts together cap as usual.
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 60]
-        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT:
+        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT | {"recovery"}:
             cap = max(cap, SINGLE_SIGNAL_FLOOR)
         if out["score"] > cap:
             out["score"], out["capped_by"] = cap, next(p["id"] for p in parts if p.get("points") == low)

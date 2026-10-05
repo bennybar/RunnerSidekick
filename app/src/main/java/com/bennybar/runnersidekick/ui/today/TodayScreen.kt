@@ -266,9 +266,9 @@ private fun Freshness(status: Status?, fetchedAt: Instant?, report: MorningRepor
 @Composable
 private fun ConnectionNotice(state: String, detail: String?, onOpenSettings: () -> Unit) {
     val (title, body) = when (state) {
-        "reauth_required" -> "Garmin needs you to sign in again" to "Reconnect Garmin in Settings. Syncing is paused until then."
+        "reauth_required" -> "Garmin needs signing in again" to "The server's Garmin sign-in has expired and has to be renewed there. Syncing is paused until then."
         "rate_limited" -> "Garmin asked us to slow down" to "Syncing will retry automatically later."
-        "not_configured" -> "Garmin isn't connected" to "Connect Garmin in Settings to start syncing."
+        "not_configured" -> "Garmin isn't connected" to "The server has no Garmin connection yet, so nothing syncs."
         else -> "Last sync failed" to (detail ?: "Will retry later.")
     }
     Group { row(title, supporting = body, icon = Icons.Outlined.LinkOff, iconShape = MaterialShapes.Burst, onClick = onOpenSettings) }

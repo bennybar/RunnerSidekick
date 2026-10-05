@@ -98,6 +98,11 @@ fun SignInScreen() {
                         error = "Google sign-in didn't complete (${e.type.substringAfterLast('.')})."
                     } catch (e: ApiException) {
                         error = e.message
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {  // anything else: a message, never a crash
+                        android.util.Log.e("RunnerSidekick", "Sign-in failed", e)
+                        error = "Sign-in didn't complete. Please try again."
                     } finally {
                         busy = false
                     }
@@ -123,11 +128,19 @@ fun SignInScreen() {
                 scope.launch {
                     busy = true; error = null
                     try {
-                        repo.settings.setBackend(url, token)
-                        repo.refreshAll()
+                        // Checked before it's saved: a token the server rejects is never stored
+                        error = repo.checkToken(url, token)
+                        if (error == null) {
+                            repo.settings.setBackend(url, token)
+                            runCatching { repo.refreshAll() }  // the app opens either way; the screens report their own errors
+                        }
                     } catch (e: ApiException) {
-                        repo.settings.clearToken()
                         error = e.message
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.e("RunnerSidekick", "Connect failed", e)
+                        error = "Couldn't connect. Check the address and token."
                     } finally {
                         busy = false
                     }

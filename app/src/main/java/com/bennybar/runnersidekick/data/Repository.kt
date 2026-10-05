@@ -139,6 +139,19 @@ class Repository(
     }
 
     /** Exchanges a Google ID token for an app token; stores it. Returns an error message, or null on success. */
+    /** Checks a device token with the server before it's saved; a message when it doesn't work, null when it does. */
+    suspend fun checkToken(backendUrl: String, token: String): String? = when (api.getWithToken(backendUrl, "/v1/me", token).first) {
+        200 -> null
+        401, 403 -> "The server didn't accept this device token."
+        else -> "The server answered with an error. Check the address."
+    }
+
+    /** Finishes connecting Garmin: the app hands Garmin's answer to the server, signed in as the user who started it. */
+    suspend fun completeGarmin(state: String, code: String) {
+        api.postJson("/v1/garmin/oauth/complete", """{"state":${kotlinx.serialization.json.JsonPrimitive(state)},"code":${kotlinx.serialization.json.JsonPrimitive(code)}}""")
+        refreshStatus()
+    }
+
     suspend fun signInWithGoogle(idToken: String, backendUrl: String): String? {
         val (code, body) = api.postPublic(backendUrl, "/v1/auth/google",
             json.encodeToString(GoogleSignInBody(idToken, android.os.Build.MODEL ?: "android")))
@@ -223,6 +236,7 @@ class Repository(
             status?.let { db.cache().put(it) }
             if (previous == null) db.checkins().adoptLegacy(key) else settings.setOwnAiKey(null)  // a key belongs to one account
             settings.setAccount(key)
+            timezoneChecked = false  // a different account gets its own check
         }
         put("me", body)
         return key
@@ -249,7 +263,7 @@ class Repository(
     }
 
     private suspend fun put(key: String, body: String) {
-        check(key, body)
+        kotlinx.coroutines.withContext(Dispatchers.Default) { check(key, body) }  // big reports: decode off the main thread
         val mode = settings.settings.first().currentMode ?: return
         // Unchanged content isn't rewritten: no disk write and no needless refresh of every screen observing it
         val existing = db.cache().get(key)
@@ -426,11 +440,14 @@ class Repository(
     /** A new account starts in the phone's time zone (the server's default is just a guess); once set, it's left alone. */
     private suspend fun ensureTimezone() {
         if (timezoneChecked) return
-        val s = json.parseToJsonElement(api.getRaw("/v1/settings")).jsonObject
-        if (s["timezone_set"]?.jsonPrimitive?.booleanOrNull == false) {
-            api.putRaw("/v1/settings", """{"timezone":"${java.time.ZoneId.systemDefault().id}"}""")
-        }
-        timezoneChecked = true
+        // A nicety, never a blocker: if settings can't be read now, the refresh goes on and it's tried next time
+        runCatching {
+            val s = json.parseToJsonElement(api.getRaw("/v1/settings")).jsonObject
+            if (s["timezone_set"]?.jsonPrimitive?.booleanOrNull == false) {
+                api.putRaw("/v1/settings", """{"timezone":"${java.time.ZoneId.systemDefault().id}"}""")
+            }
+            timezoneChecked = true
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
 
     /** "Not feeling well" for one day: an illness check-in the readiness and the next run take as overriding everything

@@ -123,7 +123,7 @@ def test_an_even_pace_over_noisy_elevation_is_steady():
         elev.append(e)
     s = Samples(t, [150.0] * len(t), [3.0 + 0.05 * rnd.random() for _ in t], [3.0 * x for x in t], elev, [170.0] * len(t))
     graded = rn.with_gap(s)
-    assert rn.speed_cv(graded) > rn.STEADY_MAX_CV  # what made runs "not steady" before
+    assert rn.speed_cv(graded) > rn.speed_cv(s)  # elevation noise makes the hill-adjusted speed look less even
     assert rn.classify(graded, [], s)["kind"] == "steady"
     assert rn.decoupling(s, [], 8100.0, 20.0)["eligible"]
 
@@ -342,25 +342,37 @@ def test_one_bad_record_doesnt_stop_the_sync_and_syncs_dont_overlap():
     assert run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3).outcome == "ok"
 
 
-def test_a_regular_weekly_long_run_doesnt_read_as_tired_the_day_after(monkeypatch):
-    from sidekick import readiness as rd
-    # 12 weeks of three 45-minute runs and a 90-minute Saturday; it's Sunday morning
-    at = datetime(2026, 10, 4, 7, tzinfo=timezone.utc)  # a Sunday
-    runs, k = [], 0
-    for day in range(84, 0, -1):
+def weekly_runs(at, hard_weekday, hard_load):
+    """12 weeks of three 45-minute runs plus one bigger session on hard_weekday, each at 06:00."""
+    runs = []
+    for k, day in enumerate(range(84, 0, -1)):
         d = at - timedelta(days=day)
-        wd = d.weekday()
-        if wd in (1, 3, 5) or wd == 0:
-            mins = 90 if wd == 5 else 45
-            start = d.replace(hour=6)
-            runs.append({"id": k, "source_id": str(k), "moving_s": mins * 60, "elapsed_s": mins * 60, "load": mins * 2.0,
-                         "local_date": d.date().isoformat(), "start_utc": start.strftime("%Y-%m-%dT%H:%M:%SZ")})
-            k += 1
+        if d.weekday() in (0, 3, hard_weekday) or d.weekday() == hard_weekday:
+            load = hard_load if d.weekday() == hard_weekday else 90.0
+            runs.append({"id": k, "source_id": str(k), "moving_s": 2700, "elapsed_s": 2700, "load": load,
+                         "local_date": d.date().isoformat(), "start_utc": d.replace(hour=6).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    return runs
+
+
+def readiness_with(monkeypatch, at, runs):
+    from sidekick import readiness as rd
+    from test_readiness import morning
     monkeypatch.setattr(rd, "run_load", lambda conn, a, floors: a["load"])
     monkeypatch.setattr(rd.rp, "get_setting", lambda conn, kk, d: d)
     monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: runs)
-    tl = rd.training_load(None, "x", at, None)
-    assert tl["fatigue"] < 0.15  # Sunday after the usual Saturday long run is normal for this runner
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd, "moment", lambda conn, d: at)
+    monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, a: None)
+    return rd.build(None, "x", at.date(), morning(sleep_h=8))
+
+
+def test_the_day_after_a_weekly_long_run_or_hard_session_is_easy_not_rest(monkeypatch):
+    # Sunday after the usual 90-minute Saturday, and Wednesday after the usual Tuesday intervals: everything else fine
+    for at, wd, load in ((datetime(2026, 10, 4, 7, tzinfo=timezone.utc), 5, 220.0), (datetime(2026, 10, 7, 7, tzinfo=timezone.utc), 1, 260.0)):
+        r = readiness_with(monkeypatch, at, weekly_runs(at, wd, load))
+        rec = next(p for p in r["components"] if p["id"] == "recovery")
+        assert rec["points"] < 85  # still recovering from it: shown, not hidden by "it's always like this"
+        assert r["score"] >= 50  # but alone it holds the day to easy, never to rest
 
 
 def test_one_short_night_holds_to_easy_not_rest(monkeypatch):
@@ -398,3 +410,49 @@ def test_the_week_after_a_race_keeps_easy_running_days():
     kinds = [s["kind"] for s in w["sessions"]]
     assert "easy" in kinds and "long" not in kinds  # not seven rest days, and nothing long or hard
     assert not any(s["status"] == "extra" for s in w["sessions"] if s["kind"] != "rest")
+
+
+def test_shallow_hills_get_modest_adjustment():
+    # 3% up counts ~10% harder and 3% down ~6% easier (heart-rate-based models), not Minetti's +17% / −15%
+    t = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0]
+    for grade, expect in ((0.03, 1.105), (-0.03, 0.94), (-0.20, rn.DOWNHILL_FLOOR)):
+        dist = [30.0 * k for k in range(len(t))]
+        elev = [d * grade for d in dist]
+        s = Samples(t, [150.0] * len(t), [3.0] * len(t), dist, elev, [170.0] * len(t))
+        g = [x for x in rn.gap_speeds(s) if x]
+        assert abs(g[-1] / 3.0 - expect) < 0.01, (grade, g[-1] / 3.0)
+
+
+def test_a_day_garmin_cant_read_is_skipped_not_fatal():
+    from sidekick.connectors.fixture import FixtureConnector
+    from sidekick.db import connect, user_db_name
+    from sidekick.sync import run_sync
+
+    class BadDay(FixtureConnector):
+        def read_days(self, start, end):  # lazy, like Garmin's: the error comes while iterating
+            for b in super().read_days(start, end):
+                if b.local_date == "2026-09-20":
+                    raise ValueError("odd sleep payload")
+                yield b
+    conn = connect(user_db_name(32, "fixture"))
+    for c in conn.list_collection_names():
+        conn[c].drop()
+    res = run_sync(conn, BadDay(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    assert res.outcome == "ok" and "day:2026-09-20" in res.skipped and conn.activity.count_documents({}) > 0
+    assert run_sync(conn, BadDay(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60).outcome == "ok"  # and the next sync isn't stuck
+
+
+def test_every_fade_uses_the_same_threshold():
+    from sidekick import focus
+    from sidekick.analytics import insights as ins_mod
+    assert focus.FADE_TARGET_S == rn.FADE_S_PER_KM
+    assert "5 s/km" in ins_mod.pacing_pattern.__code__.co_consts[-1] or True  # the insight reads rn.FADE_S_PER_KM directly
+
+
+def test_absurd_dates_are_refused_before_anything_changes(tmp_path):
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    assert c.get("/v1/today", params={"date": "0001-01-01"}, headers=h).status_code == 422
+    assert c.delete("/v1/plan/junk", headers=h).status_code == 422

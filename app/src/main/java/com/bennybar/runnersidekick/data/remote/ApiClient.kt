@@ -43,11 +43,23 @@ class ApiClient(private val credentials: suspend () -> Pair<String, String>?) {
 
     suspend fun postRaw(path: String, headers: Map<String, String> = emptyMap()): String = call("POST", path, emptyMap(), "", headers)
 
+    suspend fun postJson(path: String, body: String): String = call("POST", path, emptyMap(), body)
+
     suspend fun delete(path: String, query: Map<String, String>): String = call("DELETE", path, query, null)
 
     /** Unauthenticated POST (sign-in), against an explicit base URL. Returns the HTTP code and body. */
     suspend fun postPublic(base: String, path: String, body: String): Pair<Int, String> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(base.trimEnd('/') + path).post(body.toRequestBody("application/json".toMediaType())).build()
+        try {
+            http.newCall(req).await().use { it.code to it.body.string() }
+        } catch (e: IOException) {
+            throw ApiException.Network(e)
+        }
+    }
+
+    /** A GET with an explicit token, before it's saved (e.g. to check a device token). (HTTP code, body). */
+    suspend fun getWithToken(base: String, path: String, token: String): Pair<Int, String> = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(base.trimEnd('/') + path).header("Authorization", "Bearer $token").get().build()
         try {
             http.newCall(req).await().use { it.code to it.body.string() }
         } catch (e: IOException) {

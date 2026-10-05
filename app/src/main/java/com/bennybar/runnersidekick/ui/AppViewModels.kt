@@ -58,7 +58,7 @@ open class BaseVm(val repo: Repository) : ViewModel() {
         } catch (e: Exception) {
             // Anything else (storage, the database, opening a page): a message, never a crash
             android.util.Log.e("RunnerSidekick", "Unexpected error", e)
-            _error.value = "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
+            _error.value = "Something went wrong. Showing saved data."
         } finally {
             _busy.value = false
         }

@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 import os
@@ -70,6 +70,11 @@ class IntentIn(BaseModel):
                       "pain", "gi", "motivation", "other"] | None = None
     health: Literal["normal", "recovering", "mild_symptoms", "poor_sleep", "fatigued", "sore", "other"] | None = None
     client_updated_at: str
+
+
+class GarminCompleteIn(BaseModel):
+    state: str = Field(max_length=200)
+    code: str = Field(max_length=2000)
 
 
 class FocusIn(BaseModel):
@@ -176,6 +181,16 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def today(conn) -> date:
         return datetime.now(tz(conn)).date()
 
+    def parse_day(day: str, conn) -> date:
+        """A YYYY-MM-DD day within a sensible range (2000 to a year ahead), else ValueError with a plain message."""
+        try:
+            d = date.fromisoformat(day)
+        except ValueError:
+            raise ValueError("date must be YYYY-MM-DD")
+        if not date(2000, 1, 1) <= d <= today(conn) + timedelta(days=366):
+            raise ValueError("date is out of range")
+        return d
+
     def make_connector(conn, ucfg: Config):
         if connector is not None:
             return connector
@@ -228,8 +243,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def ai_config(conn, own_key: str | None = None) -> nv.AiConfig:
         """On the server's key only the allowed models run (RSK_AI_MODELS); with the runner's own key, any model they set."""
         model = rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL)
-        if not (own_key or "").strip() and model not in nv.server_models():
-            model = nv.DEFAULT_MODEL
+        if not (own_key or "").strip():
+            model = nv.server_model(model)
         return nv.AiConfig(
             enabled=bool(rp.get_setting(conn, "ai_enabled", False)),
             model=model,
@@ -309,9 +324,9 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     @api.get("/v1/today")
     def today_report(day: str | None = Query(default=None, alias="date"), conn=Depends(db)):
         try:
-            d = date.fromisoformat(day) if day else today(conn)
-        except ValueError:
-            raise HTTPException(422, "date must be YYYY-MM-DD")
+            d = parse_day(day, conn) if day else today(conn)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         with lock_reports:
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         body = with_narrative(conn, body)
@@ -367,13 +382,20 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.put("/v1/plan/{day}")
     def put_plan(day: str, body: PlanIn, conn=Depends(db)):
-        date.fromisoformat(day)
+        try:
+            parse_day(day, conn)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         put_if_newer(conn.day_plan, {"local_date": day}, {"kind": body.kind, "minutes": body.minutes, "client_updated_at": body.client_updated_at})
         with lock_reports:
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
 
     @api.delete("/v1/plan/{day}")
     def delete_plan(day: str, conn=Depends(db)):
+        try:
+            parse_day(day, conn)  # checked before anything is deleted
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         conn.day_plan.delete_one({"local_date": day})
         with lock_reports:
             return rp.build_morning(conn, cfg.source, date.fromisoformat(day), synthetic)
@@ -780,33 +802,30 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                             f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>{title}</h2>"
                             f"<p>{msg}</p><p>You can close this page and return to Runner Sidekick.</p></body>")
 
-    @app.get("/v1/garmin/oauth/begin")
-    def garmin_begin(ticket: str = ""):
-        """The app opens this one-time link; it marks this browser (a cookie) and sends it on to Garmin."""
-        from fastapi.responses import RedirectResponse
-        sec = secrets(cfg.data_dir)
-        try:
-            url, nonce = goauth.begin(accounts.app_db(), ticket, sec.get("garmin_client_id", ""), GARMIN_REDIRECT_URI)
-        except goauth.OAuthError as e:
-            return oauth_page("Garmin not connected", str(e))
-        r = RedirectResponse(url, status_code=302)
-        r.set_cookie("rsk_garmin", nonce, max_age=goauth.STATE_TTL_S, httponly=True, secure=True, samesite="lax",
-                     path="/v1/garmin/oauth")
-        return r
-
     @app.get("/v1/garmin/oauth/callback", response_class=HTMLResponse)
-    def garmin_callback(request: Request, state: str = "", code: str = "", error: str = ""):
-        page = oauth_page
+    def garmin_callback(state: str = "", code: str = "", error: str = ""):
+        """Garmin's redirect: nothing is linked here. The page hands the answer to the app, which finishes the linking
+        signed in as the user who started it."""
+        from html import escape
+        from urllib.parse import urlencode
         if error or not code or not state:
-            return page("Garmin not connected", "The connection was cancelled or Garmin returned an error.")
+            return oauth_page("Garmin not connected", "The connection was cancelled or Garmin returned an error.")
+        link = escape(goauth.APP_RETURN + "?" + urlencode({"state": state, "code": code}))
+        return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><title>Finish in the app</title>"
+                            f"<meta http-equiv=refresh content='0;url={link}'>"
+                            f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>Almost done</h2>"
+                            f"<p><a href='{link}'>Open Runner Sidekick</a> to finish connecting Garmin.</p></body>")
+
+    @api.post("/v1/garmin/oauth/complete")
+    def garmin_complete(body: GarminCompleteIn, user=Depends(current_user)):
         sec = secrets(cfg.data_dir)
         try:
-            goauth.complete(accounts.app_db(), state, code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""), GARMIN_REDIRECT_URI,
-                            lambda uid: accounts.user_dir(cfg.data_dir, uid), nonce=request.cookies.get("rsk_garmin"),
+            goauth.complete(accounts.app_db(), body.state, body.code, sec.get("garmin_client_id", ""), sec.get("garmin_client_secret", ""),
+                            GARMIN_REDIRECT_URI, lambda uid: accounts.user_dir(cfg.data_dir, uid), user_id=user["id"],
                             linked_elsewhere=lambda g, uid: any(u != uid for u in goauth.linked_users(cfg.data_dir / "users", g)))
         except goauth.OAuthError as e:
-            return page("Garmin not connected", str(e))
-        return page("Garmin connected", "Your Garmin account is linked.")
+            raise HTTPException(409, str(e))
+        return {"connected": True}
 
     @api.delete("/v1/garmin/connection")
     def garmin_disconnect(user=Depends(current_user)):

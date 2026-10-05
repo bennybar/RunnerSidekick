@@ -13,7 +13,7 @@ from .db import first_weekday, many, one, put, utc_now
 from .db import week_start as db_week_start
 
 FOCUS_VERSION = "focus-1.0"
-FADE_TARGET_S = 5.0          # "even" = second half no more than 5 s/km slower than the first
+from .analytics.running import FADE_S_PER_KM as FADE_TARGET_S  # "even": the app's one ±5 s/km
 EASY_SHARE = 0.7             # an easy run spends >= 70% of moving time below the zone-3 floor
 VOLUME_BAND = 0.15           # steady volume = within ±15% of the previous week
 from .analytics.running import MIN_ZONE_COVERAGE  # the one rule for everything judged from time in zones
@@ -47,11 +47,13 @@ def run_fade(conn, a: dict) -> float | None:
     laps = rp.laps_for(conn, a["id"])
     if rn.classify(rp.samples_for(conn, a["id"]), laps)["kind"] != "steady":
         return None
-    sp = [s.pace_s_per_km for s in rn.splits_from_laps(laps) if s.complete and s.pace_s_per_km]
+    # The app's one fade: halves of complete splits, hill-adjusted where the samples allow it
+    splits = rn.splits_from_laps(laps)
+    details = rn.split_details(rp.samples_for(conn, a["id"]), laps, None) or [{}] * len(splits)
+    sp = [d.get("gap_pace_s_per_km") or s.pace_s_per_km for s, d in zip(splits, details) if s.complete and s.pace_s_per_km]
     if len(sp) < 4:
         return None
-    h = len(sp) // 2
-    return sum(sp[h:]) / (len(sp) - h) - sum(sp[:h]) / h
+    return rn.fade(sp)
 
 
 def zone_shares(conn, a: dict, floors: list[float]) -> dict | None:

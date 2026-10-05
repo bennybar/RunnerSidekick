@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.7"  # 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.8"  # 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -244,6 +244,8 @@ GRADE_CLAMP = 0.30      # outside ±30% the energy-cost model isn't reliable; cl
 # Downhill, Minetti's energy cost falls to ~60% of flat at −10%, far more credit than runners get: heart-rate-based
 # grade adjustment (Strava's, 2017) bottoms out near 85% of flat. So a descent counts as at most 15% easier than flat.
 DOWNHILL_FLOOR = 0.85
+DOWNHILL_PER_GRADE = 2.0  # downhill credit grows ~2% per 1% of descent (Minetti gives ~5%, far more than heart rate shows)
+UPHILL_PER_GRADE = 3.5    # uphill cost ~3.5% per 1% of climb on shallow grades (Minetti's ~6% is metabolic, on a treadmill)
 HALF_GRADE_DIFF = 0.015  # decoupling: when a half descends overall, the halves' net grades may differ by at most 1.5 points
 
 
@@ -272,8 +274,13 @@ def gap_speeds(s: Samples) -> list[float | None]:
     c0 = minetti_cost(0.0)
     out = []
     for sp, g in zip(s.speed, grades(s)):
-        ratio = minetti_cost(g) / c0 if g is not None else 1.0
-        out.append(None if sp is None else sp * max(ratio, DOWNHILL_FLOOR))
+        if g is None:
+            ratio = 1.0
+        elif g >= 0:
+            ratio = min(minetti_cost(g) / c0, 1 + UPHILL_PER_GRADE * g)  # uphill: ~3.5% harder per 1%, never more than Minetti
+        else:
+            ratio = max(DOWNHILL_FLOOR, 1 + DOWNHILL_PER_GRADE * g)  # downhill: about 2% easier per 1% of descent, at most 15%
+        out.append(None if sp is None else sp * ratio)
     return out
 
 
