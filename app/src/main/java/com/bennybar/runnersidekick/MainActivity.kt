@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bennybar.runnersidekick.ui.settings.SettingsScreen
 import com.bennybar.runnersidekick.ui.settings.SignInScreen
+import com.bennybar.runnersidekick.ui.settings.GarminConnectScreen
 import com.bennybar.runnersidekick.ui.theme.RunnerTheme
 import com.bennybar.runnersidekick.ui.today.TodayScreen
 
@@ -141,6 +143,18 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
     androidx.compose.runtime.LaunchedEffect(pendingRun) {
         pendingRun?.let { nav.navigate(it); openRun.value = null }
     }
+    // Signed in without Garmin connected: Connect Garmin opens by itself, once, until it's connected or skipped
+    val repo = (LocalContext.current.applicationContext as RunnerApp).repository
+    val status by repo.status.collectAsStateWithLifecycle(initialValue = null)
+    val local by repo.settings.settings.collectAsStateWithLifecycle(initialValue = null)
+    var prompted by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(status?.value?.garminLinked, local?.garminPromptSkipped) {
+        val s = status?.value ?: return@LaunchedEffect
+        if (!prompted && !s.garminLinked && !s.synthetic && local?.garminPromptSkipped == false) {
+            prompted = true
+            nav.navigate("garmin")
+        }
+    }
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination
     val onTab = TABS.any { t -> dest?.hierarchy?.any { it.route == t.route } == true }
@@ -191,7 +205,17 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             composable("day/{date}") { Page { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
             composable("activities") { Page { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) } }
             composable("journal") { Page { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
-            composable("settings") { Page { SettingsScreen() } }
+            composable("settings") { Page { SettingsScreen(onConnectGarmin = { nav.navigate("garmin") }) } }
+            composable("garmin") {
+                Page {
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    GarminConnectScreen(
+                        onDone = { nav.popBackStack(); go("today") },
+                        onSkip = if (status?.value?.garminLinked == false) ({
+                            scope.launch { repo.settings.setGarminPromptSkipped(true) }; nav.popBackStack() }) else null,
+                        onClose = { nav.popBackStack() })
+                }
+            }
             composable("activity/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 Page { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
             }

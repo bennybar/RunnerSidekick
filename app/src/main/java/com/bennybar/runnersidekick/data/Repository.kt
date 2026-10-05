@@ -179,6 +179,12 @@ class Repository(
     suspend fun garminAuthorizeUrl(): String =
         json.parseToJsonElement(api.post("/v1/garmin/oauth/start")).let { (it as kotlinx.serialization.json.JsonObject)["authorize_url"]!!.toString().trim('"') }
 
+    /** Hands the server the one-time ticket from Garmin's sign-in page; it connects Garmin and starts the first sync. */
+    suspend fun linkGarmin(ticket: String) {
+        api.postJson("/v1/garmin/ticket", """{"ticket":${kotlinx.serialization.json.JsonPrimitive(ticket)}}""")
+        runCatching { refreshStatus() }
+    }
+
     suspend fun disconnectGarmin() { api.delete("/v1/garmin/connection", emptyMap()); refreshStatus() }
 
     suspend fun deleteAccount() {

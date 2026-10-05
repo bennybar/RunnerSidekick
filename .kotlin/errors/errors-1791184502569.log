@@ -1,0 +1,3 @@
+kotlin version: 2.3.21
+error message: java.io.IOException: Cannot run program "/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java" (in directory "/Users/bennybarak/Library/Application Support/kotlin/daemon"): error=0, Failed to exec spawn helper: pid: 94968, exit value: 1
+

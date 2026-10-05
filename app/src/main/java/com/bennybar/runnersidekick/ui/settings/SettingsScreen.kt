@@ -104,7 +104,8 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     fun signOut() = launchIo { repo.signOut() }
     fun deleteAccount() = launchIo { repo.deleteAccount() }
-    fun disconnectGarmin() = launchIo { repo.disconnectGarmin(); message.value = "Garmin disconnected" }
+    // Disconnecting on purpose: Connect Garmin doesn't then open by itself (Settings → Garmin → Connect still does)
+    fun disconnectGarmin() = launchIo { repo.disconnectGarmin(); repo.settings.setGarminPromptSkipped(true); message.value = "Garmin disconnected" }
     fun connectGarmin(ctx: android.content.Context) = launchIo {
         val url = repo.garminAuthorizeUrl()
         androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(ctx, android.net.Uri.parse(url))
@@ -179,7 +180,7 @@ private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 360
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
+fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
     val local by vm.settings.collectAsStateWithLifecycle()
     val me by vm.me.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
@@ -242,15 +243,17 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                     row("Garmin", supporting = when {
                         s?.synthetic == true -> "Demo data source"
                         g?.connected == true -> "Connected with Garmin's official sign-in. " + (g.dataImport ?: "")
+                        s != null && !s.garminLinked -> "Not connected. Connect to download your runs, sleep and health data."
                         s?.connection?.state == "connected" -> "Connected · last fetch ${Format.ago(s.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
                             (s.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
                         g?.available == true -> "Not connected"
                         else -> "Garmin sign-in for members opens once Garmin approves this app"
                     }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided,
                         trailing = when {
-                            g?.connected == true -> ({ TextButton(onClick = vm::disconnectGarmin) { Text("Disconnect") } })
+                            s == null || s.synthetic -> null
+                            g?.connected == true || s.garminLinked -> ({ TextButton(onClick = { confirm = "garmin" }) { Text("Disconnect") } })
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
-                            else -> null
+                            else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                         })
                     row("Server", supporting = local?.backendUrl ?: "", icon = if (s?.connection?.state == "connected") Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("backend") })
@@ -398,12 +401,13 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
     confirm?.let { scope ->
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; else -> "Delete data?" }) },
+            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; "garmin" -> "Disconnect Garmin?"; else -> "Delete data?" }) },
             text = {
                 Text(when (scope) {
                     "local" -> "Removes cached reports and runs from this phone. Unsent check-ins are kept."
                     "raw" -> "Removes stored Garmin source payloads. Normalised records and reports stay."
                     "signout" -> "You can sign in again any time. Unsent check-ins stay on this phone."
+                    "garmin" -> "Syncing stops and the server forgets this Garmin connection. Data already downloaded stays. You can connect again any time."
                     "account" -> "Permanently deletes all your health data, reports and check-ins on the server, and disconnects Garmin. This can't be undone."
                     else -> "Removes all records, reports, check-ins and settings from the backend and this phone. Garmin sign-in tokens aren't affected. This can't be undone."
                 })
@@ -414,10 +418,11 @@ fun SettingsScreen(vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) 
                         "local" -> vm.clearLocal()
                         "signout" -> vm.signOut()
                         "account" -> vm.deleteAccount()
+                        "garmin" -> vm.disconnectGarmin()
                         else -> vm.deleteRemote(scope)
                     }
                     confirm = null
-                }) { Text(if (scope == "signout") "Sign out" else "Delete") }
+                }) { Text(when (scope) { "signout" -> "Sign out"; "garmin" -> "Disconnect"; else -> "Delete" }) }
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )

@@ -22,6 +22,8 @@ data class Status(
     @SerialName("sync_next_allowed_at") val syncNextAllowedAt: String? = null,
     val backfill: Backfill? = null,
     @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
+    /** Garmin is connected for this account (always true on demo data; true when an older server doesn't say) */
+    @SerialName("garmin_linked") val garminLinked: Boolean = true,
 )
 
 /** The latest sync on the server and how it ended. */

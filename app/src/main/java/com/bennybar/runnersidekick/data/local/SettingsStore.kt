@@ -37,6 +37,8 @@ data class LocalSettings(
     /** Colour theme and light/dark: names of ui.theme.ThemeChoice and Appearance. */
     val theme: String? = null,
     val appearance: String? = null,
+    /** "Skip for now" on Connect Garmin: it isn't opened by itself again on this sign-in. */
+    val garminPromptSkipped: Boolean = false,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -60,6 +62,7 @@ class SettingsStore(private val context: Context) {
     private val kWeekly = stringPreferencesKey("notified_weekly_week")
     private val kTheme = stringPreferencesKey("theme")
     private val kAppearance = stringPreferencesKey("appearance")
+    private val kGarminSkipped = booleanPreferencesKey("garmin_prompt_skipped")
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -73,6 +76,7 @@ class SettingsStore(private val context: Context) {
             backgroundRefresh = p[kBackground] ?: false,
             theme = p[kTheme],
             appearance = p[kAppearance],
+            garminPromptSkipped = p[kGarminSkipped] == true,
         )
     }
 
@@ -115,7 +119,9 @@ class SettingsStore(private val context: Context) {
     suspend fun setMode(mode: String) = context.dataStore.edit { it[kMode] = mode }
 
     /** Signing out also forgets the runner's own OpenAI key, so a later account never inherits it. */
-    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount); it.remove(kAiKey) }
+    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount); it.remove(kAiKey); it.remove(kGarminSkipped) }
+
+    suspend fun setGarminPromptSkipped(on: Boolean) = context.dataStore.edit { it[kGarminSkipped] = on }
 
     suspend fun setAccount(account: String) = context.dataStore.edit { it[kAccount] = account }
 
