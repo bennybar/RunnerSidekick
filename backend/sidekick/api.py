@@ -376,21 +376,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body = rp.build_morning(conn, cfg.source, d, synthetic)
         body = with_narrative(conn, body)
         if body is not None and d == today(conn):
-            from . import compare, highlights
-            from . import focus as fc
-            from . import changes
-            from .decide import decide
-            dec = decide(conn, cfg.source, d, body)
-            body["race"], body["readiness"], body["next_run"] = dec["race"], dec["readiness"], dec["next_run"]
-            body["decision"] = {"hold_back": dec["hold_back"], "hold_reason": dec["hold_reason"], "today_kind": dec["today_kind"],
-                                "unwell_applied": dec["unwell_applied"]}
-            from . import scores
-            body["scores"] = scores.build(conn, cfg.source, d, hold_back=dec["hold_back"])
-            body["changes"] = changes.since_yesterday(conn, body, d, cfg.source)
-            from . import readings
-            cmp = compare.build(conn, cfg.source, d)
-            body["highlights"] = highlights.build(conn, cfg.source, d, cmp, fc.current(conn, cfg.source, d), body["race"])
-            body["reading_notes"] = readings.notes(body["findings"], cmp)
+            from .today_view import enrich
+            enrich(conn, cfg.source, d, body)
         return body
 
     @api.get("/v1/trends")

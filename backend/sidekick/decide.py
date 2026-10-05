@@ -4,7 +4,7 @@ only safety inputs here: reported pain or illness, and several recovery signals 
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from . import race
 from . import readiness as rd
@@ -26,11 +26,16 @@ def allows(rec: dict, ready: dict, reason: str | None) -> str:
     return "steady" if score < STEADY_BELOW else "hard"
 
 
-def hold_reason(rec: dict, ready: dict) -> str | None:
+RETURN_EASY_DAYS = 3  # after reported illness or pain: this many days back at easy at most
+
+
+def hold_reason(rec: dict, ready: dict, unwell_recently: bool = False) -> str | None:
     """Why intensity is held back today, or None when it isn't."""
     score = ready.get("score")
     if rec["rule_id"] == "R0":
         return "you said you're not feeling well"
+    if unwell_recently:
+        return "you were unwell in the last few days: ease back in"
     if rec["state"] == "consider_easier":
         return "several recovery signals point the same way"
     if score is None:
@@ -46,13 +51,20 @@ def hold_reason(rec: dict, ready: dict) -> str | None:
 def decide(conn, source: str, d: date, morning: dict) -> dict:
     rec = morning["recommendation"]
     ready = rd.build(conn, source, d, morning)
-    reason = hold_reason(rec, ready)
+    # Back from illness or pain: readings can look normal again within a day, but the first days back stay easy
+    since = (d - timedelta(days=RETURN_EASY_DAYS)).isoformat()
+    unwell_recently = conn is not None and conn.checkin.count_documents(
+        {"local_date": {"$gte": since, "$lt": d.isoformat()}, "deleted": {"$ne": True}, "$or": [{"illness": True}, {"pain": True}]}) > 0
+    reason = hold_reason(rec, ready, unwell_recently)
     allowed = allows(rec, ready, reason)
     if ready.get("status") == "ok":
         ready["headline"], ready["allows"], ready["hold_reason"] = HEADLINES[allowed], allowed, reason
     rs = race.status(conn, d)
     if rs:
         rs["week"] = race.week_plan(conn, source, d, held=reason is not None)
+        # One phase on Today: the week's (it doesn't change mid-week), except after the race, when it's recovery
+        if rs["week"] and rs["phase"] != "recovery":
+            rs["phase"], rs["phase_note"] = rs["week"]["phase"], race.PHASE_NOTES[rs["week"]["phase"]]
     nxt = rd.next_run(conn, source, d, morning, ready, rs, hold=reason, allowed=allowed)
     today_kind = nxt["kind"] if nxt and nxt["date"] == d.isoformat() else None
     return {"readiness": ready, "next_run": nxt, "race": rs, "hold_reason": reason, "allows": allowed,

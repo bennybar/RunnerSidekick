@@ -13,6 +13,7 @@
   (most commands take --user ID; the default is the owner)
   rebuild-reports        regenerate reports after an algorithm change (new revisions; old ones kept)
   audit [--out PATH]     field-coverage audit of stored data (no values, no credentials)
+  replay [SCENARIO ...]  play made-up runners' histories through the app day by day and check its advice (no real data)
   serve [--host --port]  run the API (default 127.0.0.1:8765)
   migrate-sqlite [--replace]  one-time import of the old SQLite files into MongoDB (the files are left untouched)
 
@@ -225,6 +226,7 @@ def main(argv=None) -> int:
     with_user(sub.add_parser("backfill-weather", help="Open-Meteo weather estimates for recent runs that have none"))
     with_user(sub.add_parser("backfill-samples", help="re-read run samples (e.g. running power) from stored Garmin details"))
     with_user(sub.add_parser("audit")).add_argument("--out")
+    sub.add_parser("replay", help="replay made-up histories and check the advice").add_argument("scenarios", nargs="*")
     p = sub.add_parser("invite", help="invite-only access by Google email")
     p.add_argument("action", choices=["add", "remove", "list"]); p.add_argument("email", nargs="?")
     p = sub.add_parser("users", help="list, disable, enable or delete accounts")
@@ -283,6 +285,9 @@ def main(argv=None) -> int:
         else:
             print(f"removed {accounts.remove_invite(a, args.email)} unused invite(s)")
         return 0
+    if args.cmd == "replay":
+        from . import replay
+        return replay.print_report(replay.run(args.scenarios or None))
     if args.cmd == "sync":
         return cmd_sync_all(cfg, args.loop, args.user)
     if args.cmd == "serve":

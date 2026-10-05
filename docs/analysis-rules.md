@@ -534,3 +534,15 @@ One weak part alone floors the score: 50 for an overnight reading; recovery 55 w
 
 When one half of the complete splits descends by more than 1% net and the halves' net grades differ by more than 1.5
 points, the halves aren't compared: the pacing check is "info", and neither the focus nor the run story reads a fade.
+
+## Readiness 1.9 and the decision after illness — `readiness.py`, `decide.py`
+
+A reading Garmin records as not measured for last night (watch off) is left out; yesterday's value stands in only
+while last night's hasn't synced yet. With none of HRV, resting HR and sleep recorded, readiness is unavailable. For 3
+days after a check-in reporting illness or pain (`decide.RETURN_EASY_DAYS`), nothing harder than easy. With a race and
+a week plan, Today's race phase is the week's (from its first day), except recovery after the race.
+
+## History replay — `replay.py`
+
+Ten scenarios played morning by morning through sync, reports and Today; see the module docstring and
+`tests/test_replay.py` for the checks.

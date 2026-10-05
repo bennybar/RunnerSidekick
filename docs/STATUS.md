@@ -332,6 +332,24 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## History replay (2026-10-05, v0.45.2)
+- `sidekick/replay.py` (`sidekick replay [SCENARIO ...]`, and `tests/test_replay.py`): ten made-up runners played
+  through the real pipeline one morning at a time (sync, reports, Today via `today_view.enrich`, the same code the API
+  uses): a steady routine, a growing long run, a week ill, a two-week break, nights without the watch, a hot humid
+  spell, out-and-back hills, heart-rate dropouts, a half-marathon build with taper and race, and the days after a
+  10K. Runs happen in the evening, so each morning sees only what it would have. Every morning is checked for
+  consistency (headline vs what's allowed, next run vs readiness, week plan vs next run, race phase, strain vs hard
+  training) and each scenario for coach sense; the test also checks that every check actually met its case.
+- What it found and fixed:
+  - Back from illness, the next morning said "Ready to train": now the first 3 days after a "not feeling well" or pain
+    check-in allow easy at most ("you were unwell in the last few days: ease back in").
+  - A night without the watch reused the previous night's HRV, resting HR and sleep as last night's (readiness 93):
+    now they're "Not measured last night" and readiness is unavailable when none were recorded (readiness-1.9).
+  - The race highlight said one phase (by days to the race) while the week plan said another: Today now uses the
+    week's phase throughout (recovery after the race excepted).
+- Limits: checks are coach sense and internal consistency, not physiological validation; notifications (built in the
+  app) and the AI coach aren't replayed.
+
 ## Review fixes and sync hint (2026-10-05, v0.45.1)
 - Garmin: connecting again clears a "connect again" state before the first sync (it used to stop that sync without
   trying the new tokens). The Garmin account a user's data came from is kept with the data (`garmin_profile_id`), and

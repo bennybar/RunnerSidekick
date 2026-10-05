@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.8"  # 1.8: one weak part alone floors the final score, also with other parts missing; 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.9"  # 1.9: a night without the watch is "not measured", not yesterday's reading; 1.8: one weak part alone floors the final score, also with other parts missing; 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -169,9 +169,16 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     by = {f["metric"]: f for f in morning["findings"]}
     zones = rp.hr_zones(conn)
     parts = []
+    # Readings Garmin recorded as not measured last night (the watch was off): yesterday's value isn't last night's.
+    # (Yesterday's stands in only while last night's simply hasn't synced yet.)
+    off = {o["metric"] for o in conn.daily_observation.find({"local_date": today.isoformat(), "state": {"$ne": "measured"}}, {"metric": 1})} \
+        if conn is not None else set()
+
+    def reading(metric):
+        return (None, None) if metric in off else current(by.get(metric), today)
 
     f = by.get("hrv_overnight_avg")
-    v, when = current(f, today)
+    v, when = reading("hrv_overnight_avg")
     base, against = usual(f, today) if v is not None else (None, "")
     if base:
         pct = 100 * (v - base) / base
@@ -184,7 +191,7 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
                       "note": "Needs a few nights to know your usual"})
 
     f = by.get("resting_hr")
-    v, when = current(f, today)
+    v, when = reading("resting_hr")
     base, against = usual(f, today) if v is not None else (None, "")
     if base:
         d = v - base
@@ -198,7 +205,7 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
                       "say": "Not known yet",
                       "note": "Needs a few days to know your usual"})
 
-    v, when = current(by.get("sleep_duration"), today)
+    v, when = reading("sleep_duration")
     if v is not None:
         h = v / 3600
         hm = f"{int(h)} h {round((h % 1) * 60):02d} min"
@@ -207,6 +214,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
                       "note": "7 h or more scores 100; each hour short costs 40 points" + (f" · {when}" if when else "")})
     else:
         parts.append({"id": "sleep", "title": "Sleep", "value": None, "points": None, "say": "Not in yet", "note": "Not in yet"})
+
+    for p in parts:
+        if p.get("points") is None and {"hrv": "hrv_overnight_avg", "resting_hr": "resting_hr", "sleep": "sleep_duration"}[p["id"]] in off:
+            p.update(value=None, say="Not measured last night", note="The watch didn't record it last night, so this part is left out")
 
     at = moment(conn, today)
     tl = training_load(conn, source, at, zones)
@@ -240,7 +251,8 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     out = combine(parts, WEIGHTS)
     # Load and recovery both come from the running history: without any overnight reading there's no score
     if out["status"] == "ok" and not any(p.get("points") is not None for p in parts if p["id"] in OVERNIGHT):
-        out = {"status": "unavailable", "components": parts, "detail": "Waiting for last night's sleep, HRV or resting heart rate."}
+        out = {"status": "unavailable", "components": parts, "detail": "The watch didn't record last night, so there's no readiness today. Go by feel; easy is a safe choice."
+                if {"hrv_overnight_avg", "resting_hr", "sleep_duration"} <= off else "Waiting for last night's sleep, HRV or resting heart rate."}
     if out["status"] == "ok":
         # One very low part (a big jump in running, a short night) limits the whole score
         low = min(p["points"] for p in parts if p.get("points") is not None)
