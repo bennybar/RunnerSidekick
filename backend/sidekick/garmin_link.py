@@ -39,9 +39,11 @@ def users_with(users_root: Path, profile_id: int) -> list[int]:
     return out
 
 
-def link(token_dir: Path, ticket: str, users_root: Path, user_id: int, client_factory=None) -> dict:
-    """Exchanges the ticket and stores the tokens for user_id. Refuses a Garmin account already linked to another user.
-    Tokens are written to a temporary folder first, so a failed or refused link never replaces a working one."""
+def link(token_dir: Path, ticket: str, users_root: Path, user_id: int, client_factory=None, expected_profile: int | None = None) -> dict:
+    """Exchanges the ticket and stores the tokens for user_id. Refuses a Garmin account already linked to another user,
+    and (expected_profile: the Garmin account this user's data came from) a different Garmin account than the one whose
+    history is already here: two people's data must never mix. Tokens are written to a temporary folder first, so a
+    failed or refused link never replaces a working one."""
     if client_factory is None:
         from garminconnect import Garmin as client_factory
     token_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +65,9 @@ def link(token_dir: Path, ticket: str, users_root: Path, user_id: int, client_fa
             raise LinkError("Garmin didn't say which account this is. Please try again.")
         if any(u != user_id for u in users_with(users_root, pid)):
             raise LinkError("This Garmin account is already connected to another Runner Sidekick account.")
+        if expected_profile is not None and pid != expected_profile:
+            raise LinkError("Your data here came from a different Garmin account. To switch Garmin accounts, first delete "
+                            "your data (Settings → Your data → Delete everything on the backend), then connect again.")
         (tmp / ACCOUNT_FILE).write_text(json.dumps({"profile_id": pid, "display_name": getattr(api, "display_name", None)}))
         shutil.rmtree(token_dir, ignore_errors=True)
         tmp.rename(token_dir)

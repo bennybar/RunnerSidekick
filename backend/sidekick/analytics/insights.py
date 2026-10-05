@@ -94,7 +94,8 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
         # A truncated file (a few seconds of samples for a 45-minute run) isn't the run's intensity either
         moving = sum(w for w in rn._weights(r.samples) if w > 0)
         whole = r.moving_s or moving
-        return moving >= rn.MIN_ZONE_COVERAGE * whole and sum(zone_time(r, floors)) >= rn.MIN_ZONE_COVERAGE * moving
+        # Valid heart-rate time against the whole run's moving time, in one step (two 75% checks in a row let ~56% through)
+        return sum(zone_time(r, floors)) >= rn.MIN_ZONE_COVERAGE * whole
     usable = [r for r in runs if r.samples and covered(r)]
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",

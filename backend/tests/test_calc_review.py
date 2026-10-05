@@ -794,4 +794,36 @@ def test_connecting_garmin_from_a_ticket(tmp_path):
         gl.link(mine, "ST-expired-0000", users, 1, factory)
     assert gl.linked(mine) and gl.profile_of(mine) == 111  # a failed relink never breaks the working one
     assert not list((users / "1").glob(".garmin-link-*"))  # no temporary folders left behind
+    with pytest.raises(gl.LinkError, match="different Garmin account"):
+        gl.link(mine, "ST-theirs-0000001", users, 1, factory, expected_profile=111)  # same app user, other person's Garmin
+    assert gl.profile_of(mine) == 111
     assert gl.unlink(mine) and not gl.linked(mine)
+
+
+def test_one_weak_part_floors_the_final_score_with_other_parts_missing(monkeypatch):
+    from sidekick import readiness as rd
+    monkeypatch.setattr(rd, "training_load", lambda *a, **k: None)
+    monkeypatch.setattr(rd, "garmin_check", lambda *a, **k: None)
+    monkeypatch.setattr(rd, "moment", lambda conn, d: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd, "current", lambda f, d: ((f or {}).get("v"), None))
+    monkeypatch.setattr(rd, "usual", lambda f, d: ((f or {}).get("base"), "your usual"))
+    morning = {"recommendation": {"rule_id": "R1"}, "findings": [
+        {"metric": "hrv_overnight_avg", "v": 30.0, "base": 60.0},  # 50% below usual: 0 points
+        {"metric": "sleep_duration", "v": 6.0 * 3600}]}           # 6 h: 60 points, not weak
+    out = rd.build(None, "x", date(2026, 10, 5), morning)
+    assert out["score"] == rd.SINGLE_SIGNAL_FLOOR and out["floored_by"] == "hrv"  # easy, not rest
+    morning["findings"].append({"metric": "resting_hr", "v": 60.0, "base": 50.0})  # a second weak part: no floor
+    assert rd.build(None, "x", date(2026, 10, 5), morning)["score"] < rd.SINGLE_SIGNAL_FLOOR
+
+
+def test_heart_rate_has_to_cover_most_of_the_whole_run(monkeypatch):
+    from sidekick import focus
+    t = [float(x) for x in range(1000)]
+    hr = [170.0 if x < 600 else None for x in range(1000)]  # 600 s of valid heart rate in a 1000-s run
+    s = Samples(t, hr, [3.0] * 1000, [3.0 * x for x in t], [10.0] * 1000, [170.0] * 1000)
+    monkeypatch.setattr(focus.rp, "samples_for", lambda conn, i: s)
+    a = {"id": 1, "source_id": "a", "local_date": "2026-10-01", "distance_m": 3000.0, "moving_s": 1000.0}
+    assert focus.zone_shares(None, a, [100, 120, 140, 155, 165]) is None  # 60% isn't "most of the run"
+    s.hr[:] = [170.0 if x < 800 else None for x in range(1000)]
+    assert focus.zone_shares(None, a, [100, 120, 140, 155, 165]) is not None

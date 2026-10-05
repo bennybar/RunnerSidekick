@@ -212,6 +212,13 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
                     Text("${p.label} · ${(shown * 100).toInt()}%", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
+                p.hint?.let {
+                    androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.End).padding(top = 4.dp, start = 48.dp, end = 12.dp)) {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    }
+                }
             }
         } else if (isRefreshing) androidx.compose.material3.LinearProgressIndicator(
             Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))

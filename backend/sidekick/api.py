@@ -881,15 +881,21 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"connected": True}
 
     @api.post("/v1/garmin/ticket")
-    def garmin_ticket(body: GarminTicketIn, user=Depends(current_user)):
+    def garmin_ticket(body: GarminTicketIn, conn=Depends(db), user=Depends(current_user)):
         """Connects Garmin from the app's sign-in page: exchanges its one-time ticket, then starts the first sync."""
         if synthetic:
             raise HTTPException(409, "This server uses demo data; there's no Garmin to connect.")
         ucfg = user_cfg(user)
+        # The Garmin account this user's data came from (kept with the data, so a disconnect doesn't forget it; deleting
+        # everything does, which is how to switch accounts)
+        expected = rp.get_setting(conn, "garmin_profile_id", None) or garmin_link.profile_of(ucfg.garmin_token_dir)
         try:
-            garmin_link.link(ucfg.garmin_token_dir, body.ticket, cfg.data_dir / "users", user["id"])
+            got = garmin_link.link(ucfg.garmin_token_dir, body.ticket, cfg.data_dir / "users", user["id"], expected_profile=expected)
         except garmin_link.LinkError as e:
             raise HTTPException(409, str(e))
+        set_setting(conn, "garmin_profile_id", got["profile_id"])
+        from .sync import mark_reconnected
+        mark_reconnected(conn, cfg.source)  # a "connect again" state would otherwise stop the sync before it tries the new tokens
         if user["id"] not in running:
             threading.Thread(target=do_sync, args=(ucfg, user["id"]), daemon=True).start()
         return {"connected": True}

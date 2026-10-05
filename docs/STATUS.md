@@ -332,6 +332,21 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Review fixes and sync hint (2026-10-05, v0.45.1)
+- Garmin: connecting again clears a "connect again" state before the first sync (it used to stop that sync without
+  trying the new tokens). The Garmin account a user's data came from is kept with the data (`garmin_profile_id`), and
+  connecting a different Garmin account is refused (switch = delete everything first), so two people's history never
+  mixes.
+- Readiness 1.8: one weak part alone is a real floor on the final score, also when other parts are missing (HRV 0 with
+  sleep 60 and nothing else was 30 → rest; now 50 → easy).
+- Heart-rate coverage: valid heart-rate time must cover 75% of the run's moving time in one step (two 75% checks in a
+  row let about 56% through), in the intensity insight, run checks, weekly focus and strain.
+- App: while "not feeling well" isn't in the server's briefing yet, the readiness sheet shows the same rest as the card,
+  and the AI coach is held back on Today and Insights. The sync progress says it runs on the server (you can leave the
+  app) and that a first download takes a few minutes.
+- First live Garmin connection from the app (phone sign-in, ticket to the server): worked; the first sync took about
+  5½ minutes for 34 days and 30 runs, the rest of the 90 days fills in through the hourly syncs.
+
 ## Connect Garmin from the app (2026-10-05, v0.45.0)
 - Garmin is connected from the phone: Settings → Garmin → Connect (and by itself right after signing in when the
   account has no Garmin connection, with "Skip for now"). Garmin's own sign-in page opens in the app, so the password

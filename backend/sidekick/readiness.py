@@ -14,7 +14,7 @@ from . import reports as rp
 from .db import one
 from .scores import clamp, combine
 
-READINESS_VERSION = "readiness-1.7"  # 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+READINESS_VERSION = "readiness-1.8"  # 1.8: one weak part alone floors the final score, also with other parts missing; 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
 WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
 # Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
 # averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
@@ -251,12 +251,18 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 60]
         # Recovery alone: what this weekday usually leaves (the morning after the weekly long run) floors higher than
         # leftover beyond that, which still stays easy, not rest.
+        floor = None
         if len(weak) == 1 and weak[0]["id"] in OVERNIGHT:
-            cap = max(cap, SINGLE_SIGNAL_FLOOR)
+            floor = SINGLE_SIGNAL_FLOOR
         elif len(weak) == 1 and weak[0]["id"] == "recovery":
-            cap = max(cap, ROUTINE_FLOOR if tl.get("routine") else EXCEPTIONAL_FLOOR)
+            floor = ROUTINE_FLOOR if tl.get("routine") else EXCEPTIONAL_FLOOR
+        if floor is not None:
+            cap = max(cap, floor)
         if out["score"] > cap:
             out["score"], out["capped_by"] = cap, next(p["id"] for p in parts if p.get("points") == low)
+        # ...and it's a real floor: with other parts missing, the weighted score of that one part could be lower still
+        if floor is not None and out["score"] < floor:
+            out["score"], out["floored_by"] = floor, weak[0]["id"]
         out["label"] = label(out["score"])
         out["headline"] = {"High": "Ready to train", "Moderate": "Fine for an easy run", "Low": "Take it easy or rest"}[out["label"]]
         weak = [p for p in parts if p.get("points") is not None and p["points"] < 85]

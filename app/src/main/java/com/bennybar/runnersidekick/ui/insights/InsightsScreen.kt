@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.ui.insights
 
+import androidx.compose.material.icons.outlined.Psychology
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -114,6 +116,7 @@ fun InsightsScreen(
     val busy by vm.busy.collectAsStateWithLifecycle()
     val coach by vm.coach.collectAsStateWithLifecycle()
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
+    val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
     val compare by vm.compare.collectAsStateWithLifecycle()
     val firstDay by vm.weekStart.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
@@ -148,7 +151,14 @@ fun InsightsScreen(
                     return@LazyColumn
                 }
                 data?.value?.stats?.let { st -> if (st.items.isNotEmpty()) animatedItem(key = "stats") { StatsGrid(st) } }
-                coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
+                // Advice written before "not feeling well" reached the server is held back until it has (it would say train)
+                if (unwellPending) animatedItem(key = "coach") {
+                    com.bennybar.runnersidekick.ui.components.Group(title = "AI coach") {
+                        row("Waiting for today's check-in", supporting = "You said you're not feeling well. The coach's advice comes back once the " +
+                            "server has your check-in (when you're online). Until then: rest or a short walk.",
+                            icon = androidx.compose.material.icons.Icons.Outlined.Psychology, iconShape = androidx.compose.material3.MaterialShapes.Flower)
+                    }
+                } else coach?.value?.let { c -> animatedItem(key = "coach") { CoachCard(c, coachLoading, items, onOpenRun = onOpenRun, onOpenInsight = { method = it }) } }
                 fitness?.value?.let { f ->
                     animatedItem(key = "fitness") { FitnessSection(f, onOpenRun = onOpenRun) }
                 }

@@ -243,6 +243,14 @@ class Repository(
 
     val checkins: Flow<List<CheckinEntity>> = account.flatMapLatest { a -> if (a == null) flowOf(emptyList()) else db.checkins().observeAll(a) }
 
+    /** "Not feeling well" today that the server's briefing doesn't include yet (offline, or not synced): until it does,
+     *  the app applies it itself everywhere (rest), and advice written without it (the AI coach) is held back. */
+    val unwellPending: Flow<Boolean> = kotlinx.coroutines.flow.combine(today, checkins) { t, cs ->
+        val d = java.time.LocalDate.now().toString()
+        cs.firstOrNull { it.localDate == d }?.illness == true &&
+            (t?.value?.localDate != d || t.value.decision?.unwellApplied != true)
+    }
+
     fun report(id: Long): Flow<ReportEntity?> = db.reports().observe(id)
     fun checkinFor(date: String): Flow<CheckinEntity?> =
         account.flatMapLatest { a -> if (a == null) flowOf(null) else db.checkins().observeForDate(date, a) }
@@ -317,7 +325,13 @@ class Repository(
     }
 
     /** What a refresh or sync is doing and how far it has got (0–1); null when nothing is running. */
-    data class Progress(val fraction: Float, val label: String)
+    /** [hint]: a second line under the label (e.g. that a Garmin download runs on the server and takes a while). */
+    companion object {
+        const val SERVER_SYNC_HINT = "Runs on the server, so you can leave the app. A first download takes a few minutes; " +
+            "older history keeps filling in over the next hours."
+    }
+
+    data class Progress(val fraction: Float, val label: String, val hint: String? = null)
     private val _progress = kotlinx.coroutines.flow.MutableStateFlow<Progress?>(null)
     val progress: kotlinx.coroutines.flow.StateFlow<Progress?> = _progress
 
@@ -439,7 +453,7 @@ class Repository(
                 pause(attempt)
                 s = refreshStatus()
                 if (!s.syncRunning) break
-                s.syncProgress?.let { _progress.value = Progress(0.85f * it.percent / 100f, it.phase ?: "Syncing with Garmin") }
+                s.syncProgress?.let { _progress.value = Progress(0.85f * it.percent / 100f, it.phase ?: "Syncing with Garmin", SERVER_SYNC_HINT) }
             }
             refreshAll(0.85f, 1f)
             // Say how the sync really ended, never "synced" after a failure or while it's still going

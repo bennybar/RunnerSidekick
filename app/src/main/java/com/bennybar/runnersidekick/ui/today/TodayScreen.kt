@@ -121,6 +121,10 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
 
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
     val report = today?.value
+    val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
+    /** One readiness as shown, for the card and its sheet alike: rest while "not feeling well" isn't in the briefing yet */
+    fun shownReadiness(r: com.bennybar.runnersidekick.data.remote.Score) =
+        if (unwellPending) r.copy(score = null, label = "Low", headline = "Take it easy or rest", holdReason = "you're not feeling well", allows = "rest") else r
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -157,10 +161,9 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 val todayDate = LocalDate.now().toString()
                 val mark = checkins.firstOrNull { it.localDate == todayDate }
                 val unwell = mark?.illness == true
-                val pending = unwell && (report.localDate != todayDate || report.decision?.unwellApplied != true)
+                val pending = unwellPending
                 report.readiness?.let { r -> animatedItem(key = "readiness") {
-                    val shown = if (pending) r.copy(score = null, label = "Low", headline = "Take it easy or rest", holdReason = "you're not feeling well", allows = "rest") else r
-                    ReadinessCard(shown, unwell, pending, onUnwell = { vm.setUnwell(todayDate, !unwell) }) { sheet = "readiness" } } }
+                    ReadinessCard(shownReadiness(r), unwell, pending, onUnwell = { vm.setUnwell(todayDate, !unwell) }) { sheet = "readiness" } } }
                 report.nextRun?.let { n -> animatedItem(key = "nextrun") {
                     NextRunCard(if (pending) n.copy(date = todayDate, dayLabel = "Today", kind = "rest", title = "Rest or a short walk", distanceKm = null,
                         minutes = null, hr = null, pace = null, paceSPerKm = null, optional = false, caution = null,
@@ -169,7 +172,8 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 report.race?.let { r -> r.week?.let { w -> animatedItem(key = "raceweek") { RaceWeekStrip(r, w) { sheet = "race" } } } }
                 focus?.value?.let { f -> animatedItem(key = "focus") { FocusLine(f) { sheet = "focus" } } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
-                val coachShown = coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
+                // Coach advice written before "not feeling well" reached the server would contradict the rest above: held back
+                val coachShown = if (pending) null else coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
                     // Older advice is labelled as such, so it never reads as current next to a changed briefing
@@ -196,7 +200,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     when (sheet) {
         "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
             ScoreSheet(if (sheet == "health") "Health" else "Fitness", sc.scope[sheet!!], it, sc.basis, onDismiss = { sheet = null }) } }
-        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(it, r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
+        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(shownReadiness(it), r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
             SheetColumn(onDismiss = { sheet = null }) {
                 Text("VO₂ max", style = MaterialTheme.typography.headlineSmall)

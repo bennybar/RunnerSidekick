@@ -102,6 +102,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
         updateCoach()
     }
     fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
+    val unwellPending = repo.unwellPending.state(false)
     val checkins = repo.checkins.state(emptyList())
     // The week's focus lives on Today (with the race week, in the report)
     val focus = repo.focus.state(null)
@@ -113,6 +114,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 class InsightsVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
     val coach = repo.coach.state(null)
+    val unwellPending = repo.unwellPending.state(false)
     private val _coachLoading = MutableStateFlow(false)
     val coachLoading: StateFlow<Boolean> = _coachLoading.asStateFlow()
 

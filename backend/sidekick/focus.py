@@ -64,9 +64,9 @@ def zone_shares(conn, a: dict, floors: list[float]) -> dict | None:
     r = ins.RunData(a["source_id"], a["local_date"], datetime.min, None, a["distance_m"], a["moving_s"], None, s, [], "steady")
     zt = ins.zone_time(r, floors)
     tot = sum(zt)
-    # The same coverage rule as the intensity insight: samples cover most of the run, heart rate most of the samples
+    # The same coverage rule as the intensity insight: valid heart-rate time is most of the run's moving time
     moving = sum(w for w in rn._weights(s) if w > 0)
-    if not tot or moving < MIN_ZONE_COVERAGE * (a["moving_s"] or moving) or tot < MIN_ZONE_COVERAGE * moving:
+    if not tot or tot < MIN_ZONE_COVERAGE * (a["moving_s"] or moving):
         return None
     return {"easy": (zt[0] + zt[1] + zt[2]) / tot, "hard": (zt[4] + zt[5]) / tot}
 
