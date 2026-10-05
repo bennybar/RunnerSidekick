@@ -332,6 +332,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Follow-ups (2026-10-05, v0.35.3)
+- The plan's duration also caps a session made easier when there's no easy-pace estimate: it becomes a time ("about
+  10 min") with no guessed distance (a 10-minute plan had become 9 km).
+- Race day with the easy-only caution: the target-pace instruction is dropped.
+
 ## Plan → readiness → next run, end to end (2026-10-05, v0.35.2)
 From the v0.35.1 review, with tests that follow a session from the week plan to the next run:
 - A session made easier (held back, or steady instead of tempo) keeps the plan's duration at most; it no longer falls

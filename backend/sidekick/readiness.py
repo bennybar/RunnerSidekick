@@ -363,10 +363,10 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
         km = max(1.0, round(km * 2) / 2)  # half-km steps; no larger floor, so "shorter" stays shorter
         minutes = round(km * pace_s / 60 / 5) * 5 if pace_s else None
     # A session turned easier (held back, or steady instead of tempo) never grows past the plan's duration: the week's
-    # budget still holds
-    if planned and planned.get("minutes") and kind not in ("rest", "race") and minutes and minutes > planned["minutes"]:
+    # budget still holds. Without a pace to turn it into distance, it's a time, not a guessed distance.
+    if planned and planned.get("minutes") and kind not in ("rest", "race") and (minutes is None or minutes > planned["minutes"]):
         minutes = planned["minutes"]
-        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else km
+        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else None
     hr = None
     if zones:
         f = [round(x) for x in zones["floors"]]
@@ -384,6 +384,7 @@ def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: d
     if kind == "race" and day == today and allowed in ("easy", "rest"):
         caution = (f"Readiness says {'rest' if allowed == 'rest' else 'easy only'} today ({hold or 'readiness is low'}). "
                    "If you race, run it easy or start well below your target pace.")
+        pace = pace_s = pace_way = None  # no target-pace instruction next to that
     # An optional session (the week's target already reached) stays optional here too
     optional = bool(planned and planned.get("optional") and kind not in ("race", "rest"))
     if optional:

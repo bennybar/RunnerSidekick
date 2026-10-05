@@ -256,3 +256,20 @@ def test_an_optional_session_stays_optional_in_the_next_run(monkeypatch):
     s = [{"date": ANCHOR.isoformat(), "kind": "easy", "minutes": 10, "status": "today", "optional": True}]
     nr = next_run_with(monkeypatch, plan_week(s, done=70, target=60), score=85, allowed="hard")
     assert nr["optional"] is True and any("target is already met" in w for w in nr["why"])
+
+
+def test_a_held_back_session_without_an_easy_pace_keeps_the_plans_time(monkeypatch):
+    s = [{"date": ANCHOR.isoformat(), "kind": "tempo", "minutes": 10, "status": "today", "optional": False}]
+    real = rp.latest_body
+    monkeypatch.setattr(rp, "latest_body", lambda conn, t, *a, **k: None if t == "insights" else real(conn, t, *a, **k))
+    nr = next_run_with(monkeypatch, plan_week(s), allowed="easy", hold="Garmin's recovery timer still shows about 49 h")
+    assert nr["kind"] == "easy" and nr["minutes"] == 10 and nr["distance_km"] is None  # a time, not a guessed 9 km
+
+
+def test_race_caution_drops_the_target_pace(monkeypatch):
+    rs = plan_week([{"date": ANCHOR.isoformat(), "kind": "race", "minutes": None, "status": "today", "optional": False}])
+    rs.update(date=ANCHOR.isoformat(), target_pace_s_per_km=300)
+    nr = next_run_with(monkeypatch, rs, allowed="easy", hold="Garmin's recovery timer still shows about 49 h")
+    assert nr["caution"] and nr["pace"] is None and nr["pace_s_per_km"] is None
+    calm = next_run_with(monkeypatch, rs, score=85, allowed="hard")
+    assert calm["caution"] is None and calm["pace"] == "around 5:00 /km"

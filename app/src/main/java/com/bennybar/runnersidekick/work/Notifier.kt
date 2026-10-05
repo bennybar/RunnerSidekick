@@ -68,7 +68,7 @@ object Notifier {
             val nr = r.nextRun
             val title = rd?.let { "Readiness ${it.score} · ${it.headline ?: it.label}" } ?: r.headline
             val text = nr?.let { n -> listOfNotNull("${n.title}${if (n.optional) " (optional)" else ""} ${n.dayLabel.lowercase()}",
-                n.distanceKm?.let { Format.distance(it * 1000, settings.units) }, n.hr?.text, n.caution)
+                n.distanceKm?.let { Format.distance(it * 1000, settings.units) } ?: n.minutes?.let { "about $it min" }, n.hr?.text, n.caution)
                 .joinToString(" · ") } ?: r.recommendation.suggestion
             val stateKey = "${rd?.score}|${title.hashCode()}|${text.hashCode()}"
             if (isToday && inWindow && ready && (state.morningDate != r.localDate || state.morningState != stateKey)) {
