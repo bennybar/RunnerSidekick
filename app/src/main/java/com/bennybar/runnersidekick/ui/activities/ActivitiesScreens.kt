@@ -123,7 +123,7 @@ private fun distanceParts(m: Double?, units: Units): Pair<String, String> = Form
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(factory = factory(::ActivitiesVm))) {
+fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: ActivitiesVm = viewModel(factory = factory(::ActivitiesVm))) {
     com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val acts by vm.activities.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -143,6 +143,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, vm: ActivitiesVm = viewModel(fact
         topBar = {
             LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = {
                 if (acts?.value?.any { it.synthetic } == true) DemoBadge()
+                androidx.compose.material3.IconButton(onClick = onTrophies) { Icon(Icons.Outlined.EmojiEvents, "Your records") }
                 // Fetch a run you just finished from Garmin without waiting for the hourly sync
                 val wait = com.bennybar.runnersidekick.ui.components.syncWait(syncStatus?.value?.syncNextAllowedAt)
                 androidx.compose.material3.FilledTonalButton(onClick = vm::syncNow, enabled = !busy && wait == null,
@@ -229,7 +230,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
     // The AI card comes after the header and (when there's one) the decoupling card
     LaunchedEffect(aiScroll.value) {
-        if (aiScroll.value > 0) runList.animateScrollToItem(1 + if (detail?.value?.report?.decoupling?.decouplingPct != null) 1 else 0)
+        if (aiScroll.value > 0) runList.animateScrollToItem(1 + if (detail?.value?.report?.decoupling?.let { it.decouplingPct != null || it.reasons.isNotEmpty() } == true) 1 else 0)
     }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -283,7 +284,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
             }
             LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
-                if (r.decoupling.decouplingPct != null) item { DecouplingCard(r.decoupling) }
+                // Shown also when it couldn't be measured, saying why (a short run, missing heart rate), instead of nothing
+                if (r.decoupling.decouplingPct != null || r.decoupling.reasons.isNotEmpty()) item { DecouplingCard(r.decoupling) }
                 // Shown at the top once asked for (or already written); the button lives in the top bar
                 if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
@@ -440,6 +442,17 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
     Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DecouplingTitle(cs.onSurface)
+            if (dc.decouplingPct == null) {
+                val why = dc.reasons.firstOrNull().orEmpty()
+                val short = Regex("""eligible segment (\d+) min < (\d+) min""").find(why)
+                Text("Not measured on this run: " + when {
+                    short != null -> "it needs ${short.groupValues[2]} minutes of running after the warm-up, and this run had ${short.groupValues[1]}. " +
+                        "On shorter runs a few beats of noise would swing it too much."
+                    why.contains("heart", ignoreCase = true) -> "too little heart rate was recorded."
+                    else -> why.ifBlank { "not enough data." }
+                }, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                return@Column
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
                 listOf(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct to "power:HR").forEach { (v, l) ->
                     Column(Modifier.weight(1f).fillMaxHeight().background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {

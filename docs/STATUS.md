@@ -332,6 +332,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Records, sync without cooldown (2026-10-06, v0.46.0)
+- Activities → trophy icon → "Your records" (`GET /v1/trophies`, `trophies.py`): fastest 1 km, mile, 5 km, 10 km, half and
+  marathon (the faster of Garmin's all-time personal record and the app's fastest stretch within a synced run), longest
+  run, longest time running, most climbing, biggest week, highest VO₂ max, lowest resting heart rate, highest overnight
+  HRV, and Garmin's step records and goal streaks. Each says where it comes from and opens its run when the app has
+  it; age comparisons where a published reference exists (age grade for 5 km to the marathon, VO₂ max and usual
+  resting heart rate against age and sex). Garmin's personal records are read with its fitness numbers (after new runs,
+  else every 3 hours).
+- Sync: no cooldown of the app's own for anyone (only Garmin's "please wait" holds a sync). A manual sync that finds
+  another one running (the hourly job) waits for it, up to 4 minutes, then syncs, instead of ending with nothing.
+- Run screen: when aerobic decoupling can't be measured (under 20 minutes after the warm-up, or too little heart rate),
+  the card says why instead of not appearing.
+
 ## History replay (2026-10-05, v0.45.2)
 - `sidekick/replay.py` (`sidekick replay [SCENARIO ...]`, and `tests/test_replay.py`): ten made-up runners played
   through the real pipeline one morning at a time (sync, reports, Today via `today_view.enrich`, the same code the API

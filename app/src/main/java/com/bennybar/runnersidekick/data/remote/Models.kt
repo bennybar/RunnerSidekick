@@ -475,6 +475,22 @@ data class CheckinDto(
     val deleted: Boolean = false,
 )
 
+/** Your records: Garmin's all-time personal records next to the app's bests, with age comparisons where they exist. */
+@Serializable
+data class Trophies(val groups: List<TrophyGroup> = emptyList(), @SerialName("history_since") val historySince: String? = null,
+                    val basis: String = "")
+
+@Serializable
+data class TrophyGroup(val id: String, val title: String, val items: List<Trophy> = emptyList())
+
+@Serializable
+data class Trophy(val id: String, val title: String, val value: String, val date: String? = null,
+                  @SerialName("source_id") val sourceId: String? = null, val source: String = "",
+                  val comparison: TrophyComparison? = null)
+
+@Serializable
+data class TrophyComparison(val headline: String? = null, val detail: String? = null)
+
 /** Today's decision, as far as the app needs it. [unwellApplied]: the server already acted on reported pain or illness. */
 @Serializable
 data class Decision(@SerialName("unwell_applied") val unwellApplied: Boolean = false)

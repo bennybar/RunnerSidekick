@@ -186,6 +186,12 @@ class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
     init { launchIo { repo.refreshDay(date) } }
 }
 
+class TrophiesVm(repo: Repository) : BaseVm(repo) {
+    val trophies = repo.trophies.state(null)
+    init { refresh() }
+    fun refresh() = launchIo { repo.refreshTrophies() }
+}
+
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     val activities = repo.activities.state(null)
     val status = repo.status.state(null)

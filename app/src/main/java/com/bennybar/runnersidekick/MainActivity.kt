@@ -203,7 +203,9 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
                     onOpenReport = { nav.navigate("report/$it") }, onOpenSettings = { go("settings") }) }
             }
             composable("day/{date}") { Page { DayScreen(it.arguments!!.getString("date")!!, onBack = { nav.popBackStack() }) } }
-            composable("activities") { Page { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }) } }
+            composable("activities") { Page { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }, onTrophies = { nav.navigate("trophies") }) } }
+            composable("trophies") { Page { com.bennybar.runnersidekick.ui.activities.TrophiesScreen(onBack = { nav.popBackStack() },
+                onOpenRun = { nav.navigate("activity/$it") }) } }
             composable("journal") { Page { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
             composable("settings") { Page { SettingsScreen(onConnectGarmin = { nav.navigate("garmin") }) } }
             composable("garmin") {

@@ -85,6 +85,10 @@ class Repository(
 
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
     val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+    val trophies: Flow<Cached<com.bennybar.runnersidekick.data.remote.Trophies>?> =
+        observe("trophies") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(it) }
+    suspend fun refreshTrophies() = put("trophies", api.getRaw("/v1/trophies"))
+
     val compare: Flow<Cached<com.bennybar.runnersidekick.data.remote.CompareReport>?> =
         observe("compare") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(it) }
 
@@ -291,6 +295,7 @@ class Repository(
             key == "focus" -> json.decodeFromString<FocusState>(body)
             key == "coach" -> json.decodeFromString<CoachView>(body)
             key == "compare" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body)
+            key == "trophies" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(body)
             key.startsWith("trends:") -> json.decodeFromString<Trends>(body)
             key.startsWith("activity:") -> json.decodeFromString<ActivityDetail>(body)
             key.startsWith("runai:") -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body)
@@ -439,12 +444,12 @@ class Repository(
     suspend fun syncNow(pause: suspend (Int) -> Unit) {
         try {
             _progress.value = Progress(0f, "Starting the Garmin sync")
-            // The server refuses syncs too close together (it protects the Garmin account): say when the next one can run
+            // The server holds a sync back only when Garmin asked us to wait: say until when
             val started = json.parseToJsonElement(api.post("/v1/sync")).jsonObject
             started["next_allowed_at"]?.jsonPrimitive?.contentOrNull?.let { at ->
                 refreshStatus()
                 throw com.bennybar.runnersidekick.data.remote.ApiException.Sync(
-                    "Synced with Garmin recently. Next sync from ${com.bennybar.runnersidekick.ui.components.clockOf(at)}, to keep your Garmin account safe.")
+                    "Garmin asked us to wait before syncing again. Next sync from ${com.bennybar.runnersidekick.ui.components.clockOf(at)}.")
             }
             // The server's own progress fills the first 85%; loading the results fills the rest. Checks back off from
             // 2 s (the caller's pause decides; nothing while the screen is hidden).
