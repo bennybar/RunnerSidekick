@@ -468,8 +468,10 @@ class GarminConnector:
         if not sex and not ud.get("birthDate") and not first:
             return None
         h = num(ud.get("height"))
+        wg = num(ud.get("weight"))  # grams in Garmin's profile
         return {"sex": sex, "birth_date": ud.get("birthDate"), "first_day_of_week": first,
-                "height_cm": round(h, 1) if h and 100 <= h <= 250 else None, "source": "garmin"}
+                "height_cm": round(h, 1) if h and 100 <= h <= 250 else None,
+                "weight_kg": round(wg / 1000, 1) if wg and 30_000 <= wg <= 250_000 else None, "source": "garmin"}
 
     def list_activities(self, start: date, end: date) -> list[dict]:
         acts = self._call("get_activities_by_date", start.isoformat(), end.isoformat()) or []

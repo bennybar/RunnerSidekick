@@ -90,6 +90,9 @@ class InsightStateIn(BaseModel):
 SYNC_WAIT_S, SYNC_WAIT_TRIES = 3, 80  # a manual sync waits up to 4 minutes for another one to finish
 
 
+DATED_SETTINGS = ("activity_par", "profile_weight_kg", "profile_height_cm", "hr_max")
+
+
 class GarminTicketIn(BaseModel):
     ticket: str = Field(pattern=r"^ST-[A-Za-z0-9._\-]{8,300}$")
 
@@ -112,6 +115,10 @@ class SettingsIn(BaseModel):
     race_distance: Literal["5k", "10k", "half", "marathon"] | None = None
     race_target_s: int | None = Field(default=None, ge=600, le=36000)
     race_name: str | None = Field(default=None, max_length=60)
+    activity_par: int | None = Field(default=None, ge=0, le=7)          # NASA/JSC activity rating, for the questionnaire estimate
+    profile_weight_kg: float | None = Field(default=None, ge=30, le=250)
+    profile_height_cm: float | None = Field(default=None, ge=100, le=250)
+    hr_max: int | None = Field(default=None, ge=120, le=230)             # your own maximum heart rate, when you know it
     week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
 
 
@@ -390,6 +397,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             from .today_view import enrich
             enrich(conn, cfg.source, d, body)
         return body
+
+    @api.get("/v1/cardio")
+    def get_cardio(conn=Depends(db)):
+        from . import cardio
+        return cardio.build(conn, cfg.source, today(conn))
 
     @api.get("/v1/trophies")
     def get_trophies(conn=Depends(db)):
@@ -783,6 +795,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "profile_birth_date": rp.get_setting(conn, "profile_birth_date", None),
                 "profile_detected": rp.get_setting(conn, "source_profile", None),
                 **{k: rp.get_setting(conn, k, None) for k in ("race_date", "race_distance", "race_target_s", "race_name", "week_start_day")},
+                # Answers that change over time, each with the day it was given
+                **{k: rp.get_setting(conn, k, None) for k in DATED_SETTINGS}, **{k + "_at": rp.get_setting(conn, k + "_at", None) for k in DATED_SETTINGS},
                 "week_start_effective": WEEKDAYS[rp.first_weekday(conn)]}
 
     @api.put("/v1/settings")
@@ -805,9 +819,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
                 if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date", "race_date", "race_distance",
-                         "race_target_s", "race_name", "week_start_day"):
-                    conn.user_settings.delete_one({"key": k})
+                         "race_target_s", "race_name", "week_start_day", *DATED_SETTINGS):
+                    conn.user_settings.delete_many({"key": {"$in": [k, k + "_at"]}})
                 continue
+            if k in DATED_SETTINGS and rp.get_setting(conn, k, None) != v:
+                set_setting(conn, k + "_at", today(conn).isoformat())
             set_setting(conn, k, v)
         return get_settings(conn)
 

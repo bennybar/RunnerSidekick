@@ -887,3 +887,26 @@ def test_a_run_sets_a_record_only_by_beating_an_earlier_best():
     set_setting(conn, "garmin_records", {"records": [{"type": 1, "value": last["value"] - 0.4, "activity_id": last["source_id"], "date": last["date"]}]})
     pts = trophies.progressions(conn, "fixture", ANCHOR)["1k"]
     assert [p["source_id"] for p in pts].count(last["source_id"]) == 1 and pts[-1]["value"] == last["value"] - 0.4
+
+
+def test_cardio_fitness_keeps_its_evidence_apart(tmp_path):
+    from sidekick import cardio
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    # Jackson 1990, BMI model: a 43-year-old man, BMI 23.1, activity 7 → 56.363 + 13.447 − 16.383 − 17.4 + 10.987
+    assert round(56.363 + 1.921 * 7 - 0.381 * 43 - 0.754 * (74 / 1.79 ** 2) + 10.987) == 47
+    assert abs(cardio.vdot(5000, 20 * 60 + 0) - 49.8) < 0.5  # Daniels' table: a 20:00 5 km is about VDOT 50
+    conn = synced()
+    out = cardio.build(conn, "fixture", ANCHOR)
+    assert out["questionnaire"]["status"] == "needs_input"  # no activity answer yet: no made-up baseline
+    assert out["runs"]["status"] == "ok" and out["runs"]["spread"][0] <= out["runs"]["value"] <= out["runs"]["spread"][1]
+    assert sum(out["runs"]["left_out"].values()) > 0 and all(out["runs"]["left_out"])  # every left-out run has a reason
+    assert not any("VDOT" in n for n in out["notes"])  # performance is never set against the VO2 max estimates
+    # Answers are kept with the day they were given, and can be cleared
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    s = c.put("/v1/settings", headers=h, json={"activity_par": 6, "hr_max": 186}).json()
+    assert s["activity_par"] == 6 and s["activity_par_at"] and s["hr_max"] == 186
+    assert c.get("/v1/cardio", headers=h).json()["hr_max"]["source"].startswith("set by you")
+    assert c.put("/v1/settings", headers=h, json={"hr_max": None}).json()["hr_max"] is None
+    assert c.put("/v1/settings", headers=h, json={"activity_par": 9}).status_code == 422
