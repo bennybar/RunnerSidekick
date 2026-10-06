@@ -226,7 +226,7 @@ def build(conn, source: str, today: date) -> dict:
         runs_part.update(status="ok", value=round(mid), spread=[round(min(vals)), round(max(vals))],
                          sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
                                      f"about {round(median(lower))}.",
-                         headline=f"About {round(mid)}, from your last {len(recent)} qualifying runs",
+                         headline=f"from your last {len(recent)} qualifying runs",
                          detail=f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
                                 f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: Garmin's overnight value (the "
                                 f"published relationship used seated resting measurements).")
@@ -254,14 +254,15 @@ def build(conn, source: str, today: date) -> dict:
     missing = [n for n, v in (("your activity level", par), ("weight", weight), ("height", height), ("age", p.get("age")),
                               ("sex", p.get("sex"))) if v is None]
     if missing:
-        q.update(status="needs_input", headline="Needs a few answers", detail="Needs " + ", ".join(missing) + " (Settings → About you).")
+        q.update(status="needs_input", headline="Needs a few answers", detail="Needs " + ", ".join(missing) + " (your answers, below).")
     else:
         bmi = weight / (height / 100) ** 2
         v = 56.363 + 1.921 * par - 0.381 * p["age"] - 0.754 * bmi + 10.987 * (1 if p["sex"] == "male" else 0)
-        q.update(status="ok", value=round(v), bmi=round(bmi, 1), headline=f"About {round(v)}",
+        q.update(status="ok", value=round(v), bmi=round(bmi, 1), headline="from your answers",
                  detail=f"From your age ({p['age']}), sex, BMI {bmi:.1f} and activity level {par} of 7"
                         + (f" (answered {par_at})" if par_at else "") + ".")
     out["questionnaire"] = q
+    out["inputs"] = {"weight_kg": weight, "weight_from": weight_at, "height_cm": height, "height_from": height_at}
 
     # 3. Running performance (VDOT)
     best = None
@@ -273,7 +274,7 @@ def build(conn, source: str, today: date) -> dict:
                 best = {"value": round(vd, 1), "distance": cp.DISTANCE_LABELS[k], "metres": metres, "time_s": b["elapsed_s"], "date": b["date"],
                         "source_id": b["source_id"]}
     out["performance"] = ({"id": "performance", "title": "Running performance (VDOT)", "status": "ok", **best,
-                           "headline": f"VDOT {best['value']:.0f}",
+                           "headline": f"from your best {best['distance'].lower()} stretch",
                            "detail": f"From your fastest {best['distance'].lower()} stretch within a run ({rp.fmt_pace(best['time_s'] / (best['metres'] / 1000))}, {best['date']}). "
                                      "A performance number: it includes running economy and comes from training runs, not races, "
                                      "so it isn't comparable with the VO₂ max estimates."}
@@ -285,7 +286,7 @@ def build(conn, source: str, today: date) -> dict:
     found = vo2_on(conn, source, today, today)  # the newest reading, from the daily series or Garmin's snapshot, and not stale
     gv = (found[0], found[1].isoformat()) if found else None
     out["garmin"] = ({"id": "garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
-                      "headline": f"{round(gv[0])}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
+                      "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
                      if gv else {"id": "garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
 
     # Each VO2 max estimate placed among people of your sex and age (performance isn't: a different quantity)
