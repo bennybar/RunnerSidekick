@@ -881,3 +881,9 @@ def test_a_run_sets_a_record_only_by_beating_an_earlier_best():
     assert not any(r["id"] == "5k" for rs in trophies.records_set(conn, "fixture", ANCHOR).values() for r in rs)
     item = next(i for g in trophies.build(conn, "fixture", ANCHOR)["groups"] for i in g["items"] if i["id"] == "5k")
     assert item["history"][0]["garmin"] and item["lower_is_better"]
+    # Garmin's count of a run we measured too: one point for that run, not two
+    conn.user_settings.delete_many({"key": "garmin_records"})
+    last = trophies.progressions(conn, "fixture", ANCHOR)["1k"][-1]
+    set_setting(conn, "garmin_records", {"records": [{"type": 1, "value": last["value"] - 0.4, "activity_id": last["source_id"], "date": last["date"]}]})
+    pts = trophies.progressions(conn, "fixture", ANCHOR)["1k"]
+    assert [p["source_id"] for p in pts].count(last["source_id"]) == 1 and pts[-1]["value"] == last["value"] - 0.4

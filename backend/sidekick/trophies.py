@@ -177,6 +177,8 @@ def progressions(conn, source: str, today: date) -> dict[str, list[dict]]:
             if v is None:
                 continue
             if not pts or (v < pts[-1]["value"] if lower else v > pts[-1]["value"]):
+                if pts and sid and pts[-1]["source_id"] == sid:
+                    pts.pop()  # the same run measured twice (ours and Garmin's count): one improvement, the better value
                 pts.append({"date": d, "value": v, "source_id": sid})
         if pts:
             out[rid] = pts
