@@ -83,7 +83,7 @@ def build(conn, source: str, today: date) -> dict:
             weeks[ws.isoformat()] = weeks.get(ws.isoformat(), 0.0) + (a["distance_m"] or 0)
         wk = max(weeks, key=weeks.get)
         longest.append({"id": "week", "title": "Biggest week", "value": f"{weeks[wk] / 1000:.1f} km", "metres": weeks[wk],
-                        "date": wk, "source_id": None, "source": "your runs, week starting " + wk})
+                        "date": wk, "source_id": None, "source": "the week starting that day"})
 
     body = []
     vo2 = rp.series(conn, source, "garmin_vo2max_running", today.isoformat())
@@ -119,7 +119,7 @@ def build(conn, source: str, today: date) -> dict:
     for key in ("steps_day", "steps_week", "steps_month", "streak_best", "streak_now"):
         g = garmin.get(key)
         if g:
-            unit = "days" if key.startswith("streak") else "steps"
+            unit = ("day" if g["value"] == 1 else "days") if key.startswith("streak") else "steps"
             daily.append({"id": key, "title": dict(GARMIN_TYPES.values())[key], "value": f"{g['value']:,.0f} {unit}",
                           "date": g["date"], "source_id": None, "source": "Garmin's record"})
 

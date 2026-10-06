@@ -324,25 +324,14 @@ def _record_capabilities(conn, connector) -> None:
     set_connection(conn, connector.source, capabilities=caps)
 
 
-# ---------------------------------------------------------------- manual sync cooldown
+# ---------------------------------------------------------------- manual sync
 
-# Minutes before another manual sync may call Garmin, by how the last one (manual or the hourly job) ended: a
-# successful one rests 15 minutes, a failure can be retried soon, Garmin asking us to slow down gets a longer pause
-COOLDOWN_MIN = {"ok": 15, "partial": 15, "rate_limited": 30, "deferred": 30}
-COOLDOWN_AFTER_FAILURE_MIN = 2
-
-
-def next_manual_sync(conn: Database, source: str, now: datetime | None = None, cooldown: bool = True) -> datetime | None:
-    """When a manual sync may next call Garmin, or None when it may now. Protects the Garmin account from bursts.
-    cooldown=False (the server owner): only Garmin's own back-off applies, never ours."""
+def next_manual_sync(conn: Database, source: str, now: datetime | None = None) -> datetime | None:
+    """When a manual sync may next call Garmin, or None when it may now. Only Garmin's own back-off holds it (when
+    Garmin asked us to wait, ignoring it risks the account); the app adds no cooldown of its own."""
     now = now or datetime.now(timezone.utc)
-    job = one(conn.sync_job, {"source": source, "finished_at": {"$ne": None}}, sort=[("id", -1)]) if cooldown else None
-    t = None
-    if job:
-        done = datetime.fromisoformat(job["finished_at"].replace("Z", "+00:00"))
-        t = done + timedelta(minutes=COOLDOWN_MIN.get(job.get("outcome"), COOLDOWN_AFTER_FAILURE_MIN))
     row = get_connection_row(conn, source)
-    if row and row.get("retry_not_before"):  # Garmin's own back-off, when it set one
+    if row and row.get("retry_not_before"):
         rb = datetime.fromisoformat(row["retry_not_before"].replace("Z", "+00:00"))
-        t = max(t, rb) if t else rb
-    return t if t and t > now else None
+        return rb if rb > now else None
+    return None

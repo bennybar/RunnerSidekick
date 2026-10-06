@@ -281,32 +281,16 @@ def test_race_caution_drops_the_target_pace(monkeypatch):
     assert calm["caution"] is None and calm["pace"] == "around 5:00 /km"
 
 
-def test_manual_sync_cooldown_by_how_the_last_sync_ended():
+def test_manual_sync_waits_only_for_garmin():
     from datetime import timezone
     from sidekick.sync import next_manual_sync, set_connection
     conn = synced()
-    conn.sync_job.delete_many({})
     now = datetime(2026, 10, 5, 10, 0, tzinfo=timezone.utc)
-    assert next_manual_sync(conn, "fixture", now) is None  # never synced: go ahead
-
-    def finish(outcome, minutes_ago):
-        conn.sync_job.insert_one({"id": next_id(conn, "sync_job"), "source": "fixture", "outcome": outcome,
-                                  "finished_at": (now - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")})
-    finish("ok", 5)
-    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=10)  # 15 minutes after a good sync
-    finish("ok", 16)
-    assert next_manual_sync(conn, "fixture", now) is None
-    finish("error", 1)
-    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=1)  # a failure can be retried soon
-    finish("rate_limited", 10)
-    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=20)  # Garmin asked us to slow down
-    finish("ok", 30)
+    conn.sync_job.insert_one({"id": next_id(conn, "sync_job"), "source": "fixture", "outcome": "ok",
+                              "finished_at": (now - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    assert next_manual_sync(conn, "fixture", now) is None  # a sync a minute ago doesn't hold the next one back
     set_connection(conn, "fixture", retry_not_before=(now + timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=40)  # Garmin's own back-off wins
-    finish("ok", 1)
-    assert next_manual_sync(conn, "fixture", now, cooldown=False) == now + timedelta(minutes=40)  # the owner: Garmin's wait only
-    set_connection(conn, "fixture", retry_not_before=None)
-    assert next_manual_sync(conn, "fixture", now, cooldown=False) is None  # ...and no cooldown of ours
+    assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=40)  # Garmin asked us to wait: we do
 
 
 def test_ai_calls_on_the_server_key_share_one_daily_cap(monkeypatch):
@@ -851,3 +835,29 @@ def test_trophies_combine_garmin_records_with_our_bests_and_age_compare():
     set_setting(conn, "profile_sex", None)
     conn.user_settings.delete_many({"key": {"$in": ["profile_sex", "source_profile"]}})
     assert all(i.get("comparison") is None for g in trophies.build(conn, "fixture", ANCHOR)["groups"] for i in g["items"])  # no sex: none
+
+
+def test_a_sync_tapped_during_another_waits_for_it_then_syncs(tmp_path, monkeypatch):
+    import threading
+    import time as _t
+    from sidekick import api as api_mod
+    from sidekick.auth import create_token
+    from sidekick.db import connect, user_db_name
+    from sidekick.sync import release_lease, take_lease
+    from test_multiuser import client
+    monkeypatch.setattr(api_mod, "SYNC_WAIT_S", 0.1)
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    conn = connect(user_db_name(1, "fixture"))
+    lease = take_lease(conn, datetime.now(timezone.utc))  # the hourly job is mid-sync
+    assert lease
+    assert c.post("/v1/sync", headers=h).json()["started"] is True
+    _t.sleep(0.5)
+    assert c.get("/v1/status", headers=h).json()["sync_running"]  # waiting for it, not ended empty
+    assert conn.sync_job.count_documents({}) == 0
+    release_lease(conn, lease)
+    for _ in range(200):
+        if not c.get("/v1/status", headers=h).json()["sync_running"]:
+            break
+        _t.sleep(0.05)
+    assert conn.sync_job.count_documents({"outcome": "ok"}) == 1  # then it synced itself
