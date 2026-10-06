@@ -897,11 +897,17 @@ def test_cardio_fitness_keeps_its_evidence_apart(tmp_path):
     assert round(56.363 + 1.921 * 7 - 0.381 * 43 - 0.754 * (74 / 1.79 ** 2) + 10.987) == 47
     assert abs(cardio.vdot(5000, 20 * 60 + 0) - 49.8) < 0.5  # Daniels' table: a 20:00 5 km is about VDOT 50
     conn = synced()
+    assert set(cardio.build(conn, "fixture", ANCHOR)["runs"]["left_out"]) >= {"weather unknown"}  # unknown isn't "cool"
+    for a in rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat()):
+        conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"checked_at": utc_now(), "weather": {
+            "temperature_2m": 18.0, "dew_point_2m": 10.0, "apparent_temperature": 18.0}}}, upsert=True)
     out = cardio.build(conn, "fixture", ANCHOR)
     assert out["questionnaire"]["status"] == "needs_input"  # no activity answer yet: no made-up baseline
     assert out["runs"]["status"] == "ok" and out["runs"]["spread"][0] <= out["runs"]["value"] <= out["runs"]["spread"][1]
     assert sum(out["runs"]["left_out"].values()) > 0 and all(out["runs"]["left_out"])  # every left-out run has a reason
     assert not any("VDOT" in n for n in out["notes"])  # performance is never set against the VO2 max estimates
+    assert "comparison" in out["runs"] and "for men aged" in out["runs"]["comparison"]["headline"]
+    assert "comparison" not in out["performance"]  # VDOT isn't placed among VO2 max norms
     # Answers are kept with the day they were given, and can be cleared
     c = client(tmp_path)
     h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
@@ -910,3 +916,52 @@ def test_cardio_fitness_keeps_its_evidence_apart(tmp_path):
     assert c.get("/v1/cardio", headers=h).json()["hr_max"]["source"].startswith("set by you")
     assert c.put("/v1/settings", headers=h, json={"hr_max": None}).json()["hr_max"] is None
     assert c.put("/v1/settings", headers=h, json={"activity_par": 9}).status_code == 422
+
+
+def test_cardio_inputs_are_robust_to_spikes_zeros_and_stale_readings(monkeypatch):
+    from sidekick import cardio
+    from sidekick.connectors.base import Samples, valid_hr
+    from sidekick.db import set_setting
+    # A spike: 150 bpm for most of a minute, then 5 dense seconds at 220 → about 156, not 210
+    t = [float(x) for x in range(55)] + [55 + 0.1 * k for k in range(50)] + [60.0 + x for x in range(5)]
+    hr = [150.0] * 55 + [220.0] * 50 + [150.0] * 5
+    s = Samples(t, hr, [3.0] * len(t), [3.0 * x for x in t], [10.0] * len(t), [170.0] * len(t))
+    assert 150 <= cardio.sustained_max(s) < 160
+    # Six readings around a long gap aren't a sustained minute
+    gap = Samples([0.0, 1, 2, 50, 51, 52], [180.0] * 6, [3.0] * 6, [0.0] * 6, [10.0] * 6, [170.0] * 6)
+    assert cardio.sustained_max(gap) is None
+    # Zeros from the strap are gaps, everywhere samples are read
+    assert valid_hr([150, 0, None, 255, 160]) == [150, None, None, None, 160]
+    assert Samples.from_json({"t": [0, 1], "hr": [0, 150], "speed": [3, 3], "dist": [0, 3], "elev": [1, 1], "cad": [170, 170]}).hr == [None, 150]
+    # Garmin's value: the newest reading, not any older one in the series
+    conn = synced()
+    conn.daily_observation.delete_many({"metric": "garmin_vo2max_running"})
+    conn.daily_observation.insert_one({"source": "fixture", "metric": "garmin_vo2max_running", "state": "measured",
+                                       "local_date": (ANCHOR - timedelta(days=30)).isoformat(), "value": 40.0})
+    set_setting(conn, "garmin_fitness", {"vo2max": {"value": 50.0, "date": ANCHOR.isoformat()}})
+    assert cardio.build(conn, "fixture", ANCHOR)["garmin"]["value"] == 50
+    # The questionnaire estimate through build(), with its own inputs
+    set_setting(conn, "activity_par", 7)
+    set_setting(conn, "profile_weight_kg", 74.0)
+    set_setting(conn, "profile_height_cm", 179.0)
+    q = cardio.build(conn, "fixture", ANCHOR)["questionnaire"]
+    age = q["detail"].split("age (")[1].split(")")[0]
+    want = 56.363 + 1.921 * 7 - 0.381 * int(age) - 0.754 * (74 / 1.79 ** 2) + 10.987
+    assert q["status"] == "ok" and q["value"] == round(want)
+    # Notes never diagnose a cause
+    assert not any("usual cause" in n for n in cardio.build(conn, "fixture", ANCHOR)["notes"])
+
+
+def test_cardio_flat_means_flat_and_sensitivity_keeps_the_same_runs(monkeypatch):
+    from sidekick import cardio
+    conn = synced()
+    a = dict(next(x for x in reversed(rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat()))
+                  if (rp.run_analysis(conn, x).get("classification") or {}).get("kind") == "steady"))
+    conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"checked_at": utc_now(), "weather": {
+        "temperature_2m": 18.0, "dew_point_2m": 10.0, "apparent_temperature": 18.0}}}, upsert=True)
+    down = {**a, "elevation_gain_m": 0.0, "elevation_loss_m": 216.0, "distance_m": 7200.0}  # a steady 3% descent
+    assert cardio.run_estimate(conn, down, 50, 185)[1].startswith("hilly")
+    assert cardio.run_estimate(conn, {**a, "elevation_loss_m": None}, 50, 185)[1] == "elevation not recorded"
+    # Sensitivity: the same observation, only the maximum changed, and a lower maximum gives a lower estimate
+    e = {"vo2": 40.0, "hr": 150.0, "hr_rest": 50.0}
+    assert cardio.with_hr_max(e, 175) < cardio.with_hr_max(e, 180)

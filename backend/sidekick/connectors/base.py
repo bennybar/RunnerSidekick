@@ -152,7 +152,16 @@ class Samples:
 
     @staticmethod
     def from_json(d: dict) -> "Samples":
-        return Samples(d["t"], d["hr"], d["speed"], d["dist"], d["elev"], d["cad"], d.get("power"), d.get("dyn"))
+        return Samples(d["t"], valid_hr(d["hr"]), d["speed"], d["dist"], d["elev"], d["cad"], d.get("power"), d.get("dyn"))
+
+
+HR_PLAUSIBLE = (30, 240)  # bpm; a 0 or 255 from the strap means no reading, not a heart rate
+
+
+def valid_hr(hr: list) -> list:
+    """Heart-rate samples with implausible readings (0, sensor sentinels) as gaps, so no analysis counts them."""
+    lo, hi = HR_PLAUSIBLE
+    return [h if h is not None and lo <= h <= hi else None for h in hr]
 
 
 @dataclass

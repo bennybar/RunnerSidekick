@@ -30,6 +30,7 @@ from .base import (
     Samples,
     SleepSession,
     SourceUnavailable,
+    valid_hr,
 )
 
 log = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
                              ("directVerticalOscillation", "vo", 1), ("directVerticalRatio", "vr", 1), ("directBodyBattery", "bb", 1)):
         if key in idx:
             dyn[name] = [round(v * scale, 3) if v else None for v in pick(col(key))]  # 0 means not measured
-    return Samples(t=[round(t[i], 1) for i in keep], hr=pick(col("directHeartRate")), speed=pick(col("directSpeed")),
+    return Samples(t=[round(t[i], 1) for i in keep], hr=valid_hr(pick(col("directHeartRate"))), speed=pick(col("directSpeed")),
                    dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence),
                    power=pick(col("directPower")) if "directPower" in idx else None, dyn=dyn or None)
 

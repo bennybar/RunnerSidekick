@@ -4,8 +4,10 @@
    equation, VO2 = 3.5 + 0.2 × speed in m/min) against how far heart rate rose into its reserve, using Swain's finding
    that the share of heart-rate reserve tracks the share of oxygen-uptake reserve:
    VO2max = 3.5 + (VO2 − 3.5) / ((HR − HRrest) / (HRmax − HRrest)). An experimental combination of published parts, not a
-   validated package. Only steady, cool, well-recorded runs of 20+ minutes after a 10-minute warm-up, in the submaximal
-   range (50–90% of heart-rate reserve), count; every run left out says why. The spread between runs is shown as
+   validated package. The app's own additions are only these choices: which runs qualify (steady, outdoors, known and
+   not hot weather, flat (≤10 m/km climb), 20+ minutes after a 10-minute warm-up, 90%+ valid heart rate, 80% of the time
+   within 50–90% of heart-rate reserve) and how maximum heart rate is chosen. Recorded speed, no hill adjustment. Every
+   run left out says why. The spread between runs is shown as
    variability, not accuracy, and how much the estimate leans on the assumed maximum heart rate is shown too.
 2. Questionnaire-based: Jackson et al. 1990 (MSSE 22:863), the BMI model, with its own inputs: age, sex, BMI and the
    NASA/JSC activity rating (0–7) for the previous month. Its standard error was about 5.7 ml/kg/min across the study
@@ -30,6 +32,9 @@ from .db import get_setting
 CARDIO_VERSION = "cardio-0.1"
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
+IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
+MAX_NET_GRADE = 0.01        # the analysed stretch's overall rise or fall, at most 1%
+MAX_CLIMB_PER_KM = 10.0     # m/km, up and down each; flatter runs only: the ACSM equation used is the flat-ground one (no hill model of the app's)
 MIN_RUN_SPEED = 134.0 / 60  # m/s; slower is walking, where the running equation doesn't apply
 RECENT_DAYS, RECENT_RUNS = 60, 8
 SUSTAINED_S = 60.0          # the observed maximum is the highest heart rate held for a minute, not a one-off spike
@@ -54,21 +59,32 @@ def _dated(conn, key):
     return (v, get_setting(conn, key + "_at", None)) if v is not None else (None, None)
 
 
+MAX_GAP_S = 5.0  # a "sustained" minute has no gap in valid heart rate longer than this
+
+
 def sustained_max(s) -> float | None:
-    """The highest heart rate held over a minute (a time-weighted rolling mean), so a sensor spike doesn't count."""
+    """The highest heart rate held over a full minute: a time-weighted mean (each reading counts for the time until the
+    next), over windows with continuous valid readings only. A few seconds of spike barely move it; a gap disqualifies."""
     if s is None or not s.hr:
         return None
-    best, j, acc, n = None, 0, 0.0, 0
-    pts = [(t, h) for t, h in zip(s.t, s.hr) if h is not None]
-    for i, (t, h) in enumerate(pts):
-        acc += h
-        n += 1
-        while pts[j][0] < t - SUSTAINED_S:
-            acc -= pts[j][1]
-            n -= 1
-            j += 1
-        if t - pts[j][0] >= SUSTAINED_S * 0.9 and n >= 6:  # a full minute, with enough samples in it
-            m = acc / n
+    pts = [(t, h) for t, h in zip(s.t, s.hr) if t is not None]
+    best = None
+    for i in range(1, len(pts)):
+        end = pts[i][0]
+        acc = span = 0.0
+        ok = True
+        j = i
+        while j > 0 and span < SUSTAINED_S:
+            (t0, h0), (t1, _) = pts[j - 1], pts[j]
+            dt = t1 - t0
+            if h0 is None or dt <= 0 or dt > MAX_GAP_S:
+                ok = False
+                break
+            acc += h0 * dt
+            span += dt
+            j -= 1
+        if ok and span >= SUSTAINED_S:
+            m = acc / span
             best = m if best is None or m > best else best
     return best
 
@@ -101,20 +117,33 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     an = rp.run_analysis(conn, a)
     if (an.get("classification") or {}).get("kind") != "steady":
         return None, "not steady"
+    if a.get("sport") == "treadmill_running":
+        return None, "treadmill (speed not measured outdoors)"
     ht = wx.heat(wx.stored(conn, a["source_id"]))
-    if ht and ht["hot"]:
+    if ht is None:
+        return None, "weather unknown"
+    if ht["hot"]:
         return None, "hot and humid"
+    if a.get("elevation_gain_m") is None or a.get("elevation_loss_m") is None or not a.get("distance_m"):
+        return None, "elevation not recorded"  # unknown isn't flat
+    km = a["distance_m"] / 1000
+    if a["elevation_gain_m"] / km > MAX_CLIMB_PER_KM or a["elevation_loss_m"] / km > MAX_CLIMB_PER_KM:
+        return None, "hilly (the running equation used is for flat ground)"
     s = rp.samples_for(conn, a["id"])
     if s is None:
         return None, "no samples"
-    w, gap = rn._weights(s), rn.gap_speeds(s)
+    w = rn._weights(s)
     moved, seg, with_hr, sv, sh = 0.0, 0.0, 0.0, 0.0, 0.0
-    for wi, v, h in zip(w, gap, s.hr):
+    first = last = None  # the analysed stretch's (distance, elevation) at its ends: it has to be level overall too
+    for wi, v, h, d, e in zip(w, s.speed, s.hr, s.dist, s.elev):
         if wi <= 0:
             continue
         moved += wi
         if moved <= WARMUP_S or v is None:
             continue
+        if d is not None and e is not None:
+            first = first or (d, e)
+            last = (d, e)
         seg += wi
         if h is not None:
             with_hr += wi
@@ -122,11 +151,26 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
             sh += h * wi
     if seg < MIN_SEGMENT_S:
         return None, "under 20 minutes after the warm-up"
+    if not first or last[0] - first[0] < 1000:
+        return None, "elevation not recorded"
+    if abs(last[1] - first[1]) / (last[0] - first[0]) > MAX_NET_GRADE:
+        return None, "the stretch climbs or descends overall"
     if with_hr < MIN_HR_COVERAGE * seg:
         return None, "heart-rate gaps"
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
         return None, "walking pace"
+    # The relationship holds within the submaximal range: most of the stretch has to be inside it, not just its average
+    inside = 0.0
+    moved = 0.0
+    for wi, h in zip(w, s.hr):
+        if wi <= 0:
+            continue
+        moved += wi
+        if moved > WARMUP_S and h is not None and HRR_RANGE[0] <= (h - hr_rest) / (hrmax - hr_rest) <= HRR_RANGE[1]:
+            inside += wi
+    if inside < IN_RANGE_SHARE * with_hr:
+        return None, "heart rate outside the reliable range for much of the run"
     share = (hr - hr_rest) / (hrmax - hr_rest)
     if share < HRR_RANGE[0]:
         return None, "too easy for a reliable reading"
@@ -134,7 +178,12 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
         return None, "too hard for a reliable reading"
     vo2 = 3.5 + 0.2 * v * 60
     return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1),
-            "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr)}, None
+            "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
+
+
+def with_hr_max(e: dict, hrmax: float) -> float:
+    """The same run's observation recalculated with another maximum heart rate (nothing else changes)."""
+    return 3.5 + (e["vo2"] - 3.5) / ((e["hr"] - e["hr_rest"]) / (hrmax - e["hr_rest"]))
 
 
 def vdot(metres: float, seconds: float) -> float:
@@ -172,13 +221,11 @@ def build(conn, source: str, today: date) -> dict:
     if len(recent) >= 3:
         vals = [e["value"] for e in recent]
         mid = median(vals)
-        # How much the estimate leans on the assumed maximum heart rate: the same runs with it 5 beats lower
-        lower = [run_estimate(conn, a, rest_before(a["local_date"]), hm["value"] - 5)[0] for a in runs
-                 if a["source_id"] in {e["source_id"] for e in recent}]
-        lower = [e["value"] for e in lower if e]
+        # How much the estimate leans on the assumed maximum heart rate: the same runs and readings, only that changed
+        lower = [with_hr_max(e, hm["value"] - 5) for e in recent]
         runs_part.update(status="ok", value=round(mid), spread=[round(min(vals)), round(max(vals))],
-                         sensitivity=(f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), it would be about "
-                                      f"{round(median(lower))}." if len(lower) >= 3 else None),
+                         sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
+                                     f"about {round(median(lower))}.",
                          headline=f"About {round(mid)}, from your last {len(recent)} qualifying runs",
                          detail=f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
                                 f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: Garmin's overnight value (the "
@@ -234,22 +281,38 @@ def build(conn, source: str, today: date) -> dict:
                                         "headline": "Needs a run of 5 km or longer", "detail": ""})
 
     # 4. Garmin
-    g = rp.series(conn, source, "garmin_vo2max_running", today.isoformat())
-    gv = max(g.items())[::-1] if g else None
-    gnow = ((get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {})
-    if gv is None and gnow.get("value"):
-        gv = (gnow["value"], gnow.get("date"))
+    from .scores import vo2_on
+    found = vo2_on(conn, source, today, today)  # the newest reading, from the daily series or Garmin's snapshot, and not stale
+    gv = (found[0], found[1].isoformat()) if found else None
     out["garmin"] = ({"id": "garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
                       "headline": f"{round(gv[0])}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
                      if gv else {"id": "garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
+
+    # Each VO2 max estimate placed among people of your sex and age (performance isn't: a different quantity)
+    if p.get("sex") and p.get("age"):
+        for k in ("runs", "questionnaire", "garmin"):
+            v = out[k].get("value")
+            if v is None:
+                continue
+            it = cp.vo2_item(p["sex"], p["age"], {"vo2max": {"value": float(v)}})
+            if it.get("status") != "ok":
+                continue
+            pos = ("below the 40th percentile" if it["position"] == "below" else "above the 95th percentile" if it["position"] == "above"
+                   else f"higher than about {it['percentile']}%")
+            out[k]["comparison"] = {"headline": f"{it['rating']} for {it['group']}", "percentile": it["percentile"],
+                                    "detail": f"{v} is {pos} of {it['group']}" + (f"; typical for a {cp.SEX_WORD[p['sex']][0]} of about {it['typical_age']}"
+                                                                                 if it.get("typical_age") else "") + ".",
+                                    "source": cp.nm.VO2_SOURCE}
 
     # How the VO2 max estimates relate (performance stays out of this: a different quantity)
     notes = []
     r, gg, qq = out["runs"].get("value"), out["garmin"].get("value"), out["questionnaire"].get("value")
     if r is not None and gg is not None:
-        notes.append(f"Your runs and Garmin {'agree closely' if abs(r - gg) <= 2 else f'differ by {abs(r - gg)}'}: both read heart rate "
-                     "against pace, with different assumptions (maximum heart rate, oxygen cost), so a few points apart is normal"
-                     + ("." if abs(r - gg) <= 2 else "; the maximum heart rate is the usual cause."))
+        notes.append(f"Your runs and Garmin {'are within 2 of each other' if abs(r - gg) <= 2 else f'differ by {abs(r - gg)}'}. Both read "
+                     "heart rate against pace, but with different methods and assumptions"
+                     + ("." if abs(r - gg) <= 2 else ". Possible reasons include the maximum heart rate assumed, how resting heart rate "
+                        "is measured, running economy, conditions and data quality; the app can't tell which. The line above shows how "
+                        "much the maximum heart rate alone moves the estimate."))
     if qq is not None and (r is not None or gg is not None):
         notes.append("The questionnaire estimate is a broad baseline from who you are and how active you say you are, not from "
                      "your heart rate; it can be several points away for one person.")
