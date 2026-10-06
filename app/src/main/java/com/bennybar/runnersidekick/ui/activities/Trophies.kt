@@ -1,6 +1,9 @@
 package com.bennybar.runnersidekick.ui.activities
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,6 +43,7 @@ import com.bennybar.runnersidekick.ui.factory
 fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: TrophiesVm = viewModel(factory = factory(::TrophiesVm))) {
     val trophies by vm.trophies.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.bennybar.runnersidekick.data.remote.Trophy?>(null) }
     Scaffold(topBar = {
         TopAppBar(title = { Text("Your records") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } })
@@ -70,7 +75,7 @@ fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: Trophies
                                     listOfNotNull(when_, r.source.takeIf { it.isNotBlank() }).joinToString(" · ").ifBlank { null },
                                     r.comparison?.headline).joinToString("\n"),
                                 icon = icon, iconShape = shape,
-                                onClick = r.sourceId?.let { id -> { onOpenRun(id) } })
+                                onClick = { open = r })
                         }
                     }
                 }
@@ -79,6 +84,48 @@ fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: Trophies
                 item { Text(b, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)) }
             }
+        }
+    }
+    open?.let { r -> TrophySheet(r, onDismiss = { open = null }) { id -> open = null; onOpenRun(id) } }
+}
+
+/** One record: its value and comparison, and how it got there (each improvement, oldest first; a run opens). */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun TrophySheet(r: com.bennybar.runnersidekick.data.remote.Trophy, onDismiss: () -> Unit, onOpenRun: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(r.title, style = MaterialTheme.typography.headlineSmall)
+            Text(r.value, style = MaterialTheme.typography.displaySmall, color = cs.primary)
+            Text(listOfNotNull(r.date?.let { runCatching { Format.longDate(it) }.getOrDefault(it) }, r.source.takeIf { it.isNotBlank() })
+                .joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            r.comparison?.let { c ->
+                Text(listOfNotNull(c.headline, c.detail).joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
+            }
+            if (r.history.size >= 2) {
+                Text("How it got here", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 6.dp))
+                // Drawn so better is always up (a faster time is a lower number)
+                com.bennybar.runnersidekick.ui.components.Sparkline(r.history.map { if (r.lowerIsBetter) -it.v else it.v },
+                    Modifier.fillMaxWidth().height(72.dp),
+                    description = "${r.title}: ${r.history.joinToString(", ") { "${it.value} on ${it.date}" }}")
+            }
+            if (r.history.isNotEmpty()) Group {
+                r.history.reversed().forEachIndexed { i, pt ->
+                    row(pt.value, supporting = listOfNotNull(runCatching { Format.longDate(pt.date) }.getOrDefault(pt.date),
+                            when {
+                                pt.garmin -> "Garmin's record, before the app's history"
+                                i == r.history.size - 1 -> "where the history starts"
+                                i == 0 -> "the record now"
+                                else -> null
+                            }).joinToString(" · "),
+                        onClick = pt.sourceId?.let { id -> { onOpenRun(id) } })
+                }
+            }
+            if (r.history.size < 2) Text("No earlier best in the app's history yet: the next run that beats it shows up here.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }

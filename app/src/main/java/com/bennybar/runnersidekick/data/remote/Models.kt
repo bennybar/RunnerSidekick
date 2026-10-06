@@ -332,7 +332,12 @@ data class ActivitySummary(
     @SerialName("elevation_gain_m") val elevationGainM: Double? = null,
     @SerialName("pace_moving_s_per_km") val paceMovingSPerKm: Double? = null,
     val synthetic: Boolean = false,
+    /** Records this run set (it beat an earlier best): a trophy on the run, and its notification */
+    val records: List<RunRecord> = emptyList(),
 )
+
+@Serializable
+data class RunRecord(val id: String, val title: String, val value: String)
 
 @Serializable
 data class RunActivity(
@@ -486,7 +491,13 @@ data class TrophyGroup(val id: String, val title: String, val items: List<Trophy
 @Serializable
 data class Trophy(val id: String, val title: String, val value: String, val date: String? = null,
                   @SerialName("source_id") val sourceId: String? = null, val source: String = "",
-                  val comparison: TrophyComparison? = null)
+                  val comparison: TrophyComparison? = null, val history: List<TrophyPoint> = emptyList(),
+                  @SerialName("lower_is_better") val lowerIsBetter: Boolean = false)
+
+/** One improvement of a record ([garmin]: Garmin's all-time record from before the synced history, where it starts). */
+@Serializable
+data class TrophyPoint(val date: String, val value: String, val v: Double, @SerialName("source_id") val sourceId: String? = null,
+                       val garmin: Boolean = false)
 
 @Serializable
 data class TrophyComparison(val headline: String? = null, val detail: String? = null)

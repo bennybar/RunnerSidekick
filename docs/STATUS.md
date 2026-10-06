@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## New-record moments and record history (2026-10-06, v0.47.0)
+- A run sets a record when it beats an earlier best (the first value in the history isn't a "new best"; for records
+  Garmin also keeps, its older all-time record is the bar). `trophies.progressions` holds each record's improvements;
+  `/v1/activities` gives each run the records it set.
+- Activities: a run that set a record wears a trophy and says "New best: …". The new-run notification leads with it
+  ("New record: Fastest 5 km 27:31").
+- Your records: tapping a record opens its history: the value, its age comparison, a curve where better is always up,
+  and each earlier best with its date, opening its run.
+
 ## Records, sync without cooldown (2026-10-06, v0.46.0)
 - Activities → trophy icon → "Your records" (`GET /v1/trophies`, `trophies.py`): fastest 1 km, mile, 5 km, 10 km, half and
   marathon (the faster of Garmin's all-time personal record and the app's fastest stretch within a synced run), longest

@@ -117,7 +117,12 @@ object Notifier {
         fresh.forEach { a ->
             val n = NotificationCompat.Builder(ctx, CH_RUNS)
                 .setSmallIcon(R.drawable.ic_stat_pulse)
-                .setContentTitle("Run report ready")
+                // A run that set a record says so first
+                .setContentTitle(when (a.records.size) {
+                    0 -> "Run report ready"
+                    1 -> "New record: ${a.records[0].title} ${a.records[0].value}"
+                    else -> "New records: " + a.records.joinToString(", ") { it.title.removePrefix("Fastest ") }
+                })
                 .setContentText("${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)} · ${Format.shortDate(a.localDate)}")
                 .setContentIntent(openApp(ctx, a.sourceId)).setAutoCancel(true)
                 .build()

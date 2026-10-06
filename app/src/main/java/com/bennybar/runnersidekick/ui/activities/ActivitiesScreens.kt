@@ -190,8 +190,11 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
                                     headline = "${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)}",
                                     overline = Format.activityTime(a.startUtc, a.utcOffsetS),
                                     supporting = listOfNotNull(displayName(a.name), "${Format.duration(a.movingS)} moving",
-                                        a.avgHr?.let { "${it.roundToInt()} bpm" }).joinToString(" · "),
-                                    icon = Icons.AutoMirrored.Outlined.DirectionsRun, iconShape = MaterialShapes.Cookie9Sided,
+                                        a.avgHr?.let { "${it.roundToInt()} bpm" }).joinToString(" · ") +
+                                        (if (a.records.isNotEmpty()) "\nNew best: " + a.records.joinToString(", ") { "${it.title.removePrefix("Fastest ")} ${it.value}" } else ""),
+                                    // A run that set a record wears a trophy
+                                    icon = if (a.records.isNotEmpty()) Icons.Outlined.EmojiEvents else Icons.AutoMirrored.Outlined.DirectionsRun,
+                                    iconShape = if (a.records.isNotEmpty()) MaterialShapes.Sunny else MaterialShapes.Cookie9Sided,
                                     onClick = { onOpen(a.sourceId) },
                                 )
                             }
