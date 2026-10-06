@@ -861,3 +861,23 @@ def test_a_sync_tapped_during_another_waits_for_it_then_syncs(tmp_path, monkeypa
             break
         _t.sleep(0.05)
     assert conn.sync_job.count_documents({"outcome": "ok"}) == 1  # then it synced itself
+
+
+def test_a_run_sets_a_record_only_by_beating_an_earlier_best():
+    from sidekick import trophies
+    from sidekick.db import set_setting
+    conn = synced()
+    conn.user_settings.delete_many({"key": "garmin_records"})
+    pg = trophies.progressions(conn, "fixture", ANCHOR)
+    sets = trophies.records_set(conn, "fixture", ANCHOR)
+    first = rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat())[0]["source_id"]
+    assert first not in sets  # the first run in the history isn't a "new best" of everything
+    for rid, pts in pg.items():
+        vals = [p["value"] for p in pts]
+        assert vals == sorted(vals, reverse=rid in trophies.LOWER_IS_BETTER) and len(set(vals)) == len(vals)  # each point improves
+    assert all(r["id"] in trophies.RUN_RECORDS for rs in sets.values() for r in rs)
+    # An older Garmin all-time record is the bar: nothing in the synced history beats a 15:00 5 km
+    set_setting(conn, "garmin_records", {"records": [{"type": 3, "value": 900.0, "activity_id": None, "date": "2020-01-01"}]})
+    assert not any(r["id"] == "5k" for rs in trophies.records_set(conn, "fixture", ANCHOR).values() for r in rs)
+    item = next(i for g in trophies.build(conn, "fixture", ANCHOR)["groups"] for i in g["items"] if i["id"] == "5k")
+    assert item["history"][0]["garmin"] and item["lower_is_better"]

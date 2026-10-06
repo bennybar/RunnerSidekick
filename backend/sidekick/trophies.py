@@ -12,7 +12,7 @@ from . import compare as cp
 from . import reports as rp
 from .db import get_setting
 
-TROPHIES_VERSION = "trophies-1.0"
+TROPHIES_VERSION = "trophies-1.1"  # 1.1: each record's history of improvements; runs that set a record
 # Garmin's personal-record type ids (running and daily records; cycling and swimming ones are left out)
 GARMIN_TYPES = {1: ("1k", "Fastest 1 km"), 2: ("mile", "Fastest mile"), 3: ("5k", "Fastest 5 km"), 4: ("10k", "Fastest 10 km"),
                 5: ("half", "Fastest half marathon"), 6: ("marathon", "Fastest marathon"), 7: ("longest", "Longest run"),
@@ -123,6 +123,12 @@ def build(conn, source: str, today: date) -> dict:
             daily.append({"id": key, "title": dict(GARMIN_TYPES.values())[key], "value": f"{g['value']:,.0f} {unit}",
                           "date": g["date"], "source_id": None, "source": "Garmin's record"})
 
+    hist = progressions(conn, source, today)
+    for item in fastest + longest + body:
+        item["history"] = [{"date": pt["date"], "value": fmt(item["id"], pt["value"]), "v": pt["value"], "source_id": link(pt["source_id"]),
+                            "garmin": pt.get("garmin", False)} for pt in hist.get(item["id"], [])]
+        item["lower_is_better"] = item["id"] in LOWER_IS_BETTER
+
     groups = [{"id": "fastest", "title": "Fastest", "items": fastest}, {"id": "longest", "title": "Longest and biggest", "items": longest},
               {"id": "body", "title": "Heart and fitness", "items": body}, {"id": "daily", "title": "Steps and streaks", "items": daily}]
     return {"groups": [g for g in groups if g["items"]], "history_since": since, "algorithm_version": TROPHIES_VERSION,
@@ -134,3 +140,72 @@ def build(conn, source: str, today: date) -> dict:
 def _hms(s: float) -> str:
     s = round(s)
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+LOWER_IS_BETTER = {k for k, _, _ in DISTANCES} | {"resting_hr"}
+TITLES = {**{k: t for k, t, _ in DISTANCES}, "longest": "Longest run", "longest_time": "Longest time running",
+          "climb": "Most climbing in a run", "week": "Biggest week", "vo2max": "Highest VO₂ max",
+          "resting_hr": "Lowest resting heart rate", "hrv": "Highest overnight HRV"}
+RUN_RECORDS = {k for k, _, _ in DISTANCES} | {"longest", "longest_time", "climb"}  # set by a single run
+
+
+def fmt(rid: str, v: float) -> str:
+    if rid in LOWER_IS_BETTER - {"resting_hr"} or rid == "longest_time":
+        return _hms(v)
+    return {"longest": f"{v / 1000:.1f} km", "week": f"{v / 1000:.1f} km", "climb": f"{v:.0f} m", "vo2max": f"{v:.0f}",
+            "resting_hr": f"{v:.0f} bpm", "hrv": f"{v:.0f} ms"}[rid]
+
+
+def progressions(conn, source: str, today: date) -> dict[str, list[dict]]:
+    """Each record's history in time order, one point per improvement: {id: [{date, value, source_id, garmin?}]}. The
+    first point is where the history starts, not an improvement. For records Garmin also keeps, Garmin's all-time record
+    from before the synced history is that starting point: a run only counts as a new best if it beats it."""
+    garmin = {GARMIN_TYPES[r["type"]][0]: r for r in (get_setting(conn, "garmin_records", None) or {}).get("records", [])
+              if r["type"] in GARMIN_TYPES}
+    runs = rp.activities(conn, source, "0000-01-01", today.isoformat())
+    since = runs[0]["local_date"] if runs else None
+    out: dict[str, list[dict]] = {}
+
+    def track(rid, seq, lower, g=None):
+        """seq: (date, value, source_id) in time order. g: Garmin's record for this, if it keeps one."""
+        pts = []
+        if g and g.get("date") and since and g["date"] < since:
+            pts.append({"date": g["date"], "value": g["value"], "source_id": None, "garmin": True})  # older than our history
+        elif g and g.get("date"):
+            seq = sorted(seq + [(g["date"], g["value"], g.get("activity_id"))], key=lambda x: x[0])  # Garmin's own count of a run we have
+        for d, v, sid in seq:
+            if v is None:
+                continue
+            if not pts or (v < pts[-1]["value"] if lower else v > pts[-1]["value"]):
+                pts.append({"date": d, "value": v, "source_id": sid})
+        if pts:
+            out[rid] = pts
+
+    ours = rp.records(conn, source)
+    for key, _, _ in DISTANCES:
+        track(key, [(p["date"], p["elapsed_s"], p["source_id"]) for p in ours.get(key, {}).get("progression", [])], True, garmin.get(key))
+    track("longest", [(a["local_date"], a["distance_m"], a["source_id"]) for a in runs], False, garmin.get("longest"))
+    track("longest_time", [(a["local_date"], a["moving_s"], a["source_id"]) for a in runs], False)
+    track("climb", [(a["local_date"], a["elevation_gain_m"], a["source_id"]) for a in runs if (a["elevation_gain_m"] or 0) >= 20], False)
+    first = rp.first_weekday(conn)
+    weeks: dict[str, float] = {}
+    for a in runs:
+        d = date.fromisoformat(a["local_date"])
+        ws = (d - timedelta(days=(d.weekday() - first) % 7)).isoformat()
+        weeks[ws] = weeks.get(ws, 0.0) + (a["distance_m"] or 0)
+    track("week", [(w, v, None) for w, v in sorted(weeks.items())], False)
+    for rid, metric, lower in (("vo2max", "garmin_vo2max_running", False), ("resting_hr", "resting_hr", True), ("hrv", "hrv_overnight_avg", False)):
+        track(rid, [(d, v, None) for d, v in sorted(rp.series(conn, source, metric, today.isoformat()).items())], lower)
+    return out
+
+
+def records_set(conn, source: str, today: date) -> dict[str, list[dict]]:
+    """The records each run set (beat an earlier best), by run: {source_id: [{id, title, value}]}."""
+    out: dict[str, list[dict]] = {}
+    for rid, pts in progressions(conn, source, today).items():
+        if rid not in RUN_RECORDS:
+            continue
+        for pt in pts[1:]:
+            if pt["source_id"]:
+                out.setdefault(pt["source_id"], []).append({"id": rid, "title": TITLES[rid], "value": fmt(rid, pt["value"])})
+    return out

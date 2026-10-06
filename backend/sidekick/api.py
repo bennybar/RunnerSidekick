@@ -647,9 +647,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         end = end or today(conn).isoformat()
         start = start or (date.fromisoformat(end) - timedelta(days=cfg.backfill_days)).isoformat()
         rows = many(conn.activity, {"source": cfg.source, "local_date": {"$gte": start, "$lte": end}}, sort=[("start_utc", -1)])
+        from . import trophies
+        sets = trophies.records_set(conn, cfg.source, today(conn))  # the records each run set: a trophy on the run, and its notification
         return [{k: r[k] for k in ("source_id", "sport", "name", "start_utc", "utc_offset_s", "local_date", "distance_m",
                                    "elapsed_s", "moving_s", "avg_hr", "elevation_gain_m")} |
-                {"pace_moving_s_per_km": rp.rn.moving_pace(r["distance_m"], r["moving_s"]), "synthetic": synthetic} for r in rows]
+                {"pace_moving_s_per_km": rp.rn.moving_pace(r["distance_m"], r["moving_s"]), "synthetic": synthetic,
+                 "records": sets.get(r["source_id"], [])} for r in rows]
 
     @api.get("/v1/activities/{sid}")
     def get_activity(sid: str, conn=Depends(db)):
