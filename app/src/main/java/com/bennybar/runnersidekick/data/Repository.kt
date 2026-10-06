@@ -85,6 +85,10 @@ class Repository(
 
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
     val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+    val cardio: Flow<Cached<com.bennybar.runnersidekick.data.remote.Cardio>?> =
+        observe("cardio") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(it) }
+    suspend fun refreshCardio() = put("cardio", api.getRaw("/v1/cardio"))
+
     val trophies: Flow<Cached<com.bennybar.runnersidekick.data.remote.Trophies>?> =
         observe("trophies") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(it) }
     suspend fun refreshTrophies() = put("trophies", api.getRaw("/v1/trophies"))
@@ -296,6 +300,7 @@ class Repository(
             key == "coach" -> json.decodeFromString<CoachView>(body)
             key == "compare" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body)
             key == "trophies" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(body)
+            key == "cardio" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(body)
             key.startsWith("trends:") -> json.decodeFromString<Trends>(body)
             key.startsWith("activity:") -> json.decodeFromString<ActivityDetail>(body)
             key.startsWith("runai:") -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body)

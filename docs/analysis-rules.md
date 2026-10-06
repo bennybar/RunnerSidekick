@@ -546,3 +546,11 @@ a week plan, Today's race phase is the week's (from its first day), except recov
 
 Ten scenarios played morning by morning through sync, reports and Today; see the module docstring and
 `tests/test_replay.py` for the checks.
+
+## Cardio fitness (experimental) — `cardio.py` (`cardio-0.1`)
+
+Evidence shown side by side, not combined. Runs: VO2max = 3.5 + (3.5 + 0.2·v − 3.5) / ((HR − HRrest) / (HRmax − HRrest)),
+v = recorded speed in m/min over the stretch after a 10-minute warm-up; HRrest = median Garmin overnight resting HR over
+the 28 days before the run (7+ days); eligibility as listed in the module. Questionnaire: Jackson 1990 BMI model,
+56.363 + 1.921·PA-R − 0.381·age − 0.754·BMI + 10.987·male (SEE ≈ 5.7 across the study group). Performance: Daniels &
+Gilbert VDOT. Heart-rate samples outside 30–240 bpm are treated as missing in every analysis.

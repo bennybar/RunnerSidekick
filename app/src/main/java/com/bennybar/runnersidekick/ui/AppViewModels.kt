@@ -113,6 +113,15 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
 
 class InsightsVm(repo: Repository) : BaseVm(repo) {
     val insights = repo.insights.state(null)
+    val cardio = repo.cardio.state(null)
+    val answers = MutableStateFlow<com.bennybar.runnersidekick.data.remote.SettingsDto?>(null)
+    fun loadAnswers() = launchIo { answers.value = repo.remoteSettings() }
+    /** Saves an answer for the cardio estimates (activity level, weight, height, max heart rate), then recalculates. */
+    fun saveAnswer(change: (com.bennybar.runnersidekick.data.remote.SettingsDto) -> com.bennybar.runnersidekick.data.remote.SettingsDto) = launchIo {
+        val now = answers.value ?: repo.remoteSettings()
+        answers.value = repo.saveRemoteSettings(change(now))
+        repo.refreshCardio()
+    }
     val coach = repo.coach.state(null)
     val unwellPending = repo.unwellPending.state(false)
     private val _coachLoading = MutableStateFlow(false)
@@ -175,7 +184,7 @@ class InsightsVm(repo: Repository) : BaseVm(repo) {
     val trends = _days.flatMapLatest { repo.trends(it) }.state(null)
 
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); if (tab.value == 2) loadTrends(_days.value) }
+    fun refresh() = launchIo { repo.refreshInsights(); repo.refreshWeekly(); repo.refreshFitness(); repo.refreshCardio(); if (tab.value == 2) loadTrends(_days.value) }
         .also { loadCoach() }
     fun setDays(d: Int) { _days.value = d; loadTrends(d) }
     fun setInsightState(id: String, state: String?) = launchIo { repo.setInsightState(id, state) }

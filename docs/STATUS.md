@@ -332,6 +332,25 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Cardio fitness, experimental (2026-10-06, v0.48.0)
+- Insights → Fitness → "Cardio fitness (experimental)" (`GET /v1/cardio`, `cardio.py`): the evidence about aerobic
+  capacity side by side, never blended (they share inputs, so agreement wouldn't add certainty):
+  - From your runs: ACSM running equation (flat, recorded speed) against heart-rate reserve (Swain's VO2-reserve form),
+    per qualifying run: steady, outdoors, known and not hot weather, ≤10 m/km up and down with a level stretch,
+    20+ min after a 10-min warm-up, 90%+ valid heart rate, 80% of the time within 50–90% of heart-rate reserve. The
+    recent median, the run-to-run spread (variability, not accuracy), how much a 5-bpm-lower maximum moves the same
+    runs, and every run left out with its reason.
+  - Questionnaire-based: Jackson et al. 1990 BMI model with its own inputs: the NASA/JSC activity rating in its published
+    wording (dated answer), height and weight (Garmin's or yours, dated), age and sex.
+  - Running performance: Daniels' VDOT from the best 5 km+ stretch, never compared with the VO₂ estimates.
+  - Garmin's VO₂ max (newest reading, via `scores.vo2_on`).
+  - VO₂ estimates are placed among people of your sex and age (Cooper Institute ratings; FRIEND to come once its table
+    is taken from the paper). Notes list possible reasons for disagreement without diagnosing one.
+- Maximum heart rate: yours when set (dated), else the higher of Garmin's setting and the highest held over a full
+  minute (time-weighted, continuous readings only).
+- Heart rate: readings outside 30–240 bpm (a strap's 0 or 255) are gaps everywhere samples are read, not just here.
+- Garmin's profile weight is now read (with height) for the questionnaire.
+
 ## New-record moments and record history (2026-10-06, v0.47.0)
 - A run sets a record when it beats an earlier best (the first value in the history isn't a "new best"; for records
   Garmin also keeps, its older all-time record is the bar). `trophies.progressions` holds each record's improvements;

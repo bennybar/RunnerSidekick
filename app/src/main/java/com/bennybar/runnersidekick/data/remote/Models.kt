@@ -480,6 +480,43 @@ data class CheckinDto(
     val deleted: Boolean = false,
 )
 
+/** Cardio fitness (experimental): the evidence about aerobic capacity side by side, never blended. */
+@Serializable
+data class Cardio(
+    val runs: CardioPart, val questionnaire: CardioPart, val performance: CardioPart, val garmin: CardioPart,
+    @SerialName("hr_max") val hrMax: CardioHrMax = CardioHrMax(),
+    val notes: List<String> = emptyList(), val basis: String = "",
+    @SerialName("par_scale") val parScale: List<ParOption> = emptyList(),
+    val inputs: CardioInputs = CardioInputs(),
+)
+
+/** The weight and height the questionnaire estimate used, and where each came from ("from Garmin", or the day you set it) */
+@Serializable
+data class CardioInputs(@SerialName("weight_kg") val weightKg: Double? = null, @SerialName("weight_from") val weightFrom: String? = null,
+                        @SerialName("height_cm") val heightCm: Double? = null, @SerialName("height_from") val heightFrom: String? = null)
+
+@Serializable
+data class CardioPart(
+    val id: String, val title: String, val status: String = "ok", val value: Double? = null,
+    val headline: String? = null, val detail: String? = null, val caveat: String? = null, val source: String? = null,
+    val comparison: CardioComparison? = null, val spread: List<Int>? = null, val sensitivity: String? = null,
+    @SerialName("runs_used") val runsUsed: Int? = null, @SerialName("left_out") val leftOut: Map<String, Int>? = null,
+    val points: List<CardioPoint> = emptyList(), val date: String? = null,
+    @SerialName("source_id") val sourceId: String? = null,
+)
+
+@Serializable
+data class CardioComparison(val headline: String, val detail: String? = null, val percentile: Int? = null, val source: String? = null)
+
+@Serializable
+data class CardioPoint(val date: String, val value: Double, @SerialName("source_id") val sourceId: String)
+
+@Serializable
+data class CardioHrMax(val value: Double? = null, val source: String? = null)
+
+@Serializable
+data class ParOption(val value: Int, val text: String)
+
 /** Your records: Garmin's all-time personal records next to the app's bests, with age comparisons where they exist. */
 @Serializable
 data class Trophies(val groups: List<TrophyGroup> = emptyList(), @SerialName("history_since") val historySince: String? = null,
@@ -529,6 +566,15 @@ data class SettingsDto(
     @SerialName("race_name") val raceName: String? = null,
     @SerialName("week_start_day") val weekStartDay: String? = null,
     @SerialName("week_start_effective") val weekStartEffective: String = "monday",
+    /** Answers for the cardio fitness estimates, each with the day it was given (the server dates them) */
+    @SerialName("activity_par") val activityPar: Int? = null,
+    @SerialName("activity_par_at") val activityParAt: String? = null,
+    @SerialName("profile_weight_kg") val profileWeightKg: Double? = null,
+    @SerialName("profile_weight_kg_at") val profileWeightKgAt: String? = null,
+    @SerialName("profile_height_cm") val profileHeightCm: Double? = null,
+    @SerialName("profile_height_cm_at") val profileHeightCmAt: String? = null,
+    @SerialName("hr_max") val hrMax: Int? = null,
+    @SerialName("hr_max_at") val hrMaxAt: String? = null,
     /** Models the server's key may run (read-only; your own key may use any) */
     @SerialName("ai_models") val aiModels: List<String> = emptyList(),
 )

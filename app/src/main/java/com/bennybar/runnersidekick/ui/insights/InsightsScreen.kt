@@ -117,6 +117,9 @@ fun InsightsScreen(
     val coach by vm.coach.collectAsStateWithLifecycle()
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
     val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
+    val cardio by vm.cardio.collectAsStateWithLifecycle()
+    val answers by vm.answers.collectAsStateWithLifecycle()
+    var cardioOpen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val compare by vm.compare.collectAsStateWithLifecycle()
     val firstDay by vm.weekStart.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadCoach() }
@@ -162,6 +165,7 @@ fun InsightsScreen(
                 fitness?.value?.let { f ->
                     animatedItem(key = "fitness") { FitnessSection(f, onOpenRun = onOpenRun) }
                 }
+                cardio?.value?.let { c -> animatedItem(key = "cardio") { CardioCard(c) { vm.loadAnswers(); cardioOpen = true } } }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
                 if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
                 // Hard-running share is in the stats grid and the coach; pace at the same heart rate is charted in Trends
@@ -187,6 +191,9 @@ fun InsightsScreen(
                 }
             }
         }
+    }
+    if (cardioOpen) cardio?.value?.let { c ->
+        CardioSheet(c, answers, onSave = vm::saveAnswer, onOpenRun = { id -> cardioOpen = false; onOpenRun(id) }, onDismiss = { cardioOpen = false })
     }
     method?.let { m -> MethodSheet(data?.value?.insights?.firstOrNull { it.id == m.id } ?: m, onState = { st -> vm.setInsightState(m.id, st) }) { method = null } }
 }
