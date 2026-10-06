@@ -150,6 +150,13 @@ class FixtureConnector:
                 "training_status": {"phrase": "PRODUCTIVE_1", "date": day.isoformat(), "since": None, "paused": False,
                                     "acute_load": 420, "chronic_min": 300.0, "chronic_max": 520.0}}
 
+    def personal_records(self) -> list[dict] | None:
+        """Garmin-style all-time records for the demo (some older than the synced history)."""
+        old = (self.anchor - timedelta(days=400)).isoformat()
+        return [{"type": 1, "value": 268.0, "activity_id": None, "date": old}, {"type": 3, "value": 1395.0, "activity_id": None, "date": old},
+                {"type": 4, "value": 2950.0, "activity_id": None, "date": old}, {"type": 7, "value": 21400.0, "activity_id": None, "date": old},
+                {"type": 12, "value": 31250.0, "activity_id": None, "date": old}, {"type": 15, "value": 12.0, "activity_id": None, "date": old}]
+
     def list_activities(self, start: date, end: date) -> list[dict]:
         out = []
         d = start

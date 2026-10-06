@@ -349,7 +349,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                               if user["id"] in running else None),
             "last_job": job,
             "sync_next_allowed_at": (lambda w: w.isoformat().replace("+00:00", "Z") if w else None)(
-                None if synthetic else next_manual_sync(conn, cfg.source)),
+                None if synthetic else next_manual_sync(conn, cfg.source, cooldown=user["role"] != accounts.OWNER_ROLE)),
             "capabilities": row.get("capabilities", {}) if row else {},
             "garmin_linked": synthetic or garmin_link.linked(user_cfg(user).garmin_token_dir),
             "garmin_official": goauth.status(user_cfg(user).data_dir, bool(secrets(cfg.data_dir).get("garmin_client_id"))),
@@ -360,7 +360,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         if user["id"] in running:
             return {"started": False, "detail": "sync already running"}
         # Not too often: Garmin can rate-limit or lock an account hit in bursts (demo data has no such limit)
-        wait = None if synthetic else next_manual_sync(conn, cfg.source)
+        # The server owner isn't held to the app's cooldown (Garmin's own "wait" still applies to everyone)
+        wait = None if synthetic else next_manual_sync(conn, cfg.source, cooldown=user["role"] != accounts.OWNER_ROLE)
         if wait:
             return {"started": False, "detail": "synced recently", "next_allowed_at": wait.isoformat().replace("+00:00", "Z")}
         threading.Thread(target=do_sync, args=(user_cfg(user), user["id"]), daemon=True).start()
@@ -379,6 +380,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             from .today_view import enrich
             enrich(conn, cfg.source, d, body)
         return body
+
+    @api.get("/v1/trophies")
+    def get_trophies(conn=Depends(db)):
+        from . import trophies
+        return trophies.build(conn, cfg.source, today(conn))
 
     @api.get("/v1/trends")
     def get_trends(days: int = 28, conn=Depends(db), x_openai_key: str | None = Header(default=None)):

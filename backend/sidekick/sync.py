@@ -164,6 +164,11 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
                 merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
                 merged["fetched_at"] = utc_now()
                 set_setting(conn, "garmin_fitness", merged)
+        # Garmin's all-time personal records change only with a new run: with the fitness numbers
+        if hasattr(connector, "personal_records") and fit_due:
+            recs = connector.personal_records()
+            if recs is not None:
+                set_setting(conn, "garmin_records", {"records": recs, "fetched_at": utc_now()})
         # Zones and the profile (sex, birth date, week start) rarely change: once a day
         meta_due = (get_setting(conn, "source_meta_at", None) or "") < _hours_ago(META_EVERY_H)
         if hasattr(connector, "hr_zones") and meta_due:
@@ -327,10 +332,11 @@ COOLDOWN_MIN = {"ok": 15, "partial": 15, "rate_limited": 30, "deferred": 30}
 COOLDOWN_AFTER_FAILURE_MIN = 2
 
 
-def next_manual_sync(conn: Database, source: str, now: datetime | None = None) -> datetime | None:
-    """When a manual sync may next call Garmin, or None when it may now. Protects the Garmin account from bursts."""
+def next_manual_sync(conn: Database, source: str, now: datetime | None = None, cooldown: bool = True) -> datetime | None:
+    """When a manual sync may next call Garmin, or None when it may now. Protects the Garmin account from bursts.
+    cooldown=False (the server owner): only Garmin's own back-off applies, never ours."""
     now = now or datetime.now(timezone.utc)
-    job = one(conn.sync_job, {"source": source, "finished_at": {"$ne": None}}, sort=[("id", -1)])
+    job = one(conn.sync_job, {"source": source, "finished_at": {"$ne": None}}, sort=[("id", -1)]) if cooldown else None
     t = None
     if job:
         done = datetime.fromisoformat(job["finished_at"].replace("Z", "+00:00"))

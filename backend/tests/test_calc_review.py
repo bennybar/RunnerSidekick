@@ -303,6 +303,10 @@ def test_manual_sync_cooldown_by_how_the_last_sync_ended():
     finish("ok", 30)
     set_connection(conn, "fixture", retry_not_before=(now + timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assert next_manual_sync(conn, "fixture", now) == now + timedelta(minutes=40)  # Garmin's own back-off wins
+    finish("ok", 1)
+    assert next_manual_sync(conn, "fixture", now, cooldown=False) == now + timedelta(minutes=40)  # the owner: Garmin's wait only
+    set_connection(conn, "fixture", retry_not_before=None)
+    assert next_manual_sync(conn, "fixture", now, cooldown=False) is None  # ...and no cooldown of ours
 
 
 def test_ai_calls_on_the_server_key_share_one_daily_cap(monkeypatch):
@@ -827,3 +831,23 @@ def test_heart_rate_has_to_cover_most_of_the_whole_run(monkeypatch):
     assert focus.zone_shares(None, a, [100, 120, 140, 155, 165]) is None  # 60% isn't "most of the run"
     s.hr[:] = [170.0 if x < 800 else None for x in range(1000)]
     assert focus.zone_shares(None, a, [100, 120, 140, 155, 165]) is not None
+
+
+def test_trophies_combine_garmin_records_with_our_bests_and_age_compare():
+    from sidekick import trophies
+    from sidekick.db import set_setting
+    conn = synced()
+    set_setting(conn, "garmin_records", {"records": [{"type": 3, "value": 3000.0, "activity_id": None, "date": "2025-01-01"},  # slower than ours
+                                                     {"type": 4, "value": 2700.0, "activity_id": "fx-run-2026-09-05", "date": "2026-09-05"},
+                                                     {"type": 99, "value": 1.0, "activity_id": None, "date": None}]}, )
+    out = trophies.build(conn, "fixture", ANCHOR)
+    items = {i["id"]: i for g in out["groups"] for i in g["items"]}
+    assert items["5k"]["source"].startswith("the fastest stretch") and items["5k"]["seconds"] < 3000  # the faster of the two
+    assert items["10k"]["seconds"] == 2700.0 and items["10k"]["source_id"] == "fx-run-2026-09-05"  # Garmin's, linked to the run
+    assert "age grade" in items["10k"]["comparison"]["headline"]
+    assert items["longest"]["source"] == "your runs" and items["week"]["metres"] > 0
+    assert items["resting_hr"]["comparison"]["headline"].startswith("Your usual")
+    assert "1k" in items and items["1k"]["comparison"] is None  # no age standard for 1 km: no comparison made up
+    set_setting(conn, "profile_sex", None)
+    conn.user_settings.delete_many({"key": {"$in": ["profile_sex", "source_profile"]}})
+    assert all(i.get("comparison") is None for g in trophies.build(conn, "fixture", ANCHOR)["groups"] for i in g["items"])  # no sex: none

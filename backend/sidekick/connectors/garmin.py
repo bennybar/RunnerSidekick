@@ -445,6 +445,21 @@ class GarminConnector:
                 "components": {k: (v.get("value") if isinstance(v, dict) else v) for k, v in (fa.get("components") or {}).items()}}
         return out
 
+    def personal_records(self) -> list[dict] | None:
+        """Garmin's own all-time personal records (fastest 1 km, mile, 5 km..., longest run, most steps, goal streaks), as
+        {type, value, activity_id, date}. Garmin's type ids, kept as numbers; trophies.py names them."""
+        rows = self._call("get_personal_record")
+        if not isinstance(rows, list):
+            return None
+        out = []
+        for r in rows:
+            if r.get("typeId") is None or r.get("value") is None:
+                continue
+            when = r.get("prStartTimeLocalFormatted") or r.get("activityStartDateTimeLocalFormatted") or r.get("prStartTimeGmtFormatted")
+            out.append({"type": int(r["typeId"]), "value": float(r["value"]),
+                        "activity_id": str(r["activityId"]) if r.get("activityId") else None, "date": (when or "")[:10] or None})
+        return out
+
     def profile(self) -> dict | None:
         """Sex, birth date, height and first day of week (comparisons, BMI, week boundaries). Nothing else from the profile."""
         ud = (self._call("get_user_profile") or {}).get("userData") or {}
