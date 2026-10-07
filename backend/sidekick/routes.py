@@ -195,6 +195,8 @@ def groups(conn, source: str) -> dict:
     for o in conn.route_override.find({}):
         for other in o.get("not_with", []):
             apart.add(frozenset((o["source_id"], other)))
+        if o.get("not_route"):  # the first format (v0.50.0): "not the route started by that run"
+            apart.add(frozenset((o["source_id"], o["not_route"])))
     reps: list[dict] = []
     for a in runs:
         sid, pts = a["source_id"], shapes[a["source_id"]]
@@ -234,7 +236,6 @@ def different_route(conn, source: str, sid: str) -> bool:
 # ---------------------------------------------------------------- how a route has gone (separate from identifying it)
 
 EASY = {"easy", "long", "recovery", "steady", "progression"}
-HR_MATCH_BPM = 5
 
 
 def run_row(conn, source: str, a: dict) -> dict:
@@ -249,24 +250,36 @@ def run_row(conn, source: str, a: dict) -> dict:
             "temperature_c": (ht or {}).get("temperature_c"), "hot": None if ht is None else ht["hot"]}
 
 
+HR_BAND_BPM = 3      # runs compared must each be within this of one shared heart rate, not just on average
+MIN_PER_PERIOD = 2
+MIN_APART_DAYS = 28
+
+
 def progress(rows: list[dict]) -> str | None:
-    """At similar heart rate, how the route's pace moved: the first runs against the latest, of the same kind, hot days with
-    hot days and cool with cool (the weather estimate's threshold, a broad filter, not equal weather). Runs whose weather
-    or kind isn't known are left out."""
+    """How the route's pace moved at the same heart rate. Only runs of the same kind, hot days with hot days and cool with
+    cool (the weather estimate's threshold: a broad filter, not equal weather), and each within ±3 bpm of one shared heart
+    rate, so the comparison is run against run, not averages that happen to match. The earliest two of those against the
+    latest two, at least 4 weeks apart. Runs whose weather or kind isn't known are left out."""
+    from . import reports as rp
     for kind, hot in (("easy", False), ("hard", False), ("easy", True), ("hard", True)):
         rs = [r for r in rows if r["kind"] == kind and r["hot"] == hot and r["avg_hr"] and r["pace_s_per_km"]]
-        if len(rs) < 4:
+        best = None
+        for c in sorted({round(r["avg_hr"]) for r in rs}):  # the band holding the most runs
+            band = [r for r in rs if abs(r["avg_hr"] - c) <= HR_BAND_BPM]
+            if best is None or len(band) > len(best[1]):
+                best = (c, band)
+        if not best or len(best[1]) < 2 * MIN_PER_PERIOD:
             continue
-        early, late = rs[:2], rs[-2:]
-        h1, h2 = median(r["avg_hr"] for r in early), median(r["avg_hr"] for r in late)
-        if abs(h1 - h2) > HR_MATCH_BPM:
+        c, band = best
+        early, late = band[:MIN_PER_PERIOD], band[-MIN_PER_PERIOD:]
+        if (date.fromisoformat(late[0]["date"]) - date.fromisoformat(early[-1]["date"])).days < MIN_APART_DAYS:
             continue
-        from . import reports as rp
         p1, p2 = median(r["pace_s_per_km"] for r in early), median(r["pace_s_per_km"] for r in late)
         word = "faster" if p2 < p1 else "slower"
         months = (date.fromisoformat(early[0]["date"]).strftime("%b"), date.fromisoformat(late[-1]["date"]).strftime("%b"))
-        return (f"{'Easy' if kind == 'easy' else 'Harder'} runs{' on hot days' if hot else ''} at about {round((h1 + h2) / 2)} bpm: "
-                f"{rp.fmt_pace(p1)} → {rp.fmt_pace(p2)} ({months[0]} → {months[1]}), {abs(round(p1 - p2))} s/km {word} at a similar heart rate")
+        return (f"{'Easy' if kind == 'easy' else 'Harder'} runs{' on hot days' if hot else ''} at {c - HR_BAND_BPM}–{c + HR_BAND_BPM} bpm: "
+                f"{rp.fmt_pace(p1)} → {rp.fmt_pace(p2)} ({months[0]} → {months[1]}), {abs(round(p1 - p2))} s/km {word} "
+                f"({len(band)} runs in that band)")
     return None
 
 

@@ -1151,7 +1151,16 @@ def test_route_review_regressions():
     assert routes.progress(rows) is None  # only 2 runs are known to be easy and cool
     rows += [{"date": "2026-09-01", "kind": "easy", "hot": False, "avg_hr": 150.0, "pace_s_per_km": 350.0},
              {"date": "2026-09-15", "kind": "easy", "hot": False, "avg_hr": 151.0, "pace_s_per_km": 348.0}]
-    assert routes.progress(rows) and "Easy runs at about" in routes.progress(rows)
+    assert routes.progress(rows) and "Easy runs at 147–153 bpm" in routes.progress(rows)
+    # Averages that match aren't runs that match: 120 and 160 earlier, 140 and 140 later is no comparison
+    mixed = [{"date": d, "kind": "easy", "hot": False, "avg_hr": h, "pace_s_per_km": pc}
+             for d, h, pc in (("2026-06-01", 120.0, 380.0), ("2026-06-08", 160.0, 330.0), ("2026-09-01", 140.0, 340.0), ("2026-09-08", 140.0, 342.0))]
+    assert routes.progress(mixed) is None
+    # Old-format corrections ("not_route") are still honoured
+    conn.route_override.delete_many({})
+    first, second = runs[0]["source_id"], runs[1]["source_id"]
+    conn.route_override.insert_one({"source_id": second, "not_route": first})
+    assert all(not ({first, second} <= set(m)) for m in routes.groups(conn, "fixture").values())
     # The outline is a shape only: within a unit box
     o = routes.outline(shape(loop))
     assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in o)
