@@ -110,10 +110,9 @@ def hr_max(conn, source: str, today: date) -> dict:
     return {"value": None, "source": None}
 
 
-def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> tuple[dict | None, str | None]:
-    """One run's VO2 max estimate, or None and why it was left out."""
-    if hr_rest is None or not hrmax:
-        return None, "resting or maximum heart rate not known yet"
+def steady_stretch(conn, a: dict, allow_hot: bool = False) -> tuple[dict | None, str | None]:
+    """A run's steady, level, well-recorded stretch after the warm-up: its time-weighted speed and heart rate, and whether
+    the day was hot. Or None and why the run doesn't qualify. Shared by cardio fitness and pace at a reference heart rate."""
     an = rp.run_analysis(conn, a)
     if (an.get("classification") or {}).get("kind") != "steady":
         return None, "not steady"
@@ -122,7 +121,7 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     ht = wx.heat(wx.stored(conn, a["source_id"]))
     if ht is None:
         return None, "weather unknown"
-    if ht["hot"]:
+    if ht["hot"] and not allow_hot:
         return None, "hot and humid"
     if a.get("elevation_gain_m") is None or a.get("elevation_loss_m") is None or not a.get("distance_m"):
         return None, "elevation not recorded"  # unknown isn't flat
@@ -160,6 +159,17 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
         return None, "walking pace"
+    return {"v": v, "hr": hr, "hot": ht["hot"], "s": s, "w": w}, None
+
+
+def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> tuple[dict | None, str | None]:
+    """One run's VO2 max estimate, or None and why it was left out."""
+    if hr_rest is None or not hrmax:
+        return None, "resting or maximum heart rate not known yet"
+    st, why = steady_stretch(conn, a)
+    if st is None:
+        return None, why
+    v, hr, s, w, with_hr = st["v"], st["hr"], st["s"], st["w"], None
     # The relationship holds within the submaximal range: most of the stretch has to be inside it, not just its average
     inside = 0.0
     moved = 0.0
@@ -169,6 +179,7 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
         moved += wi
         if moved > WARMUP_S and h is not None and HRR_RANGE[0] <= (h - hr_rest) / (hrmax - hr_rest) <= HRR_RANGE[1]:
             inside += wi
+    with_hr = sum(wi for wi, h, k in zip(w, s.hr, _after_warmup(w)) if wi > 0 and k and h is not None)
     if inside < IN_RANGE_SHARE * with_hr:
         return None, "heart rate outside the reliable range for much of the run"
     share = (hr - hr_rest) / (hrmax - hr_rest)
@@ -179,6 +190,15 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     vo2 = 3.5 + 0.2 * v * 60
     return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1),
             "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
+
+
+def _after_warmup(w) -> list[bool]:
+    out, moved = [], 0.0
+    for wi in w:
+        if wi > 0:
+            moved += wi
+        out.append(moved > WARMUP_S)
+    return out
 
 
 def with_hr_max(e: dict, hrmax: float) -> float:

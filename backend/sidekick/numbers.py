@@ -283,6 +283,81 @@ def climbing(conn, source: str, today: date) -> dict:
             "detail": f"On {day(top['date'])}.", "series": series, "source_id": top["source_id"]}
 
 
+# ---------------------------------------------------------------- pace at a reference heart rate
+
+REF_HR_BAND = 4  # bpm: only runs whose steady stretch averaged this close to the reference count (no extrapolation)
+
+
+def reference_pace(conn, source: str, today: date) -> dict:
+    from .cardio import steady_stretch
+    base = {"id": "reference_pace", "title": "Pace at your usual heart rate", "lower_is_better": True,
+            "basis": "Your pace on runs whose steady stretch (after a 10-minute warm-up, level, good heart rate) averaged close "
+                     "to one reference heart rate: your typical steady heart rate, rounded to 5 bpm. Only runs within 4 bpm of "
+                     "it count, so nothing is extrapolated; same watch only; hot days are compared with hot days. Faster at the "
+                     "same heart rate usually means fitter, though heat, terrain and tiredness move it too."}
+    runs = rp.activities(conn, source, (today - timedelta(days=180)).isoformat(), today.isoformat())
+    stretches = []
+    for a in runs:
+        st, _ = steady_stretch(conn, a, allow_hot=True)
+        if st:
+            stretches.append({"date": a["local_date"], "source_id": a["source_id"], "device": a.get("device_id"),
+                              "v": st["v"], "hr": st["hr"], "hot": st["hot"]})
+    if len(stretches) < 3:
+        return {**base, "status": "not_enough", "headline": "Needs steady, level runs with good heart rate",
+                "detail": f"{len(stretches)} qualifying runs in the last 6 months; 3 are needed."}
+    latest = stretches[-1]
+    same = [x for x in stretches if x["device"] == latest["device"] and x["hot"] == latest["hot"]]
+    ref = 5 * round(median(x["hr"] for x in same[-12:]) / 5)
+    near = [x for x in same if abs(x["hr"] - ref) <= REF_HR_BAND]
+    if len(near) < 2:
+        return {**base, "status": "not_enough", "headline": f"Too few runs near {ref} bpm yet", "detail": ""}
+    series = [{"date": x["date"], "v": round(1000 / x["v"], 1), "label": f"{rp.fmt_pace(1000 / x['v'])} at {x['hr']:.0f} bpm",
+               "source_id": x["source_id"]} for x in near]
+    now = median(p["v"] for p in series[-3:])
+    ch = change_since([{"date": p["date"], "v": p["v"]} for p in series], 56, today)
+    cond = " on hot days" if latest["hot"] else ""
+    trend = (f"{abs(ch[0]):.0f} s/km {'faster' if ch[0] < 0 else 'slower'} than on {day(ch[1])}{cond}" if ch and abs(ch[0]) >= 3
+             else f"about the same as two months ago{cond}" if ch else "")
+    return {**base, "status": "ok", "value": f"{rp.fmt_pace(now)} at {ref} bpm", "headline": trend,
+            "detail": f"From {len(series)} runs within {REF_HR_BAND} bpm of {ref}{cond}; the latest three's median.", "series": series}
+
+
+# ---------------------------------------------------------------- endurance by run length
+
+DURATION_GROUPS = ((0, 45, "under 45 min"), (45, 60, "45–60 min"), (60, 75, "60–75 min"), (75, 90, "75–90 min"), (90, 999, "90 min +"))
+MIN_PER_GROUP = 3
+
+
+def endurance(conn, source: str, today: date) -> dict:
+    from .weather import unusually_hot
+    base = {"id": "endurance", "title": "Endurance by run length", "lower_is_better": True,
+            "basis": "Aerobic decoupling (how much heart rate drifts against pace from the first half to the second) on steady "
+                     "runs, grouped by how long they were, last 6 months. Where it rises with length is where holding your effort "
+                     "gets harder. Runs much hotter than your usual are left out; each group needs 3 runs."}
+    hot = unusually_hot(conn)
+    by: dict[str, list[float]] = {}
+    for a in rp.activities(conn, source, (today - timedelta(days=180)).isoformat(), today.isoformat()):
+        rep = conn.report.find_one({"type": "post_run", "subject_key": a["source_id"]}, sort=[("revision", -1)])
+        dc = ((rep or {}).get("body") or {}).get("decoupling") or {}
+        if not dc.get("eligible") or dc.get("decoupling_pct") is None or a["source_id"] in hot or not a.get("moving_s"):
+            continue
+        mins = a["moving_s"] / 60
+        label = next(g[2] for g in DURATION_GROUPS if g[0] <= mins < g[1])
+        by.setdefault(label, []).append(dc["decoupling_pct"])
+    rows = [(g[2], by[g[2]]) for g in DURATION_GROUPS if len(by.get(g[2], [])) >= MIN_PER_GROUP]
+    if not rows:
+        return {**base, "status": "not_enough", "headline": "Needs 3 steady runs of a similar length",
+                "detail": "Runs counted so far: " + (", ".join(f"{k}: {len(v)}" for k, v in by.items()) or "none") + "."}
+    text = " · ".join(f"{k}: {median(v):.1f}%" for k, v in rows)
+    more = [g[2] for g in DURATION_GROUPS if g[2] not in dict(rows)]
+    return {**base, "status": "ok", "value": text,
+            "headline": "Drift by run length" if len(rows) > 1 else "Only one length so far: longer runs will show where it changes",
+            "detail": f"Median drift per group ({', '.join(f'{len(v)} runs' for _, v in rows)})."
+                      + (f" Not enough runs yet: {', '.join(more)}." if more else ""),
+            "groups": [{"label": k, "median_pct": round(median(v), 1), "runs": len(v)} for k, v in rows]}
+
+
 def build(conn, source: str, today: date) -> dict:
-    return {"items": [threshold(conn, today), form(conn, source, today), predictions(conn, today), recovery(conn, source, today),
-                      climbing(conn, source, today)], "algorithm_version": NUMBERS_VERSION}
+    return {"items": [threshold(conn, today), reference_pace(conn, source, today), form(conn, source, today), predictions(conn, today),
+                      endurance(conn, source, today), recovery(conn, source, today), climbing(conn, source, today)],
+            "algorithm_version": NUMBERS_VERSION}

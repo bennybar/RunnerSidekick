@@ -996,7 +996,7 @@ def test_training_numbers_known_answers():
     assert numbers.pace(3.083) == rp.fmt_pace(1000 / 3.083)
     conn = synced()
     items = {i["id"]: i for i in numbers.build(conn, "fixture", ANCHOR)["items"]}
-    assert set(items) == {"threshold", "form", "predictions", "recovery", "climbing"}
+    assert set(items) == {"threshold", "reference_pace", "form", "predictions", "endurance", "recovery", "climbing"}
     assert all(i["status"] != "ok" or (i["value"] and i["series"]) for i in items.values())
 
 
@@ -1096,3 +1096,16 @@ def test_routes_group_confident_matches_and_respect_corrections():
     assert routes.different_route(conn, "fixture", moved)
     assert all(moved not in m or len(m) == 1 for m in routes.groups(conn, "fixture").values() if runs[0]["source_id"] in m)
     assert routes.route_of(conn, "fixture", moved) is None or runs[0]["source_id"] not in routes.route_of(conn, "fixture", moved)[1]
+
+
+def test_reference_pace_never_extrapolates_and_endurance_needs_full_groups():
+    from sidekick import numbers
+    conn = synced()
+    for a in rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat()):
+        conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"checked_at": utc_now(), "weather": {
+            "temperature_2m": 18.0, "dew_point_2m": 10.0, "apparent_temperature": 18.0}}}, upsert=True)
+    it = numbers.reference_pace(conn, "fixture", ANCHOR)
+    ref = int(it["value"].split(" at ")[1].split()[0])
+    assert all(abs(float(p["label"].split(" at ")[1].split()[0]) - ref) <= numbers.REF_HR_BAND for p in it["series"])
+    en = numbers.endurance(conn, "fixture", ANCHOR)
+    assert en["status"] == "ok" and all(g["runs"] >= numbers.MIN_PER_GROUP for g in en["groups"])
