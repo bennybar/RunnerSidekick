@@ -463,13 +463,15 @@ data class RoutesReport(val routes: List<RouteSummary> = emptyList(), val basis:
 @Serializable
 data class RouteSummary(val id: String, val name: String, @SerialName("distance_km") val distanceKm: Double = 0.0,
                         val loop: Boolean = false, val runs: Int = 0, val first: String? = null, val last: String? = null,
-                        val progress: String? = null, val rows: List<RouteRun> = emptyList())
+                        val progress: String? = null, val rows: List<RouteRun> = emptyList(),
+                        /** The route's shape in a unit box (no coordinates), for drawing */
+                        val outline: List<List<Double>> = emptyList())
 
 @Serializable
 data class RouteRun(@SerialName("source_id") val sourceId: String, val date: String,
                     @SerialName("distance_m") val distanceM: Double? = null, @SerialName("pace_s_per_km") val paceSPerKm: Double? = null,
-                    @SerialName("avg_hr") val avgHr: Double? = null, val kind: String = "easy",
-                    @SerialName("temperature_c") val temperatureC: Double? = null, val hot: Boolean = false)
+                    @SerialName("avg_hr") val avgHr: Double? = null, val kind: String? = null,  // null: not known
+                    @SerialName("temperature_c") val temperatureC: Double? = null, val hot: Boolean? = null)
 
 @Serializable
 data class ReportListItem(

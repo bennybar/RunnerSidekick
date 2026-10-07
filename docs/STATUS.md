@@ -332,6 +332,18 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Routes review fixes (2026-10-07, v0.50.1)
+- Direction: following one route along another now advances with the distance travelled (150 m per 50-m step, plus the
+  stretch spent in a detour, at most a third of a loop), so a short loop run the other way can't match by reaching round
+  it. This also fixed a split: the old 1.5-km look-ahead jumped between an out-and-back's overlapping legs; on live data
+  two groups of the same route (4 + 7 runs) are now one (12).
+- Corrections are stored as pairs of runs that aren't the same route, so "different route" works for a route's first run
+  too and survives regrouping.
+- Unknown weather or run kind stays unknown and is left out of progress claims; the wording says what the filter is
+  (hot with hot by the estimate's threshold), not "same conditions".
+- The route sheet draws the route's outline (a shape in a unit box, no coordinates) with its start marked.
+- App: route rows accept unknown weather and kind (a null there had made the routes list fail to load).
+
 ## Repeat routes, pace at your usual heart rate, endurance by length (2026-10-07, v0.50.0)
 - Repeat routes (`routes.py`): each run's simplified route (a point every 50 m, rounded to ~11 m) in `route_shape`,
   kept as long as the run; the full GPS track is removed from the stored raw Garmin details as soon as it's made
