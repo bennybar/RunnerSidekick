@@ -332,6 +332,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Repeat routes, pace at your usual heart rate, endurance by length (2026-10-07, v0.50.0)
+- Repeat routes (`routes.py`): each run's simplified route (a point every 50 m, rounded to ~11 m) in `route_shape`,
+  kept as long as the run; the full GPS track is removed from the stored raw Garmin details as soon as it's made
+  (`sidekick backfill-routes` did this for runs synced before). Matching is by geometry: distance and area only
+  shortlist; two runs are the same route when each covers 95% of the other within 40 m and following one along the other
+  goes forward (loops started elsewhere match, the opposite direction doesn't, an out-and-back matches itself, small
+  detours fit). Only confident matches group; "This run is a different route" takes a run out for good. Progress is a
+  separate step: same kind of run, same conditions (hot with hot), similar heart rate. On the run screen and in Your
+  records. Live: 6 routes covering 20 of 31 runs.
+- Training numbers: "Pace at your usual heart rate" (steady, level runs whose average was within 4 bpm of the reference;
+  same watch; hot with hot; no extrapolation) and "Endurance by run length" (drift by duration group, 3+ runs each).
+  Steady-stretch selection is shared with cardio fitness. A trend ("than on …") needs a point 4+ weeks earlier.
+
 ## Training numbers, review fixes (2026-10-07, v0.49.1)
 - "Fitness, fatigue and form" is now "Training load balance": recent load against usual, bands named for what they
   measure and marked as the app's rules of thumb; no race-readiness or "building fitness" claims; after 10+ days

@@ -219,7 +219,8 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
                 }
             }
             composable("activity/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                Page { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
+                Page { ActivityDetailScreen(it.arguments!!.getString("id")!!, onBack = { nav.popBackStack() },
+                    onOpenRun = { rid -> nav.navigate("activity/$rid") }) }
             }
             composable("report/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                 Page {

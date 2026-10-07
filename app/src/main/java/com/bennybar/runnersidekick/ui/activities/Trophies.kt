@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsWalk
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Straighten
+import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -44,6 +45,9 @@ fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: Trophies
     val trophies by vm.trophies.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<com.bennybar.runnersidekick.data.remote.Trophy?>(null) }
+    val routes by vm.routes.collectAsStateWithLifecycle()
+    val units by vm.settings.collectAsStateWithLifecycle()
+    var routeOpen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     Scaffold(topBar = {
         TopAppBar(title = { Text("Your records") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } })
@@ -80,6 +84,17 @@ fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: Trophies
                     }
                 }
             }
+            routes?.value?.routes?.takeIf { it.isNotEmpty() }?.let { rs ->
+                item(key = "routes") {
+                    Group(title = "Your routes") {
+                        rs.forEach { rt ->
+                            row(routeTitle(rt.name, rt.distanceKm, rt.loop, rt.runs), supporting = rt.progress ?: "Run ${rt.runs} times since ${
+                                rt.first?.let { Format.shortDate(it) } ?: "—"}", icon = Icons.Outlined.Route, iconShape = MaterialShapes.Cookie9Sided,
+                                onClick = { routeOpen = rt.id })
+                        }
+                    }
+                }
+            }
             t?.basis?.takeIf { it.isNotBlank() }?.let { b ->
                 item { Text(b, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp)) }
@@ -87,6 +102,10 @@ fun TrophiesScreen(onBack: () -> Unit, onOpenRun: (String) -> Unit, vm: Trophies
         }
     }
     open?.let { r -> TrophySheet(r, onDismiss = { open = null }) { id -> open = null; onOpenRun(id) } }
+    routeOpen?.let { rid -> routes?.value?.routes?.firstOrNull { it.id == rid }?.let { rt ->
+        RouteSheet(rt, routes?.value?.basis.orEmpty(), units?.units, current = null, onOpenRun = { routeOpen = null; onOpenRun(it) },
+            onNotThis = null, onDismiss = { routeOpen = null })
+    } }
 }
 
 /** One record: its value and comparison, and how it got there (each improvement, oldest first; a run opens). */

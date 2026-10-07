@@ -450,7 +450,26 @@ data class Chart(
 )
 
 @Serializable
-data class ActivityDetail(val report: PostRunReport? = null, val chart: Chart? = null)
+data class ActivityDetail(val report: PostRunReport? = null, val chart: Chart? = null, val route: RunRoute? = null)
+
+/** The repeat route this run belongs to (recognised from its shape), when it has one. */
+@Serializable
+data class RunRoute(val id: String, val name: String, @SerialName("distance_km") val distanceKm: Double = 0.0,
+                    val loop: Boolean = false, val runs: Int = 0, val progress: String? = null)
+
+@Serializable
+data class RoutesReport(val routes: List<RouteSummary> = emptyList(), val basis: String = "")
+
+@Serializable
+data class RouteSummary(val id: String, val name: String, @SerialName("distance_km") val distanceKm: Double = 0.0,
+                        val loop: Boolean = false, val runs: Int = 0, val first: String? = null, val last: String? = null,
+                        val progress: String? = null, val rows: List<RouteRun> = emptyList())
+
+@Serializable
+data class RouteRun(@SerialName("source_id") val sourceId: String, val date: String,
+                    @SerialName("distance_m") val distanceM: Double? = null, @SerialName("pace_s_per_km") val paceSPerKm: Double? = null,
+                    @SerialName("avg_hr") val avgHr: Double? = null, val kind: String = "easy",
+                    @SerialName("temperature_c") val temperatureC: Double? = null, val hot: Boolean = false)
 
 @Serializable
 data class ReportListItem(

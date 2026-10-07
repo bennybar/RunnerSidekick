@@ -198,8 +198,9 @@ class DayVm(repo: Repository, val date: String) : BaseVm(repo) {
 
 class TrophiesVm(repo: Repository) : BaseVm(repo) {
     val trophies = repo.trophies.state(null)
+    val routes = repo.routes.state(null)
     init { refresh() }
-    fun refresh() = launchIo { repo.refreshTrophies() }
+    fun refresh() = launchIo { repo.refreshTrophies(); repo.refreshRoutes() }
 }
 
 class ActivitiesVm(repo: Repository) : BaseVm(repo) {
@@ -219,6 +220,9 @@ class ActivitiesVm(repo: Repository) : BaseVm(repo) {
 
 class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     val detail = repo.activity(id).state(null)
+    val routes = repo.routes.state(null)
+    fun loadRoutes() = launchIo { repo.refreshRoutes() }
+    fun notThisRoute() = launchIo { repo.differentRoute(id) }
     val ai = repo.runAi(id).state(null)
     init { refresh() }
     fun refresh() = launchIo { repo.refreshActivity(id); runCatching { repo.refreshRunAi(id) } }

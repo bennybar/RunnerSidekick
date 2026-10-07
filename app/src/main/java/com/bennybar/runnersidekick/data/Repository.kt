@@ -85,6 +85,16 @@ class Repository(
 
     val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
     val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+    val routes: Flow<Cached<com.bennybar.runnersidekick.data.remote.RoutesReport>?> =
+        observe("routes") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(it) }
+    suspend fun refreshRoutes() = put("routes", api.getRaw("/v1/routes"))
+    /** "Different route": this run leaves the route it was grouped with, for good. */
+    suspend fun differentRoute(sid: String) {
+        api.post("/v1/activities/$sid/different-route")
+        refreshRoutes()
+        refreshActivity(sid)
+    }
+
     val numbers: Flow<Cached<com.bennybar.runnersidekick.data.remote.TrainingNumbers>?> =
         observe("numbers") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.TrainingNumbers>(it) }
     suspend fun refreshNumbers() = put("numbers", api.getRaw("/v1/numbers"))
@@ -306,6 +316,7 @@ class Repository(
             key == "trophies" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(body)
             key == "cardio" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(body)
             key == "numbers" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.TrainingNumbers>(body)
+            key == "routes" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(body)
             key.startsWith("trends:") -> json.decodeFromString<Trends>(body)
             key.startsWith("activity:") -> json.decodeFromString<ActivityDetail>(body)
             key.startsWith("runai:") -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body)

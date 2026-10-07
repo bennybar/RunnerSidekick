@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.ui.activities
 
+import androidx.compose.material.icons.outlined.Route
+
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
 
@@ -225,10 +227,12 @@ private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewModel(key = id, factory = factory { ActivityVm(it, id) })) {
+fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> Unit = {}, vm: ActivityVm = viewModel(key = id, factory = factory { ActivityVm(it, id) })) {
     com.bennybar.runnersidekick.ui.components.TrackVisible(vm)
     val detail by vm.detail.collectAsStateWithLifecycle()
     val ai by vm.ai.collectAsStateWithLifecycle()
+    val routes by vm.routes.collectAsStateWithLifecycle()
+    var routeOpen by remember { mutableStateOf(false) }
     val aiScroll = remember { mutableStateOf(0) }
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
     // The AI card comes after the header and (when there's one) the decoupling card
@@ -285,6 +289,10 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                     if (busy) "Fetching analysis…" else "Connect to the backend to load this run.") } }
                 return@RefreshBox
             }
+            if (routeOpen) detail?.value?.route?.let { rt -> routes?.value?.routes?.firstOrNull { it.id == rt.id }?.let { full ->
+                RouteSheet(full, routes?.value?.basis.orEmpty(), units, current = id, onOpenRun = { routeOpen = false; onOpenRun(it) },
+                    onNotThis = { routeOpen = false; vm.notThisRoute() }, onDismiss = { routeOpen = false })
+            } }
             LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
                 // Shown also when it couldn't be measured, saying why (a short run, missing heart rate), instead of nothing
@@ -292,6 +300,14 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, vm: ActivityVm = viewMo
                 // Shown at the top once asked for (or already written); the button lives in the top bar
                 if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
+                // The repeat route this run belongs to, recognised from its shape; opens how the route has gone
+                detail?.value?.route?.let { rt -> item(key = "route") {
+                    Group(title = "Route") {
+                        row(routeTitle(rt.name, rt.distanceKm, rt.loop, rt.runs), supporting = rt.progress ?: "Recognised from its shape",
+                            icon = Icons.Outlined.Route, iconShape = androidx.compose.material3.MaterialShapes.Cookie9Sided,
+                            onClick = { vm.loadRoutes(); routeOpen = true })
+                    }
+                } }
                 if (r.checks.isNotEmpty()) item {
                     Group(title = "How it went") {
                         r.checks.forEach { c -> row(c.title, supporting = c.say, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
