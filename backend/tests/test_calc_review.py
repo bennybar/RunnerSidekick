@@ -1156,6 +1156,10 @@ def test_route_review_regressions():
     mixed = [{"date": d, "kind": "easy", "hot": False, "avg_hr": h, "pace_s_per_km": pc}
              for d, h, pc in (("2026-06-01", 120.0, 380.0), ("2026-06-08", 160.0, 330.0), ("2026-09-01", 140.0, 340.0), ("2026-09-08", 140.0, 342.0))]
     assert routes.progress(mixed) is None
+    # A band centred between recorded values: 137 and 143 both fit 140 ± 3
+    between = [{"date": d, "kind": "easy", "hot": False, "avg_hr": h, "pace_s_per_km": pc}
+               for d, h, pc in (("2026-06-01", 137.0, 360.0), ("2026-06-08", 143.0, 358.0), ("2026-09-01", 137.0, 350.0), ("2026-09-08", 143.0, 349.0))]
+    assert routes.progress(between) and "137–143 bpm" in routes.progress(between)
     # Old-format corrections ("not_route") are still honoured
     conn.route_override.delete_many({})
     first, second = runs[0]["source_id"], runs[1]["source_id"]

@@ -264,7 +264,9 @@ def progress(rows: list[dict]) -> str | None:
     for kind, hot in (("easy", False), ("hard", False), ("easy", True), ("hard", True)):
         rs = [r for r in rows if r["kind"] == kind and r["hot"] == hot and r["avg_hr"] and r["pace_s_per_km"]]
         best = None
-        for c in sorted({round(r["avg_hr"]) for r in rs}):  # the band holding the most runs
+        hrs = [r["avg_hr"] for r in rs]
+        # The band holding the most runs: every whole-number centre across the range (137 and 143 both fit 140 ± 3)
+        for c in range(int(min(hrs, default=0)), int(max(hrs, default=-1)) + 2):
             band = [r for r in rs if abs(r["avg_hr"] - c) <= HR_BAND_BPM]
             if best is None or len(band) > len(best[1]):
                 best = (c, band)

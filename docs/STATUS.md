@@ -332,6 +332,10 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Route progress band search (2026-10-07, v0.50.3)
+- The shared heart-rate band is searched over every whole-number centre across the route's runs, not only centres equal
+  to a recorded average (runs at 137 and 143 bpm now share the 140 ± 3 band).
+
 ## Route progress compares like runs (2026-10-07, v0.50.2)
 - A route's progress now compares individual runs within one shared heart-rate band (±3 bpm, the band holding the most
   runs), earliest two against latest two, at least 4 weeks apart; matching averages of different runs no longer count.
