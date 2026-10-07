@@ -990,11 +990,42 @@ def test_training_numbers_known_answers():
         for k in range(120):
             t.append(x); hr.append(175 - min(30, 30 * k / 60)); v.append(2.5); x += 1
     drops = numbers.recovery_drops(Samples(t, hr, v, [0.0] * len(t), [10.0] * len(t), [170.0] * len(t)), 170)
-    assert len(drops) == 3 and all(28 <= dd <= 32 for dd in drops)
+    assert len(drops) == 3 and all(28 <= dd["drop"] <= 32 for dd in drops) and all(dd["recovery_speed"] > 1.7 for dd in drops)
     # Form bands, and Garmin's threshold speed comes in tenths of a metre per second
-    assert next(b for b in numbers.FORM_BANDS if b[0] is None or -35 >= b[0])[1] == "Heavy"
+    assert next(b for b in numbers.FORM_BANDS if b[0] is None or -35 >= b[0])[1] == "Recent load well above your usual"
     assert numbers.pace(3.083) == rp.fmt_pace(1000 / 3.083)
     conn = synced()
     items = {i["id"]: i for i in numbers.build(conn, "fixture", ANCHOR)["items"]}
     assert set(items) == {"threshold", "form", "predictions", "recovery", "climbing"}
     assert all(i["status"] != "ok" or (i["value"] and i["series"]) for i in items.values())
+
+
+def test_training_numbers_dont_flatter_or_invent(monkeypatch):
+    from sidekick import numbers
+    from sidekick.connectors.base import Samples
+    # A poor recovery is kept: drops of 30, 30 and 2 bpm all count
+    t, hr, v = [], [], []
+    x = 0.0
+    for fall in (30, 30, 2):
+        for k in range(120):
+            t.append(x); hr.append(150 + 25 * k / 119); v.append(4.5); x += 1
+        for k in range(120):
+            t.append(x); hr.append(175 - min(fall, fall * k / 60)); v.append(2.5); x += 1
+    drops = [d["drop"] for d in numbers.recovery_drops(Samples(t, hr, v, [0.0] * len(t), [10.0] * len(t), [170.0] * len(t)), 170)]
+    assert len(drops) == 3 and min(drops) < 5
+    # No climb across a 301-second hole in the recording
+    t, d, e = [], [], []
+    for x in list(range(0, 600, 2)) + list(range(901, 1500, 2)):
+        t.append(float(x)); d.append(4.0 * x); e.append(10.0 if x < 600 else 70.0)
+    assert numbers.best_climb(Samples(t, [150.0] * len(t), [4.0] * len(t), d, e, [170.0] * len(t))) is None
+    # An old climb isn't called "best in 90 days"
+    conn = synced()
+    old = rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat())[0]
+    monkeypatch.setattr(numbers, "climb_of", lambda c, a: {"vam": 700, "gain_m": 40, "minutes": 4, "grade": 4.0} if a["id"] == old["id"] else None)
+    later = date.fromisoformat(old["local_date"]) + timedelta(days=150)
+    cl = numbers.climbing(conn, "fixture", later)
+    assert cl["status"] == "ok" and "90 days" in cl["headline"] and cl["headline"].startswith("best in the last year")
+    # 30 days without running: not "fresh, ready to race", but a break
+    f = numbers.form(conn, "fixture", ANCHOR + timedelta(days=30))
+    assert f["headline"] == "Little recent training" and "race" not in (f["detail"] + f["headline"]).lower()
+    assert all("race" not in b[2].lower() and "build" not in b[2].lower() for b in numbers.FORM_BANDS)

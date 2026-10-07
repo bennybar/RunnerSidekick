@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Training numbers, review fixes (2026-10-07, v0.49.1)
+- "Fitness, fatigue and form" is now "Training load balance": recent load against usual, bands named for what they
+  measure and marked as the app's rules of thumb; no race-readiness or "building fitness" claims; after 10+ days
+  without a run it says so ("Little recent training").
+- Heart-rate recovery keeps every effort with continuous heart rate through the minute, whatever its drop; each session
+  records whether recoveries were walked or jogged, and only like is compared with like.
+- Climbing speed never spans a gap of more than 10 s in the recording; an older climb is labelled "best in the last
+  year", and each climb shows its length and grade. Recovery and climbing appear in the app only once there's data.
+
 ## Training numbers (2026-10-07, v0.49.0)
 - Insights → "Training numbers" (`GET /v1/numbers`, `numbers.py`), each with its history in a sheet (curve with better
   always up, recent values, runs open):

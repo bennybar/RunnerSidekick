@@ -45,7 +45,8 @@ private fun iconOf(id: String) = when (id) {
 @Composable
 fun NumbersCard(n: TrainingNumbers, onOpen: (String) -> Unit) {
     Group(title = "Training numbers") {
-        n.items.forEach { it ->
+        // Recovery and climbing appear once there's something to show (sessions with repeats, runs with real climbs)
+        n.items.filter { it.status == "ok" || it.id !in setOf("recovery", "climbing") }.forEach { it ->
             val (icon, shape) = iconOf(it.id)
             row(it.title, supporting = listOfNotNull(it.value, it.headline?.takeIf { h -> h.isNotBlank() }).joinToString(" · "),
                 icon = icon, iconShape = shape, onClick = { onOpen(it.id) })
@@ -65,7 +66,7 @@ fun NumberSheet(item: NumberItem, onOpenRun: (String) -> Unit, onDismiss: () -> 
             item.headline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
             item.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             if (item.series.size >= 2) {
-                // Drawn so better is always up (a faster pace or time is a lower number)
+                // Faster paces and times are drawn upward; the load balance has no better or worse direction
                 Sparkline(item.series.map { if (item.lowerIsBetter) -it.v else it.v }, Modifier.fillMaxWidth().height(80.dp),
                     description = "${item.title} from ${item.series.first().date} to ${item.series.last().date}")
                 Text("${Format.shortDate(item.series.first().date)} – ${Format.shortDate(item.series.last().date)}" +

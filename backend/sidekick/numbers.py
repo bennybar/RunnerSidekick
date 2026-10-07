@@ -24,12 +24,17 @@ from . import reports as rp
 from .db import get_setting
 
 NUMBERS_VERSION = "numbers-1.0"
-FORM_BANDS = ((20, "Fresh", "Fatigue is well below your fitness: a good state to race or test."),
-              (-10, "Neutral", "Fatigue and fitness are about level: steady training."),
-              (-30, "Training", "Carrying the fatigue that builds fitness; recover well."),
-              (None, "Heavy", "Fatigue is high against your fitness: an easier few days would let it come down."))
+FORM_BANDS = ((20, "Recent load well below your usual", "Your last week was much lighter than your usual training. That can mean "
+                    "you're rested, or simply that you've trained less lately."),
+              (-10, "Balanced", "Your last week was about in line with your usual training."),
+              (-30, "Recent load above your usual", "Your last week was heavier than your usual training."),
+              (None, "Recent load well above your usual", "Your last week was much heavier than your usual training; easier days "
+                     "bring the balance back."))
+QUIET_DAYS = 10  # this long without a run: the balance mostly says you've stopped, and it says that
 RECOVERY_WINDOW_S, EFFORT_MIN_S = 60.0, 60.0
+WALK_BELOW = 1.7  # m/s (about 10 min/km): slower recoveries count as walking or standing, faster as jogging
 VAM_WINDOWS_S, VAM_MIN_GRADE, VAM_MIN_GAIN = (180, 300, 600), 0.03, 20.0
+MAX_GAP_S = 10.0  # a climb can't span missing data longer than this
 _vam_cache: dict = {}
 _hrr_cache: dict = {}
 
@@ -80,10 +85,11 @@ def threshold(conn, today: date) -> dict:
 
 def form(conn, source: str, today: date) -> dict:
     from .readiness import ACUTE_DAYS, CHRONIC_DAYS, run_load
-    base = {"id": "form", "title": "Fitness, fatigue and form", "lower_is_better": False,
-            "basis": "Fitness: your training load (heart-rate zones × minutes) fading over 28 days. Fatigue: the same over 7 days. "
-                     "Form = fitness − fatigue, as a share of fitness: above +20% fresh, −10 to +20% neutral, −30 to −10% "
-                     "training, below −30% heavy. The same load model as readiness."}
+    base = {"id": "form", "title": "Training load balance", "lower_is_better": False, "neutral": True,
+            "basis": "Your usual load (heart-rate zones × minutes, fading over 28 days) against your recent load (the same over 7 "
+                     "days): (usual − recent) / usual. The bands (+20%, −10%, −30%) are the app's rules of thumb, not a published "
+                     "scale. It describes how your recent training compares with your usual; it can't tell readiness to race, "
+                     "and a high positive balance can just as well mean training less. The same load model as readiness."}
     tz = ZoneInfo(get_setting(conn, "timezone", "UTC"))
     zones = rp.hr_zones(conn)
     runs = rp.activities(conn, source, (today - timedelta(days=200)).isoformat(), today.isoformat())
@@ -114,8 +120,12 @@ def form(conn, source: str, today: date) -> dict:
     band = next(b for b in FORM_BANDS if b[0] is None or now["v"] >= b[0])
     for p in series:
         p["label"] = f"{p['v']:+d}%"
-    return {**base, "status": "ok", "value": f"Form {now['v']:+d}%", "headline": band[1], "detail":
-            f"{band[2]} Fitness {now['fitness']:.0f}, fatigue {now['fatigue']:.0f} (load per day).", "series": series}
+    quiet = (today - ends[-1][0].astimezone(tz).date()).days
+    headline, detail = band[1], band[2]
+    if quiet >= QUIET_DAYS:
+        headline, detail = "Little recent training", f"No run in {quiet} days: the balance mostly reflects the break."
+    return {**base, "status": "ok", "value": f"{now['v']:+d}%", "headline": headline, "detail":
+            f"{detail} Usual load {now['fitness']:.0f}, recent {now['fatigue']:.0f} (per day).", "series": series}
 
 
 # ---------------------------------------------------------------- race predictions over time (Garmin's)
@@ -137,8 +147,9 @@ def predictions(conn, today: date) -> dict:
 
 # ---------------------------------------------------------------- heart-rate recovery
 
-def recovery_drops(s, floor4: float) -> list[float]:
-    """Heart-rate drop over the 60 s after each hard effort in the samples (bpm)."""
+def recovery_drops(s, floor4: float) -> list[dict]:
+    """Each hard effort's heart-rate drop over the following 60 s (bpm, kept whatever it is) and the recovery's speed.
+    Only the recording's quality decides what counts: continuous heart rate through the minute, a real effort."""
     pts = [(t, h, v) for t, h, v in zip(s.t, s.hr, s.speed) if t is not None and h is not None and v is not None]
     if len(pts) < 30:
         return []
@@ -164,19 +175,19 @@ def recovery_drops(s, floor4: float) -> list[float]:
             later = avg(end + RECOVERY_WINDOW_S - 3, end + RECOVERY_WINDOW_S + 3, 1)
             slow = avg(end + 5, end + RECOVERY_WINDOW_S, 2)
             gap_free = all(b[0] - a[0] <= 5 for a, b in zip(pts, pts[1:]) if end <= a[0] <= end + RECOVERY_WINDOW_S)
-            if peak and later and slow is not None and peak >= floor4 and slow <= 0.8 * avg(start, end, 2) and gap_free:
-                d = peak - later
-                if 5 <= d <= 80:
-                    drops.append(round(d, 1))
+            covered = pts[-1][0] >= end + RECOVERY_WINDOW_S  # the recording runs the whole minute
+            if peak and later and slow is not None and peak >= floor4 and slow <= 0.8 * avg(start, end, 2) and gap_free and covered:
+                drops.append({"drop": round(peak - later, 1), "recovery_speed": round(slow, 2)})
         i = j + 1
     return drops
 
 
 def recovery(conn, source: str, today: date) -> dict:
     base = {"id": "recovery", "title": "Heart-rate recovery", "lower_is_better": False,
-            "basis": "How far heart rate falls in the minute after a hard effort (60+ s fast, ending in zone 4 or above), while "
-                     "you jog or walk. A bigger drop generally goes with better fitness. Measured on the move, so smaller than "
-                     "a standing test: compare with yourself, not with published values. Experimental."}
+            "basis": "How far heart rate falls in the minute after a hard effort (60+ s fast, ending in zone 4 or above), median "
+                     "per session. Every effort with continuous heart rate counts, whatever the result. How you recover changes "
+                     "it as much as fitness does (walking drops more than jogging), so sessions are compared only with ones "
+                     "recovered the same way. Measured on the move, smaller than a standing test. Experimental."}
     zones = rp.hr_zones(conn)
     if not zones:
         return {**base, "status": "unavailable", "headline": "Needs heart-rate zones", "detail": ""}
@@ -188,14 +199,22 @@ def recovery(conn, source: str, today: date) -> dict:
             _hrr_cache[key] = recovery_drops(s, zones["floors"][3]) if s else []
         drops = _hrr_cache[key]
         if len(drops) >= 2:
-            series.append({"date": a["local_date"], "v": round(median(drops)), "label": f"{round(median(drops))} bpm",
+            v = median(d["drop"] for d in drops)
+            how = "walking" if median(d["recovery_speed"] for d in drops) < WALK_BELOW else "jogging"
+            series.append({"date": a["local_date"], "v": round(v), "label": f"{round(v)} bpm · {how} recoveries", "how": how,
                            "source_id": a["source_id"], "efforts": len(drops)})
     if not series:
-        return {**base, "status": "not_enough", "headline": "Needs a session with hard efforts and easy recoveries",
-                "detail": "Intervals or repeats with slower jogs between them, in the last 6 months."}
+        return {**base, "status": "not_enough", "headline": "Needs a session with hard efforts and easier recoveries",
+                "detail": "Intervals or repeats with slower jogs or walks between them, in the last 6 months."}
     last = series[-1]
-    return {**base, "status": "ok", "value": f"−{last['v']} bpm in a minute", "headline": f"median of {last['efforts']} efforts on {day(last['date'])}",
-            "detail": f"From {len(series)} session{'s' if len(series) != 1 else ''} in the last 6 months.", "series": series}
+    alike = [p for p in series if p["how"] == last["how"]]
+    prev = alike[-2] if len(alike) >= 2 else None
+    trend = (f"{abs(last['v'] - prev['v'])} bpm {'more' if last['v'] > prev['v'] else 'less'} than on {day(prev['date'])} "
+             f"(also {last['how']})" if prev and last["v"] != prev["v"] else f"the same as on {day(prev['date'])}" if prev
+             else f"the first session with {last['how']} recoveries")
+    return {**base, "status": "ok", "value": f"−{last['v']} bpm in a minute", "headline": trend,
+            "detail": f"Median of {last['efforts']} efforts on {day(last['date'])}, {last['how']} between them.",
+            "series": alike}
 
 
 # ---------------------------------------------------------------- climbing speed (VAM)
@@ -205,19 +224,27 @@ def best_climb(s) -> dict | None:
     pts = [(t, d, e) for t, d, e in zip(s.t, s.dist, s.elev) if t is not None and d is not None and e is not None]
     if len(pts) < 20:
         return None
-    grid, k = [], 0  # resampled to 10 s
+    grid, k = [], 0  # resampled to 10 s; a point inside a gap in the recording is None, never interpolated across
     t = pts[0][0]
     while t <= pts[-1][0]:
         while k + 1 < len(pts) and pts[k + 1][0] < t:
             k += 1
         a, b = pts[k], pts[min(k + 1, len(pts) - 1)]
-        f = 0 if b[0] == a[0] else (t - a[0]) / (b[0] - a[0])
-        grid.append((t, a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])))
+        if b[0] - a[0] > MAX_GAP_S:
+            grid.append(None)
+        else:
+            f = 0 if b[0] == a[0] else (t - a[0]) / (b[0] - a[0])
+            grid.append((t, a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])))
         t += 10
     best = None
     for w in VAM_WINDOWS_S:
         n = w // 10
+        bad = [0]  # running count of gap points, so a window with any is skipped
+        for g in grid:
+            bad.append(bad[-1] + (g is None))
         for i in range(n, len(grid)):
+            if bad[i + 1] - bad[i - n] > 0:
+                continue
             (t0, d0, e0), (t1, d1, e1) = grid[i - n], grid[i]
             gain, dist = e1 - e0, d1 - d0
             if gain >= VAM_MIN_GAIN and dist > 0 and gain / dist >= VAM_MIN_GRADE:
@@ -247,9 +274,12 @@ def climbing(conn, source: str, today: date) -> dict:
             series.append({"date": a["local_date"], "v": c["vam"], "label": f"{c['vam']} m/h", "source_id": a["source_id"], **c})
     if not series:
         return {**base, "status": "not_enough", "headline": "No sustained climbs yet", "detail": "Needs a run with a climb of 3 minutes or more."}
-    recent = [p for p in series if p["date"] >= (today - timedelta(days=90)).isoformat()] or series
-    top = max(recent, key=lambda p: p["v"])
-    return {**base, "status": "ok", "value": f"{top['v']} m/h", "headline": f"best in 90 days: +{top['gain_m']} m in {top['minutes']} min at {top['grade']}%",
+    recent = [p for p in series if p["date"] >= (today - timedelta(days=90)).isoformat()]
+    when = "best in 90 days" if recent else "best in the last year (none in 90 days)"
+    top = max(recent or series, key=lambda p: p["v"])
+    for p in series:
+        p["label"] = f"{p['v']} m/h · {p['minutes']} min at {p['grade']}%"  # the climb's length and grade: compare like with like
+    return {**base, "status": "ok", "value": f"{top['v']} m/h", "headline": f"{when}: +{top['gain_m']} m in {top['minutes']} min at {top['grade']}%",
             "detail": f"On {day(top['date'])}.", "series": series, "source_id": top["source_id"]}
 
 
