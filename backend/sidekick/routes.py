@@ -14,7 +14,8 @@ Identification (geometry only):
 - Corrections: "Different route" takes a run out of a route for good.
 
 How each route has gone is a separate step (`progress`): same-route runs of the same kind (easy and steady apart from
-hard), cool runs only, compared at similar average heart rate. Conditions are shown, not mixed into identification.
+hard), in the same conditions (hot with hot, cool with cool), at similar average heart rate. Conditions are shown, not
+mixed into identification.
 """
 
 from __future__ import annotations
@@ -238,9 +239,10 @@ def run_row(conn, source: str, a: dict) -> dict:
 
 
 def progress(rows: list[dict]) -> str | None:
-    """At similar heart rate, how the route's pace moved: the first runs against the latest, same kind, cool runs only."""
-    for kind in ("easy", "hard"):
-        rs = [r for r in rows if r["kind"] == kind and not r["hot"] and r["avg_hr"] and r["pace_s_per_km"]]
+    """At similar heart rate, how the route's pace moved: the first runs against the latest, of the same kind and in the
+    same conditions (hot days with hot days, cool with cool), so neither the effort nor the weather makes the change."""
+    for kind, hot in (("easy", False), ("hard", False), ("easy", True), ("hard", True)):
+        rs = [r for r in rows if r["kind"] == kind and r["hot"] == hot and r["avg_hr"] and r["pace_s_per_km"]]
         if len(rs) < 4:
             continue
         early, late = rs[:2], rs[-2:]
@@ -251,8 +253,8 @@ def progress(rows: list[dict]) -> str | None:
         p1, p2 = median(r["pace_s_per_km"] for r in early), median(r["pace_s_per_km"] for r in late)
         word = "faster" if p2 < p1 else "slower"
         months = (date.fromisoformat(early[0]["date"]).strftime("%b"), date.fromisoformat(late[-1]["date"]).strftime("%b"))
-        return (f"{'Easy' if kind == 'easy' else 'Hard'} runs at about {round((h1 + h2) / 2)} bpm: {rp.fmt_pace(p1)} → "
-                f"{rp.fmt_pace(p2)} ({months[0]} → {months[1]}), {abs(round(p1 - p2))} s/km {word} at a similar heart rate")
+        return (f"{'Easy' if kind == 'easy' else 'Harder'} runs{' on hot days' if hot else ''} at about {round((h1 + h2) / 2)} bpm: "
+                f"{rp.fmt_pace(p1)} → {rp.fmt_pace(p2)} ({months[0]} → {months[1]}), {abs(round(p1 - p2))} s/km {word} at a similar heart rate")
     return None
 
 
@@ -273,5 +275,5 @@ def all_routes(conn, source: str) -> list[dict]:
 
 BASIS = ("Recognised from each run's simplified route (a point every 50 m, rounded to about 11 m): two runs are the same route "
          "when each covers the other and they go the same way, small detours allowed; a loop started elsewhere still counts, "
-         "the opposite direction doesn't. Only confident matches are grouped. Progress compares runs of the same kind, cool "
-         "ones only, at a similar heart rate. Kept as long as the run; the full GPS track isn't stored.")
+         "the opposite direction doesn't. Only confident matches are grouped. Progress compares runs of the same kind in the same "
+         "conditions (hot with hot, cool with cool), at a similar heart rate. Kept as long as the run; the full GPS track isn't stored.")
