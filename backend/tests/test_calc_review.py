@@ -1029,3 +1029,70 @@ def test_training_numbers_dont_flatter_or_invent(monkeypatch):
     f = numbers.form(conn, "fixture", ANCHOR + timedelta(days=30))
     assert f["headline"] == "Little recent training" and "race" not in (f["detail"] + f["headline"]).lower()
     assert all("race" not in b[2].lower() and "build" not in b[2].lower() for b in numbers.FORM_BANDS)
+
+
+def _track(points_xy, lat0=32.08, lon0=34.78, step=5.0):
+    """A GPS track through the given (x, y) metre waypoints, a sample every `step` m: (dist, lat, lon)."""
+    import math
+    dist, lat, lon, d = [], [], [], 0.0
+    for (x1, y1), (x2, y2) in zip(points_xy, points_xy[1:]):
+        seg = math.hypot(x2 - x1, y2 - y1)
+        n = max(1, int(seg / step))
+        for k in range(n):
+            f = k / n
+            x, y = x1 + f * (x2 - x1), y1 + f * (y2 - y1)
+            dist.append(d + f * seg)
+            lat.append(lat0 + y / 110_540)
+            lon.append(lon0 + x / (111_320 * math.cos(math.radians(lat0))))
+        d += seg
+    return dist, lat, lon
+
+
+def test_routes_are_recognised_by_shape():
+    from sidekick import routes
+    loop = [(0, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]           # a 3.6 km rectangle, run anticlockwise
+    shape = lambda pts: routes.shape_from_track(*_track(pts))  # noqa: E731
+    a = shape(loop)
+    assert routes.compare(a, shape(loop))["confidence"] == "high"
+    # The same loop started from another corner still matches; run the other way round it doesn't
+    other_start = [(1000, 0), (1000, 800), (0, 800), (0, 0), (1000, 0)]
+    assert routes.compare(a, shape(other_start))["confidence"] == "high"
+    rev = routes.compare(a, shape(list(reversed(loop))))
+    assert rev["direction"] == "opposite" and rev["confidence"] != "high"
+    # A small detour (30 m off for 100 m) still matches; a different route of the same length and start doesn't
+    detour = [(0, 0), (450, 0), (450, -30), (550, -30), (550, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]
+    assert routes.compare(a, shape(detour))["confidence"] == "high"
+    other = [(0, 0), (0, 800), (-1000, 800), (-1000, 0), (0, 0)]
+    assert routes.compare(a, shape(other))["confidence"] == "no"
+    # An out-and-back isn't the same as its reverse either (it is the same route, though, by geometry and direction)
+    oab = [(0, 0), (1500, 0), (0, 0)]
+    assert routes.compare(shape(oab), shape(oab))["confidence"] == "high"
+    # Raw details lose their GPS once the simplified route is made
+    det = {"metricDescriptors": [{"key": "sumDistance", "metricsIndex": 0}, {"key": "directLatitude", "metricsIndex": 1},
+                                 {"key": "directLongitude", "metricsIndex": 2}],
+           "activityDetailMetrics": [{"metrics": [d, la, lo]} for d, la, lo in zip(*_track(loop))], "geoPolylineDTO": {"x": 1}}
+    assert routes.shape_from_details(det)
+    s = routes.strip_gps(det)
+    assert "geoPolylineDTO" not in s and all(m["metrics"][1] is None and m["metrics"][2] is None for m in s["activityDetailMetrics"])
+    assert all(isinstance(p, list) and len(p) == 2 and round(p[0], 4) == p[0] for p in a)  # stored rounded to ~11 m
+
+
+def test_routes_group_confident_matches_and_respect_corrections():
+    from sidekick import routes
+    conn = synced()
+    loop = [(0, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]
+    other_start = [(1000, 0), (1000, 800), (0, 800), (0, 0), (1000, 0)]
+    reverse = list(reversed(loop))
+    runs = rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat())[-6:]
+    for a, pts in zip(runs, [loop, other_start, loop, reverse, loop, reverse]):
+        conn.activity.update_one({"source_id": a["source_id"]}, {"$set": {"distance_m": 3600.0}})
+        conn.route_shape.replace_one({"source_id": a["source_id"]}, {"source_id": a["source_id"],
+                                     "points": routes.shape_from_track(*_track(pts))}, upsert=True)
+    g = routes.groups(conn, "fixture")
+    sizes = sorted(len(m) for m in g.values())
+    assert sizes == [2, 4]  # 4 anticlockwise (one started elsewhere), 2 clockwise: two routes, never merged
+    # "Different route": that run leaves the route and stays out
+    moved = runs[2]["source_id"]
+    assert routes.different_route(conn, "fixture", moved)
+    assert all(moved not in m or len(m) == 1 for m in routes.groups(conn, "fixture").values() if runs[0]["source_id"] in m)
+    assert routes.route_of(conn, "fixture", moved) is None or runs[0]["source_id"] not in routes.route_of(conn, "fixture", moved)[1]

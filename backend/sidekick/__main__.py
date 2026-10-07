@@ -224,6 +224,7 @@ def main(argv=None) -> int:
     with_user(sub.add_parser("rebuild-reports"))
     with_user(sub.add_parser("backfill-intensity", help="intensity minutes from stored Garmin day summaries"))
     with_user(sub.add_parser("backfill-weather", help="Open-Meteo weather estimates for recent runs that have none"))
+    with_user(sub.add_parser("backfill-routes", help="simplified routes from stored Garmin details; then drop the full GPS from them"))
     with_user(sub.add_parser("backfill-samples", help="re-read run samples (e.g. running power) from stored Garmin details"))
     with_user(sub.add_parser("audit")).add_argument("--out")
     sub.add_parser("replay", help="replay made-up histories and check the advice").add_argument("scenarios", nargs="*")
@@ -328,6 +329,21 @@ def main(argv=None) -> int:
                 save_day(conn, r["source"], DayBundle(local_date=r["source_key"], observations=obs))
                 days += 1
         print(f"intensity minutes stored for {days} days")
+        return 0
+    if args.cmd == "backfill-routes":
+        # The simplified route for runs synced before routes existed, from the stored raw details; then the full GPS track
+        # is removed from those raw details (Garmin still has it), as for every run synced from now on
+        from .routes import shape_from_details, strip_gps
+        conn = connect(ucfg.db_name)
+        made = stripped = 0
+        for raw in conn.raw_payload.find({"kind": "activity_details"}):
+            shape = shape_from_details(raw["payload"])
+            if shape:
+                conn.route_shape.replace_one({"source_id": raw["source_key"]}, {"source_id": raw["source_key"], "points": shape}, upsert=True)
+                made += 1
+            conn.raw_payload.update_one({"_id": raw["_id"]}, {"$set": {"payload": strip_gps(raw["payload"])}})
+            stripped += 1
+        print(f"{made} simplified routes stored; full GPS removed from {stripped} stored Garmin details")
         return 0
     if args.cmd == "backfill-samples":
         # Runs' sample streams from the stored raw details, and Garmin's per-run numbers from the stored summaries, with

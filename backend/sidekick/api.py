@@ -683,7 +683,23 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         body = with_narrative(conn, report)
         if body is not None:
             body["checks"] = run_checks.build(conn, cfg.source, body)
-        return {"report": body, "chart": downsample(s) if s else None}
+        from . import routes
+        rt = next((r for r in routes.all_routes(conn, cfg.source) if sid in {x["source_id"] for x in r["rows"]}), None)
+        return {"report": body, "chart": downsample(s) if s else None,
+                "route": {k: rt[k] for k in ("id", "name", "distance_km", "loop", "runs", "progress")} if rt else None}
+
+    @api.get("/v1/routes")
+    def get_routes(conn=Depends(db)):
+        from . import routes
+        return {"routes": routes.all_routes(conn, cfg.source), "basis": routes.BASIS, "algorithm_version": routes.ROUTES_VERSION}
+
+    @api.post("/v1/activities/{sid}/different-route")
+    def mark_different_route(sid: str, conn=Depends(db)):
+        """The runner says this run isn't the route it was grouped with: it stays out of it from now on."""
+        from . import routes
+        if not routes.different_route(conn, cfg.source, sid):
+            raise HTTPException(404, "This run isn't part of a route")
+        return {"ok": True}
 
     run_ai_inflight: set[tuple] = set()
 
@@ -838,7 +854,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
                   "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
-                          "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings"]}[scope]
+                          "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override"]}[scope]
         for t in tables:
             conn[t].delete_many({})
         return {"deleted": tables}

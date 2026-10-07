@@ -80,6 +80,8 @@ def save_activity(conn: Database, source: str, a: Activity, chash: str) -> int:
             "elevation_loss_m": l.elevation_loss_m, "avg_cadence_spm": l.avg_cadence_spm, "intensity": l.intensity} for l in a.laps]])
     if a.samples is not None:
         conn.activity_samples.replace_one({"activity_id": aid}, {"activity_id": aid, "samples": a.samples.to_json()}, upsert=True)
+    if a.shape:
+        conn.route_shape.replace_one({"source_id": a.source_id}, {"source_id": a.source_id, "points": a.shape}, upsert=True)
     return aid
 
 

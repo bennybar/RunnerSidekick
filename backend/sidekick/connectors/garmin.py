@@ -271,8 +271,10 @@ def normalise_activity(a: dict, splits: dict | None, details: dict | None) -> Ac
     raw = [RawPayload("activity_summary", str(a["activityId"]), a)]
     if splits is not None:
         raw.append(RawPayload("activity_splits", str(a["activityId"]), splits))
+    from ..routes import shape_from_details, strip_gps
+    shape = shape_from_details(details)  # the simplified route; the full GPS track isn't kept
     if details is not None:
-        raw.append(RawPayload("activity_details", str(a["activityId"]), details))
+        raw.append(RawPayload("activity_details", str(a["activityId"]), strip_gps(details)))
     return Activity(
         source_id=str(a["activityId"]), sport=normalise_sport((a.get("activityType") or {}).get("typeKey")),
         name=a.get("activityName"), start_utc=iso_utc(start), utc_offset_s=off, local_date=local_date,
@@ -283,6 +285,7 @@ def normalise_activity(a: dict, splits: dict | None, details: dict | None) -> Ac
         avg_cadence_spm=non_negative(a.get("averageRunningCadenceInStepsPerMinute")),
         garmin_metrics=garmin_metrics, device_id=str(a["deviceId"]) if a.get("deviceId") is not None else None,
         manufacturer=a.get("manufacturer") if isinstance(a.get("manufacturer"), str) else None, laps=laps, samples=normalise_samples(details, start), raw=raw,
+        shape=shape,
     )
 
 

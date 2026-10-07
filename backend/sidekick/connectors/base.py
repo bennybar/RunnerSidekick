@@ -187,6 +187,7 @@ class Activity:
     laps: list[Lap] = field(default_factory=list)
     samples: Samples | None = None
     raw: list[RawPayload] = field(default_factory=list)
+    shape: list | None = None  # the simplified route (routes.py), when the run has GPS
 
 
 class Connector(Protocol):
