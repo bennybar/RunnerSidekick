@@ -14,7 +14,8 @@ Identification (geometry only):
 - Corrections: "Different route" takes a run out of a route for good.
 
 How each route has gone is a separate step (`progress`): same-route runs of the same kind (easy and steady apart from
-hard), in the same conditions (hot with hot, cool with cool), at similar average heart rate. Conditions are shown, not
+hard), hot days with hot days and cool with cool (a broad filter), at similar average heart rate; unknown weather or kind
+is left out. Conditions are shown, not
 mixed into identification.
 """
 
@@ -74,29 +75,35 @@ def _project(p, line, cum):
 
 
 FOLLOW_SHARE = 0.9
-FOLLOW_AHEAD = 30   # points (about 1.5 km) ahead to look for the next match: room for a detour
+FOLLOW_STEP = 3    # points (150 m) a 50-m step along A may advance along B
 FOLLOW_NEAR_M = 60.0  # point to point (50 m spacing), so a little looser than point to line
 
 
 def follows(A: list, B: list, loop: bool) -> float:
-    """The share of A's points matched while moving forward along B, starting where A starts."""
+    """The share of A's points matched while moving forward along B, starting where A starts. How far ahead to look is
+    tied to the distance travelled: a few points (both are 50 m apart), plus the stretch spent off route in a detour, and
+    never more than a third of a loop, so going forward can never reach round a short loop to what's behind."""
     n = len(B)
     j = min(range(n), key=lambda k: math.hypot(A[0][0] - B[k][0], A[0][1] - B[k][1]))
-    ok = 0
+    cap = max(1, n // 3) if loop else n
+    ok = miss = 0
     for p in A:
         best = None
-        for step in range(0, FOLLOW_AHEAD):  # forward or staying, never back (reversed runs must not crawl along)
+        for step in range(0, min(FOLLOW_STEP + miss, cap) + 1):  # forward or staying, never back
             k = j + step
             if loop:
                 k %= n
-            elif not 0 <= k < n:
-                continue
+            elif k >= n:
+                break
             d = math.hypot(p[0] - B[k][0], p[1] - B[k][1])
             if best is None or d < best[0]:
                 best = (d, k)
         if best and best[0] <= FOLLOW_NEAR_M:
             ok += 1
             j = best[1]
+            miss = 0
+        else:
+            miss += 1  # off route (a detour): the next match may be further along B
     return ok / len(A)
 
 
@@ -184,16 +191,18 @@ def groups(conn, source: str) -> dict:
     from . import reports as rp
     shapes = {r["source_id"]: r["points"] for r in conn.route_shape.find({}, {"source_id": 1, "points": 1})}
     runs = [a for a in rp.activities(conn, source, "0000-01-01", "9999-12-31") if a["source_id"] in shapes]
-    apart = {}
+    apart = set()  # pairs of runs the runner said aren't the same route; they never share a group, whichever came first
     for o in conn.route_override.find({}):
-        apart.setdefault(o["source_id"], set()).add(o["not_route"])
+        for other in o.get("not_with", []):
+            apart.add(frozenset((o["source_id"], other)))
     reps: list[dict] = []
     for a in runs:
         sid, pts = a["source_id"], shapes[a["source_id"]]
         box, dist = _bbox(pts), a.get("distance_m") or len(pts) * SPACING_M
         home = None
         for g in reps:
-            if g["id"] in apart.get(sid, ()) or abs(dist - g["dist"]) > DIST_TOLERANCE * g["dist"] or not _overlap(box, g["box"]):
+            if any(frozenset((sid, m)) in apart for m in g["members"]) or abs(dist - g["dist"]) > DIST_TOLERANCE * g["dist"] \
+                    or not _overlap(box, g["box"]):
                 continue  # the shortlist: distance and area only narrow it down
             if compare(pts, g["pts"])["confidence"] == "high":
                 home = g
@@ -217,7 +226,8 @@ def different_route(conn, source: str, sid: str) -> bool:
     found = route_of(conn, source, sid)
     if not found:
         return False
-    conn.route_override.update_one({"source_id": sid, "not_route": found[0]}, {"$set": {"source_id": sid, "not_route": found[0]}}, upsert=True)
+    others = [m for m in found[1] if m != sid]
+    conn.route_override.update_one({"source_id": sid}, {"$addToSet": {"not_with": {"$each": others}}}, upsert=True)
     return True
 
 
@@ -231,16 +241,18 @@ def run_row(conn, source: str, a: dict) -> dict:
     from . import reports as rp
     from . import weather as wx
     rep = conn.report.find_one({"type": "post_run", "subject_key": a["source_id"]}, sort=[("revision", -1)])
-    kind = ((rep or {}).get("body") or {}).get("intent", {}).get("kind") or "easy"
+    kind = (((rep or {}).get("body") or {}).get("intent") or {}).get("kind")
     ht = wx.heat(wx.stored(conn, a["source_id"]))
     return {"source_id": a["source_id"], "date": a["local_date"], "distance_m": a["distance_m"],
             "pace_s_per_km": rp.rn.moving_pace(a["distance_m"], a["moving_s"]), "avg_hr": a.get("avg_hr"),
-            "kind": "easy" if kind in EASY else "hard", "temperature_c": (ht or {}).get("temperature_c"), "hot": bool(ht and ht["hot"])}
+            "kind": None if kind is None else "easy" if kind in EASY else "hard",  # unknown stays unknown
+            "temperature_c": (ht or {}).get("temperature_c"), "hot": None if ht is None else ht["hot"]}
 
 
 def progress(rows: list[dict]) -> str | None:
-    """At similar heart rate, how the route's pace moved: the first runs against the latest, of the same kind and in the
-    same conditions (hot days with hot days, cool with cool), so neither the effort nor the weather makes the change."""
+    """At similar heart rate, how the route's pace moved: the first runs against the latest, of the same kind, hot days with
+    hot days and cool with cool (the weather estimate's threshold, a broad filter, not equal weather). Runs whose weather
+    or kind isn't known are left out."""
     for kind, hot in (("easy", False), ("hard", False), ("easy", True), ("hard", True)):
         rs = [r for r in rows if r["kind"] == kind and r["hot"] == hot and r["avg_hr"] and r["pace_s_per_km"]]
         if len(rs) < 4:
@@ -258,13 +270,24 @@ def progress(rows: list[dict]) -> str | None:
     return None
 
 
+def outline(pts: list, max_points: int = 60) -> list[list[float]]:
+    """The route's shape scaled into a unit box (aspect kept), for drawing: no coordinates, no place."""
+    step = max(1, len(pts) // max_points)
+    xy = _xy(pts[::step] + [pts[-1]], *pts[0])
+    xs, ys = [p[0] for p in xy], [p[1] for p in xy]
+    span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+    return [[round((x - min(xs)) / span, 3), round((max(ys) - y) / span, 3)] for x, y in xy]
+
+
 def summary(conn, source: str, rid: str, members: list[str], number: int) -> dict:
     from . import reports as rp
     rows = [run_row(conn, source, a) for a in (rp.activity_by_source_id(conn, source, s) for s in members) if a]
     first = rows[0]
-    loop = is_loop(conn.route_shape.find_one({"source_id": rid})["points"])
+    rep_pts = conn.route_shape.find_one({"source_id": rid})["points"]
+    loop = is_loop(rep_pts)
     return {"id": rid, "name": f"Route {number}", "distance_km": round(median(r["distance_m"] for r in rows) / 1000, 1),
             "loop": loop, "runs": len(rows), "first": first["date"], "last": rows[-1]["date"], "progress": progress(rows),
+            "outline": outline(rep_pts),
             "rows": rows}
 
 
@@ -275,5 +298,6 @@ def all_routes(conn, source: str) -> list[dict]:
 
 BASIS = ("Recognised from each run's simplified route (a point every 50 m, rounded to about 11 m): two runs are the same route "
          "when each covers the other and they go the same way, small detours allowed; a loop started elsewhere still counts, "
-         "the opposite direction doesn't. Only confident matches are grouped. Progress compares runs of the same kind in the same "
-         "conditions (hot with hot, cool with cool), at a similar heart rate. Kept as long as the run; the full GPS track isn't stored.")
+         "the opposite direction doesn't. Only confident matches are grouped. Progress compares runs of the same kind, hot days with "
+         "hot days and cool with cool (by the weather estimate: dew point 18 °C or feels-like 27 °C), at a similar heart rate; "
+         "runs whose weather or kind isn't known are left out. A broad filter, not identical conditions. Kept as long as the run; the full GPS track isn't stored.")

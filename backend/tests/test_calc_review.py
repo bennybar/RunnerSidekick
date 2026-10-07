@@ -1119,3 +1119,39 @@ def test_a_trend_needs_four_weeks():
     assert numbers.change_since(pts, 56, date(2026, 10, 7)) is None  # ten days apart: no trend claimed
     pts.insert(0, {"date": "2026-08-10", "v": 370.0})
     assert numbers.change_since(pts, 56, date(2026, 10, 7)) == (-8.0, "2026-08-10")
+
+
+def test_route_review_regressions():
+    from sidekick import routes
+    shape = lambda pts: routes.shape_from_track(*_track(pts))  # noqa: E731
+    # Short loops run the other way are a different route (the forward search can't reach round them)
+    for side in (200, 300):  # 800 m and 1.2 km loops
+        loop = [(0, 0), (side, 0), (side, side), (0, side), (0, 0)]
+        c = routes.compare(shape(loop), shape(list(reversed(loop))))
+        assert c["direction"] != "same" and c["confidence"] != "high", side
+        assert routes.compare(shape(loop), shape(loop))["confidence"] == "high"
+    # A longer detour (200 m off route) still finds its way back along the route
+    big = [(0, 0), (400, 0), (400, -100), (600, -100), (600, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]
+    assert routes.follows(*[routes._xy(s, 32.08, 34.78) for s in (shape(big), shape([(0, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]))], True) > 0.8
+    # "Different route" works for the run that started the group too
+    conn = synced()
+    loop = [(0, 0), (1000, 0), (1000, 800), (0, 800), (0, 0)]
+    runs = rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat())[-3:]
+    for a in runs:
+        conn.activity.update_one({"source_id": a["source_id"]}, {"$set": {"distance_m": 3600.0}})
+        conn.route_shape.replace_one({"source_id": a["source_id"]}, {"source_id": a["source_id"], "points": shape(loop)}, upsert=True)
+    oldest = runs[0]["source_id"]
+    assert list(routes.groups(conn, "fixture").values()) == [[r["source_id"] for r in runs]]
+    assert routes.different_route(conn, "fixture", oldest)
+    g = routes.groups(conn, "fixture")
+    assert all(oldest not in m for m in g.values()) and [r["source_id"] for r in runs[1:]] in g.values()
+    # Unknown weather or kind never joins a progress claim
+    rows = [{"date": f"2026-0{m}-01", "kind": k, "hot": h, "avg_hr": 150.0, "pace_s_per_km": 360.0 - m}
+            for m, k, h in ((5, "easy", None), (6, None, False), (7, "easy", False), (8, "easy", False))]
+    assert routes.progress(rows) is None  # only 2 runs are known to be easy and cool
+    rows += [{"date": "2026-09-01", "kind": "easy", "hot": False, "avg_hr": 150.0, "pace_s_per_km": 350.0},
+             {"date": "2026-09-15", "kind": "easy", "hot": False, "avg_hr": 151.0, "pace_s_per_km": 348.0}]
+    assert routes.progress(rows) and "Easy runs at about" in routes.progress(rows)
+    # The outline is a shape only: within a unit box
+    o = routes.outline(shape(loop))
+    assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in o)
