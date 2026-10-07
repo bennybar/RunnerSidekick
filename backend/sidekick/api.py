@@ -398,6 +398,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             enrich(conn, cfg.source, d, body)
         return body
 
+    @api.get("/v1/numbers")
+    def get_numbers(conn=Depends(db)):
+        from . import numbers
+        return numbers.build(conn, cfg.source, today(conn))
+
     @api.get("/v1/cardio")
     def get_cardio(conn=Depends(db)):
         from . import cardio

@@ -164,6 +164,19 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
                 merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
                 merged["fetched_at"] = utc_now()
                 set_setting(conn, "garmin_fitness", merged)
+        # Garmin's threshold and race-prediction histories: with the fitness numbers. Extras: Garmin failing on one of them
+        # doesn't fail the sync (a sign-in problem or rate limit still does)
+        for fn, key in (("threshold_history", "garmin_threshold"), ("prediction_history", "garmin_predictions")):
+            if hasattr(connector, fn) and fit_due:
+                try:
+                    got = getattr(connector, fn)(today)
+                except (AuthRequired, RateLimited):
+                    raise
+                except Exception as e:
+                    log.warning("%s skipped: %s", fn, type(e).__name__)
+                    got = None
+                if got:
+                    set_setting(conn, key, got)
         # Garmin's all-time personal records change only with a new run: with the fitness numbers
         if hasattr(connector, "personal_records") and fit_due:
             recs = connector.personal_records()

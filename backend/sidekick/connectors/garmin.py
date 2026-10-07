@@ -359,7 +359,7 @@ class GarminConnector:
         self._client = api
         return api
 
-    def _call(self, fn: str, *args):
+    def _call(self, fn: str, *args, **kwargs):
         from garminconnect import (
             GarminConnectAuthenticationError,
             GarminConnectConnectionError,
@@ -371,7 +371,7 @@ class GarminConnector:
         if self.spacing:
             time.sleep(self.spacing)
         try:
-            return getattr(api, fn)(*args)
+            return getattr(api, fn)(*args, **kwargs)
         except GarminConnectAuthenticationError as e:
             raise AuthRequired(f"{fn}: authentication failed") from e
         except GarminConnectTooManyRequestsError as e:
@@ -445,6 +445,26 @@ class GarminConnector:
                                                          "lastUpdated")} | {
                 "components": {k: (v.get("value") if isinstance(v, dict) else v) for k, v in (fa.get("components") or {}).items()}}
         return out
+
+    def threshold_history(self, day: date) -> dict | None:
+        """Garmin's running lactate threshold: weekly heart rate and pace over the last year, and the weight it reports.
+        (Garmin's threshold speed comes in tenths of a metre per second.)"""
+        rows = self._call("get_lactate_threshold", latest=False, start_date=(day - timedelta(days=365)).isoformat(),
+                          end_date=day.isoformat(), aggregation="weekly") or {}
+        hr = {r["updatedDate"]: num(r.get("value")) for r in rows.get("heart_rate") or [] if r.get("updatedDate")}
+        sp = {r["updatedDate"]: num(r.get("value")) for r in rows.get("speed") or [] if r.get("updatedDate")}
+        pts = [{"date": d, "hr": hr.get(d), "speed_m_s": round(sp[d] * 10, 3) if sp.get(d) else None} for d in sorted(set(hr) | set(sp))]
+        latest = self._call("get_lactate_threshold") or {}
+        w = num((latest.get("power") or {}).get("weight"))
+        return {"points": pts, "weight_kg": w if w and 30 <= w <= 250 else None} if pts else None
+
+    def prediction_history(self, day: date) -> list[dict] | None:
+        """Garmin's daily race predictions over the last 6 months (seconds)."""
+        rows = self._call("get_race_predictions", (day - timedelta(days=182)).isoformat(), day.isoformat(), "daily")
+        if not isinstance(rows, list):
+            return None
+        return [{"date": r["calendarDate"], "5k": r.get("time5K"), "10k": r.get("time10K"), "half": r.get("timeHalfMarathon"),
+                 "marathon": r.get("timeMarathon")} for r in rows if r.get("calendarDate")]
 
     def personal_records(self) -> list[dict] | None:
         """Garmin's own all-time personal records (fastest 1 km, mile, 5 km..., longest run, most steps, goal streaks), as

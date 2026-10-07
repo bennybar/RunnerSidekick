@@ -75,6 +75,13 @@ def build(conn, source: str, today: date) -> dict:
         if (climb["elevation_gain_m"] or 0) >= 20:
             longest.append({"id": "climb", "title": "Most climbing in a run", "value": f"{climb['elevation_gain_m']:.0f} m",
                             "date": climb["local_date"], "source_id": climb["source_id"], "source": "your runs"})
+        from .numbers import climb_of
+        climbs = [(a, climb_of(conn, a)) for a in runs]
+        climbs = [(a, c) for a, c in climbs if c]
+        if climbs:
+            a, c = max(climbs, key=lambda x: x[1]["vam"])
+            longest.append({"id": "vam", "title": "Fastest climbing (VAM)", "value": f"{c['vam']} m/h", "date": a["local_date"],
+                            "source_id": a["source_id"], "source": f"+{c['gain_m']} m in {c['minutes']} min at {c['grade']}%"})
         first = rp.first_weekday(conn)
         weeks: dict[str, float] = {}
         for a in runs:
@@ -144,15 +151,15 @@ def _hms(s: float) -> str:
 
 LOWER_IS_BETTER = {k for k, _, _ in DISTANCES} | {"resting_hr"}
 TITLES = {**{k: t for k, t, _ in DISTANCES}, "longest": "Longest run", "longest_time": "Longest time running",
-          "climb": "Most climbing in a run", "week": "Biggest week", "vo2max": "Highest VO₂ max",
+          "climb": "Most climbing in a run", "vam": "Fastest climbing (VAM)", "week": "Biggest week", "vo2max": "Highest VO₂ max",
           "resting_hr": "Lowest resting heart rate", "hrv": "Highest overnight HRV"}
-RUN_RECORDS = {k for k, _, _ in DISTANCES} | {"longest", "longest_time", "climb"}  # set by a single run
+RUN_RECORDS = {k for k, _, _ in DISTANCES} | {"longest", "longest_time", "climb", "vam"}  # set by a single run
 
 
 def fmt(rid: str, v: float) -> str:
     if rid in LOWER_IS_BETTER - {"resting_hr"} or rid == "longest_time":
         return _hms(v)
-    return {"longest": f"{v / 1000:.1f} km", "week": f"{v / 1000:.1f} km", "climb": f"{v:.0f} m", "vo2max": f"{v:.0f}",
+    return {"longest": f"{v / 1000:.1f} km", "week": f"{v / 1000:.1f} km", "climb": f"{v:.0f} m", "vam": f"{v:.0f} m/h", "vo2max": f"{v:.0f}",
             "resting_hr": f"{v:.0f} bpm", "hrv": f"{v:.0f} ms"}[rid]
 
 
@@ -189,6 +196,8 @@ def progressions(conn, source: str, today: date) -> dict[str, list[dict]]:
     track("longest", [(a["local_date"], a["distance_m"], a["source_id"]) for a in runs], False, garmin.get("longest"))
     track("longest_time", [(a["local_date"], a["moving_s"], a["source_id"]) for a in runs], False)
     track("climb", [(a["local_date"], a["elevation_gain_m"], a["source_id"]) for a in runs if (a["elevation_gain_m"] or 0) >= 20], False)
+    from .numbers import climb_of
+    track("vam", [(a["local_date"], (climb_of(conn, a) or {}).get("vam"), a["source_id"]) for a in runs], False)
     first = rp.first_weekday(conn)
     weeks: dict[str, float] = {}
     for a in runs:

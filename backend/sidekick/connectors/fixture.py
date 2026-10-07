@@ -150,6 +150,14 @@ class FixtureConnector:
                 "training_status": {"phrase": "PRODUCTIVE_1", "date": day.isoformat(), "since": None, "paused": False,
                                     "acute_load": 420, "chronic_min": 300.0, "chronic_max": 520.0}}
 
+    def threshold_history(self, day: date) -> dict | None:
+        return {"points": [{"date": (day - timedelta(days=7 * k)).isoformat(), "hr": 168.0, "speed_m_s": round(3.30 - 0.004 * k, 3)}
+                           for k in range(12, -1, -1)], "weight_kg": 74.0}
+
+    def prediction_history(self, day: date) -> list[dict] | None:
+        return [{"date": (day - timedelta(days=k)).isoformat(), "5k": 1440 + k // 3, "10k": 3010 + k // 2, "half": 6700 + k,
+                 "marathon": 14200 + 2 * k} for k in range(120, -1, -1)]
+
     def personal_records(self) -> list[dict] | None:
         """Garmin-style all-time records for the demo (some older than the synced history)."""
         old = (self.anchor - timedelta(days=400)).isoformat()

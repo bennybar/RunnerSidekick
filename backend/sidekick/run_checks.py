@@ -97,13 +97,19 @@ def build(conn, source: str, report: dict) -> list[dict]:
 
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0
+    vam = None
+    act_row = rp.activity_by_source_id(conn, source, a["source_id"]) if climb >= 30 else None
+    if act_row:
+        from .numbers import climb_of
+        c = climb_of(conn, act_row)
+        vam = f" · best climb {c['vam']} m/h (+{c['gain_m']} m in {c['minutes']} min)" if c else None
     if climb >= 30 and splits:
         hilly = max(splits, key=lambda s: (s.get("elevation_gain_m") or 0))
         if hilly.get("gap_pace_s_per_km") and (hilly.get("elevation_gain_m") or 0) >= 10:
             out.append(check("hills", "Hills", f"+{round(climb)} m · hilliest km {hilly['idx'] + 1}: {rp.fmt_pace(hilly['pace_s_per_km'])}"
-                                               f" ({rp.fmt_pace(hilly['gap_pace_s_per_km'])} on the flat)", "info"))
+                                               f" ({rp.fmt_pace(hilly['gap_pace_s_per_km'])} on the flat)" + (vam or ""), "info"))
         else:
-            out.append(check("hills", "Hills", f"+{round(climb)} m in total", "info"))
+            out.append(check("hills", "Hills", f"+{round(climb)} m in total" + (vam or ""), "info"))
 
     # Conditions: the weather estimate, with whether it was hot enough to matter
     ht = report.get("heat")

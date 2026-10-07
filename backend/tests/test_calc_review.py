@@ -965,3 +965,36 @@ def test_cardio_flat_means_flat_and_sensitivity_keeps_the_same_runs(monkeypatch)
     # Sensitivity: the same observation, only the maximum changed, and a lower maximum gives a lower estimate
     e = {"vo2": 40.0, "hr": 150.0, "hr_rest": 50.0}
     assert cardio.with_hr_max(e, 175) < cardio.with_hr_max(e, 180)
+
+
+def test_training_numbers_known_answers():
+    from sidekick import numbers
+    from sidekick.connectors.base import Samples
+    # A climb: 5 minutes rising 60 m over 1200 m (5%), on the flat before and after → VAM 720 m/h
+    t, d, e = [], [], []
+    for x in range(0, 1500, 2):
+        t.append(float(x))
+        d.append(4.0 * x)
+        e.append(10.0 + (0 if x < 600 else min(60.0, (x - 600) / 300 * 60)))
+    s = Samples(t, [150.0] * len(t), [4.0] * len(t), d, e, [170.0] * len(t))
+    c = numbers.best_climb(s)
+    assert c and 700 <= c["vam"] <= 740 and c["gain_m"] >= 55
+    flat = Samples(t, [150.0] * len(t), [4.0] * len(t), d, [10.0] * len(t), [170.0] * len(t))
+    assert numbers.best_climb(flat) is None
+    # Intervals: 2 min fast ending at 175 bpm, then a slow minute where it falls to 145 → a 30 bpm drop each
+    t, hr, v = [], [], []
+    x = 0.0
+    for rep in range(3):
+        for k in range(120):
+            t.append(x); hr.append(150 + 25 * k / 119); v.append(4.5); x += 1
+        for k in range(120):
+            t.append(x); hr.append(175 - min(30, 30 * k / 60)); v.append(2.5); x += 1
+    drops = numbers.recovery_drops(Samples(t, hr, v, [0.0] * len(t), [10.0] * len(t), [170.0] * len(t)), 170)
+    assert len(drops) == 3 and all(28 <= dd <= 32 for dd in drops)
+    # Form bands, and Garmin's threshold speed comes in tenths of a metre per second
+    assert next(b for b in numbers.FORM_BANDS if b[0] is None or -35 >= b[0])[1] == "Heavy"
+    assert numbers.pace(3.083) == rp.fmt_pace(1000 / 3.083)
+    conn = synced()
+    items = {i["id"]: i for i in numbers.build(conn, "fixture", ANCHOR)["items"]}
+    assert set(items) == {"threshold", "form", "predictions", "recovery", "climbing"}
+    assert all(i["status"] != "ok" or (i["value"] and i["series"]) for i in items.values())
