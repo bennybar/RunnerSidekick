@@ -332,6 +332,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Route progress compares like runs (2026-10-07, v0.50.2)
+- A route's progress now compares individual runs within one shared heart-rate band (±3 bpm, the band holding the most
+  runs), earliest two against latest two, at least 4 weeks apart; matching averages of different runs no longer count.
+  The claim names the band and how many runs are in it. Live: Route 1, 9 runs at 155–161 bpm, 6:02 → 5:44 /km; Route 4's
+  earlier claim no longer qualifies.
+- Corrections saved in the first format (`not_route`) are still honoured (none existed on the server).
+
 ## Routes review fixes (2026-10-07, v0.50.1)
 - Direction: following one route along another now advances with the distance travelled (150 m per 50-m step, plus the
   stretch spent in a detour, at most a third of a loop), so a short loop run the other way can't match by reaching round
