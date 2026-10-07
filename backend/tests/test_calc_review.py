@@ -1107,5 +1107,15 @@ def test_reference_pace_never_extrapolates_and_endurance_needs_full_groups():
     it = numbers.reference_pace(conn, "fixture", ANCHOR)
     ref = int(it["value"].split(" at ")[1].split()[0])
     assert all(abs(float(p["label"].split(" at ")[1].split()[0]) - ref) <= numbers.REF_HR_BAND for p in it["series"])
+    for a in rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat()):
+        rp.build_post_run(conn, "fixture", a["source_id"], True)  # the per-run decoupling the groups read
     en = numbers.endurance(conn, "fixture", ANCHOR)
     assert en["status"] == "ok" and all(g["runs"] >= numbers.MIN_PER_GROUP for g in en["groups"])
+
+
+def test_a_trend_needs_four_weeks():
+    from sidekick import numbers
+    pts = [{"date": "2026-09-27", "v": 350.0}, {"date": "2026-10-01", "v": 345.0}, {"date": "2026-10-06", "v": 362.0}]
+    assert numbers.change_since(pts, 56, date(2026, 10, 7)) is None  # ten days apart: no trend claimed
+    pts.insert(0, {"date": "2026-08-10", "v": 370.0})
+    assert numbers.change_since(pts, 56, date(2026, 10, 7)) == (-8.0, "2026-08-10")

@@ -48,6 +48,9 @@ def hms(s: float) -> str:
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
+MIN_TREND_DAYS = 28
+
+
 def day(iso: str) -> str:
     return date.fromisoformat(iso).strftime("%-d %b")
 
@@ -57,7 +60,12 @@ def change_since(series: list[dict], days: int, today: date) -> tuple[float, str
     if len(series) < 2:
         return None
     target = (today - timedelta(days=days)).isoformat()
-    then = min(series[:-1], key=lambda p: abs(date.fromisoformat(p["date"]).toordinal() - date.fromisoformat(target).toordinal()))
+    # Only points at least 4 weeks before the latest: a change over a few days is noise, not a trend
+    last = date.fromisoformat(series[-1]["date"])
+    earlier = [p for p in series[:-1] if (last - date.fromisoformat(p["date"])).days >= MIN_TREND_DAYS]
+    if not earlier:
+        return None
+    then = min(earlier, key=lambda p: abs(date.fromisoformat(p["date"]).toordinal() - date.fromisoformat(target).toordinal()))
     return series[-1]["v"] - then["v"], then["date"]
 
 
