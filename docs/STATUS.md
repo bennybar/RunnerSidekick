@@ -332,6 +332,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Training numbers (2026-10-07, v0.49.0)
+- Insights → "Training numbers" (`GET /v1/numbers`, `numbers.py`), each with its history in a sheet (curve with better
+  always up, recent values, runs open):
+  - Lactate threshold: Garmin's heart rate and pace, weekly over the last year (Garmin's speed is in tenths of m/s).
+  - Fitness, fatigue and form: the readiness load model's 28- and 7-day loads; form = (fitness − fatigue) / fitness,
+    bands +20 / −10 / −30%.
+  - Race predictions over time: Garmin's daily predictions, last 6 months.
+  - Heart-rate recovery: the drop over 60 s after hard efforts (60+ s fast against the run's easier quarter, ending in
+    zone 4+, followed by a slower minute), median of 2+ per session. Measured while moving; experimental.
+  - Climbing speed (VAM): the run's best climb over 3–10 min at 3%+ and 20+ m (longer when about as fast). Also on the
+    run screen's hills check and as a record ("Fastest climbing").
+- Sync reads Garmin's threshold and prediction histories with the fitness numbers; failing on them doesn't fail a sync.
+
 ## Cardio fitness, experimental (2026-10-06, v0.48.0)
 - Insights → Fitness → "Cardio fitness (experimental)" (`GET /v1/cardio`, `cardio.py`): the evidence about aerobic
   capacity side by side, never blended (they share inputs, so agreement wouldn't add certainty):

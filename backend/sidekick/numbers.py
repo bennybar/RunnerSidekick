@@ -43,6 +43,10 @@ def hms(s: float) -> str:
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
+def day(iso: str) -> str:
+    return date.fromisoformat(iso).strftime("%-d %b")
+
+
 def change_since(series: list[dict], days: int, today: date) -> tuple[float, str] | None:
     """The latest value minus the one closest to `days` before it, with that date."""
     if len(series) < 2:
@@ -66,10 +70,10 @@ def threshold(conn, today: date) -> dict:
     last = pts[-1]
     series = [{"date": p["date"], "v": round(1000 / p["speed_m_s"], 1), "label": pace(p["speed_m_s"])} for p in pts]
     ch = change_since(series, 56, today)
-    trend = (f"{abs(ch[0]):.0f} s/km {'faster' if ch[0] < 0 else 'slower'} than on {ch[1]}" if ch and abs(ch[0]) >= 2
+    trend = (f"{abs(ch[0]):.0f} s/km {'faster' if ch[0] < 0 else 'slower'} than on {day(ch[1])}" if ch and abs(ch[0]) >= 2
              else "about the same pace as two months ago" if ch else None)
     return {**base, "status": "ok", "value": f"{last['hr']:.0f} bpm · {pace(last['speed_m_s'])}" if last.get("hr") else pace(last["speed_m_s"]),
-            "headline": trend or f"as of {last['date']}", "detail": f"Garmin's latest, {last['date']}.", "series": series}
+            "headline": trend or f"as of {day(last['date'])}", "detail": f"Garmin's latest, {day(last['date'])}.", "series": series}
 
 
 # ---------------------------------------------------------------- fitness, fatigue and form
@@ -125,7 +129,7 @@ def predictions(conn, today: date) -> dict:
     series = [{"date": r["date"], "v": r["5k"], "label": hms(r["5k"])} for r in rows]
     last = rows[-1]
     ch = change_since(series, 56, today)
-    trend = (f"5K {abs(ch[0]):.0f} s {'faster' if ch[0] < 0 else 'slower'} than on {ch[1]}" if ch and abs(ch[0]) >= 5
+    trend = (f"5K {abs(ch[0]):.0f} s {'faster' if ch[0] < 0 else 'slower'} than on {day(ch[1])}" if ch and abs(ch[0]) >= 5
              else "about the same as two months ago" if ch else "")
     others = ", ".join(f"{lab} {hms(last[k])}" for k, lab in (("10k", "10K"), ("half", "half"), ("marathon", "marathon")) if last.get(k))
     return {**base, "status": "ok", "value": f"5K {hms(last['5k'])}", "headline": trend, "detail": f"Now: {others}.", "series": series}
@@ -190,7 +194,7 @@ def recovery(conn, source: str, today: date) -> dict:
         return {**base, "status": "not_enough", "headline": "Needs a session with hard efforts and easy recoveries",
                 "detail": "Intervals or repeats with slower jogs between them, in the last 6 months."}
     last = series[-1]
-    return {**base, "status": "ok", "value": f"−{last['v']} bpm in a minute", "headline": f"median of {last['efforts']} efforts on {last['date']}",
+    return {**base, "status": "ok", "value": f"−{last['v']} bpm in a minute", "headline": f"median of {last['efforts']} efforts on {day(last['date'])}",
             "detail": f"From {len(series)} session{'s' if len(series) != 1 else ''} in the last 6 months.", "series": series}
 
 
@@ -246,7 +250,7 @@ def climbing(conn, source: str, today: date) -> dict:
     recent = [p for p in series if p["date"] >= (today - timedelta(days=90)).isoformat()] or series
     top = max(recent, key=lambda p: p["v"])
     return {**base, "status": "ok", "value": f"{top['v']} m/h", "headline": f"best in 90 days: +{top['gain_m']} m in {top['minutes']} min at {top['grade']}%",
-            "detail": f"On {top['date']}.", "series": series, "source_id": top["source_id"]}
+            "detail": f"On {day(top['date'])}.", "series": series, "source_id": top["source_id"]}
 
 
 def build(conn, source: str, today: date) -> dict:

@@ -118,6 +118,8 @@ fun InsightsScreen(
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
     val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
     val cardio by vm.cardio.collectAsStateWithLifecycle()
+    val numbers by vm.numbers.collectAsStateWithLifecycle()
+    var numberOpen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     val answers by vm.answers.collectAsStateWithLifecycle()
     var cardioOpen by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     val compare by vm.compare.collectAsStateWithLifecycle()
@@ -165,6 +167,7 @@ fun InsightsScreen(
                 fitness?.value?.let { f ->
                     animatedItem(key = "fitness") { FitnessSection(f, onOpenRun = onOpenRun) }
                 }
+                numbers?.value?.takeIf { it.items.isNotEmpty() }?.let { n -> animatedItem(key = "numbers") { NumbersCard(n) { numberOpen = it } } }
                 cardio?.value?.let { c -> animatedItem(key = "cardio") { CardioCard(c) { vm.loadAnswers(); cardioOpen = true } } }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
                 if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
@@ -192,6 +195,9 @@ fun InsightsScreen(
             }
         }
     }
+    numberOpen?.let { id -> numbers?.value?.items?.firstOrNull { it.id == id }?.let { item ->
+        NumberSheet(item, onOpenRun = { rid -> numberOpen = null; onOpenRun(rid) }, onDismiss = { numberOpen = null })
+    } }
     if (cardioOpen) cardio?.value?.let { c ->
         CardioSheet(c, answers, onSave = vm::saveAnswer, onOpenRun = { id -> cardioOpen = false; onOpenRun(id) }, onDismiss = { cardioOpen = false })
     }

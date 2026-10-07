@@ -480,6 +480,20 @@ data class CheckinDto(
     val deleted: Boolean = false,
 )
 
+/** Training numbers: lactate threshold, form, race predictions over time, heart-rate recovery, climbing speed. */
+@Serializable
+data class TrainingNumbers(val items: List<NumberItem> = emptyList())
+
+@Serializable
+data class NumberItem(
+    val id: String, val title: String, val status: String = "ok", val value: String? = null, val headline: String? = null,
+    val detail: String? = null, val basis: String = "", val series: List<NumberPoint> = emptyList(),
+    @SerialName("lower_is_better") val lowerIsBetter: Boolean = false, @SerialName("source_id") val sourceId: String? = null,
+)
+
+@Serializable
+data class NumberPoint(val date: String, val v: Double, val label: String? = null, @SerialName("source_id") val sourceId: String? = null)
+
 /** Cardio fitness (experimental): the evidence about aerobic capacity side by side, never blended. */
 @Serializable
 data class Cardio(

@@ -98,7 +98,7 @@ def build(conn, source: str, report: dict) -> list[dict]:
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0
     vam = None
-    act_row = rp.activity_by_source_id(conn, source, a["source_id"]) if climb >= 30 else None
+    act_row = rp.activity_by_source_id(conn, source, a["source_id"]) if climb >= 30 and conn is not None else None
     if act_row:
         from .numbers import climb_of
         c = climb_of(conn, act_row)
