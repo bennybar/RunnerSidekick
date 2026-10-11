@@ -98,7 +98,8 @@ def auto_run_ai(cfg, conn, source: str, sids: list[str], today) -> None:
     from . import narrative as nv
     from . import run_ai
     from .config import secrets
-    key = os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")
+    from .config import server_openai_key
+    key = server_openai_key(cfg.data_dir)
     if sids and key and rp.get_setting(conn, "ai_enabled", False):
         wrote = run_ai.auto(conn, source, sids, today, nv.server_model(rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL)), key,
                             int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "25")))

@@ -60,6 +60,17 @@ def secrets(data_dir: Path) -> dict:
         return {}
 
 
+def server_openai_key(data_dir: Path) -> str | None:
+    """The server's own OpenAI key, unless the owner switched server AI off ("server_ai_enabled": false in
+    secrets.json): then AI runs only with a runner's own key or on their phone."""
+    import os
+
+    s = secrets(data_dir)
+    if s.get("server_ai_enabled") is False:
+        return None
+    return os.getenv("OPENAI_API_KEY") or s.get("openai_api_key")
+
+
 def load_config() -> Config:
     source = os.getenv("RSK_SOURCE", SOURCE_GARMIN)
     if source not in (SOURCE_GARMIN, SOURCE_FIXTURE):

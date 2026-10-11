@@ -1200,3 +1200,13 @@ def test_on_device_ai_input_is_checked_like_the_servers(tmp_path, monkeypatch):
     bad = {**good, "summary": "You ran 12 km at 150 bpm."}  # digits: rejected, as for the server's model
     assert c.post(f"/v1/activities/{sid}/ai/local", headers=h, json={"input_hash": p["input_hash"], "output": _json.dumps(bad)}).json()["status"] == "rejected"
     assert c.post(f"/v1/activities/{sid}/ai/local", headers=h, json={"input_hash": "stale", "output": "{}"}).status_code == 409
+
+
+def test_server_ai_can_be_switched_off(tmp_path, monkeypatch):
+    import json as _json
+    from sidekick.config import server_openai_key
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (tmp_path / "secrets.json").write_text(_json.dumps({"openai_api_key": "sk-test"}))
+    assert server_openai_key(tmp_path) == "sk-test"
+    (tmp_path / "secrets.json").write_text(_json.dumps({"openai_api_key": "sk-test", "server_ai_enabled": False}))
+    assert server_openai_key(tmp_path) is None  # only a runner's own key or their phone

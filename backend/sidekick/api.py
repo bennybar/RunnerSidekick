@@ -22,7 +22,7 @@ from dataclasses import replace
 from . import accounts
 from . import garmin_oauth as goauth
 from . import garmin_link
-from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, secrets
+from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, secrets, server_openai_key
 from fastapi.responses import HTMLResponse
 from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
@@ -315,7 +315,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return nv.AiConfig(
             enabled=bool(rp.get_setting(conn, "ai_enabled", False)),
             model=model,
-            api_key=os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key"),
+            api_key=server_openai_key(cfg.data_dir),
             max_calls_per_day=int(os.getenv("RSK_AI_MAX_CALLS_PER_DAY", "25")),
         )
 
@@ -842,7 +842,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "ai_engine": rp.get_setting(conn, "ai_engine", "server"),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
                 "ai_models": sorted(nv.server_models()),  # what the server's key may run; your own key may use any
-                "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
+                "ai_available": bool(server_openai_key(cfg.data_dir)) or narrative_provider is not None,
                 "morning_window_start": rp.get_setting(conn, "morning_window_start", "06:00"),
                 "morning_window_end": rp.get_setting(conn, "morning_window_end", "10:00"),
                 "profile_sex": rp.get_setting(conn, "profile_sex", None),
