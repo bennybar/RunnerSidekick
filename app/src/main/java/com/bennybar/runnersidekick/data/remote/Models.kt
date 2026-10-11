@@ -588,6 +588,8 @@ data class SettingsDto(
     @SerialName("goal_type") val goalType: String? = null,
     @SerialName("ai_enabled") val aiEnabled: Boolean = false,
     @SerialName("weather_enabled") val weatherEnabled: Boolean = true,
+    /** Where AI input on a run is written: "server" (OpenAI) or "device" (Gemini Nano on this phone) */
+    @SerialName("ai_engine") val aiEngine: String = "server",
     @SerialName("ai_model") val aiModel: String = "gpt-6.1-sol",
     @SerialName("ai_available") val aiAvailable: Boolean = false,
     @SerialName("morning_window_start") val morningWindowStart: String = "06:00",

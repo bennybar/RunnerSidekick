@@ -332,6 +332,19 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## AI input on the phone, plain AI errors (2026-10-11, v0.51.0)
+- Settings → AI coach → "Where AI input is written": on the server (OpenAI) or on this phone (Gemini Nano, through ML
+  Kit's GenAI Prompt API, `com.google.mlkit:genai-prompt` 1.0.0-beta4). Offered only where the phone has Gemini Nano;
+  choosing it downloads the model first when needed. On the phone, "Get AI input" fetches the run's prompt
+  (`GET /v1/activities/{sid}/ai/prompt`: the same evidence bundle and instructions, with the output shape spelled out),
+  runs it on the phone, and posts the answer (`POST …/ai/local`), which the server checks exactly like its own (format,
+  evidence ids, numbers, wording; wrapped JSON is unwrapped) and keeps. In this mode the server never sends that run to
+  OpenAI and skips the automatic input after a sync. The coach and summaries stay on the server.
+- AI failures say why: a rejected key ("The server's OpenAI key was rejected …" or "Your OpenAI key …"), rate limits,
+  connection problems (`ai_errors.py`), on the run card too (it used to say "didn't pass the app's checks" for every
+  failure).
+- Found: since 2026-10-11 the server's OpenAI key is rejected (HTTP 401) for every AI feature; it needs a new key.
+
 ## Route progress band search (2026-10-07, v0.50.3)
 - The shared heart-rate band is searched over every whole-number centre across the route's runs, not only centres equal
   to a recorded average (runs at 137 and 143 bpm now share the 140 ± 3 band).

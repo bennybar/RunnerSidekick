@@ -438,6 +438,17 @@ class Repository(
         observe("runai:$id") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(it) }
 
     /** The run's AI input; [request] asks for it to be written (only then does it cost an AI call). Returns the status. */
+    /** AI input written on this phone (Gemini Nano): the server's prompt in, the answer back to be checked and kept. */
+    suspend fun localRunAi(id: String): String {
+        val p = json.parseToJsonElement(api.getRaw("/v1/activities/$id/ai/prompt")).jsonObject
+        val raw = LocalAi.generate(p["system"]!!.jsonPrimitive.content, p["input"]!!.jsonPrimitive.content)
+        api.postJson("/v1/activities/$id/ai/local", kotlinx.serialization.json.buildJsonObject {
+            put("input_hash", p["input_hash"]!!)
+            put("output", kotlinx.serialization.json.JsonPrimitive(raw))
+        }.toString())
+        return refreshRunAi(id)
+    }
+
     suspend fun refreshRunAi(id: String, request: Boolean = false): String {
         val body = if (request) api.postRaw("/v1/activities/$id/ai", aiHeaders()) else api.getRaw("/v1/activities/$id/ai", headers = aiHeaders())
         put("runai:$id", body)
