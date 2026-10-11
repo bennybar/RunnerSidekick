@@ -32,9 +32,3 @@
 -keep class com.bennybar.runnersidekick.**$$serializer { *; }
 -keepclassmembers class com.bennybar.runnersidekick.** { *** Companion; }
 
-# ML Kit GenAI (Gemini Nano through AICore): its setup finds classes by reflection, which R8 otherwise renames or removes
-# (the status check then failed with a NullPointerException in release builds only)
--keep class com.google.mlkit.** { *; }
--keep class com.google.android.gms.internal.mlkit_** { *; }
--keep class com.google.android.gms.common.internal.** { *; }
--dontwarn com.google.mlkit.**

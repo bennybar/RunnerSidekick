@@ -588,8 +588,6 @@ data class SettingsDto(
     @SerialName("goal_type") val goalType: String? = null,
     @SerialName("ai_enabled") val aiEnabled: Boolean = false,
     @SerialName("weather_enabled") val weatherEnabled: Boolean = true,
-    /** Where AI input on a run is written: "server" (OpenAI) or "device" (Gemini Nano on this phone) */
-    @SerialName("ai_engine") val aiEngine: String = "server",
     @SerialName("ai_model") val aiModel: String = "gpt-6.1-sol",
     @SerialName("ai_available") val aiAvailable: Boolean = false,
     @SerialName("morning_window_start") val morningWindowStart: String = "06:00",
@@ -612,8 +610,6 @@ data class SettingsDto(
     @SerialName("profile_height_cm_at") val profileHeightCmAt: String? = null,
     @SerialName("hr_max") val hrMax: Int? = null,
     @SerialName("hr_max_at") val hrMaxAt: String? = null,
-    /** Models the server's key may run (read-only; your own key may use any) */
-    @SerialName("ai_models") val aiModels: List<String> = emptyList(),
 )
 
 @Serializable

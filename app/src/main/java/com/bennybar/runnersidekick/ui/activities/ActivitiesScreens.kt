@@ -157,7 +157,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
                 }
             })
         },
-        snackbarHost = { SnackbarHost(listSnackbar) },
+        snackbarHost = { SnackbarHost(listSnackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
     ) { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val all = acts?.value.orEmpty().filter { it.sport != "other" }
@@ -272,7 +272,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                             // Already written for this run: nothing more to ask for (it's shown at the top)
                             enabled = st !in setOf("ok", "pending", "disabled", "not_configured", "budget_exceeded"),
                             contentPadding = PaddingValues(horizontal = 14.dp), modifier = Modifier.padding(end = 8.dp)) {
-                            if (st == "pending" || st == "on_device") androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
+                            if (st == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(18.dp))
                             else Icon(if (st == "ok") Icons.Outlined.CheckCircle else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(if (st == "ok") "AI input ready" else if (ai?.value?.stale == true) "Update AI input" else "Get AI input")
@@ -281,7 +281,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
     ) { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             if (r == null) {
@@ -591,7 +591,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     Text("Coaching from this run's analysis, its week and your plan", style = MaterialTheme.typography.labelMedium,
                         color = cs.onSurfaceVariant)
                 }
-                if (v?.status == "pending" || v?.status == "on_device") androidx.compose.material3.LoadingIndicator(Modifier.size(28.dp))
+                if (v?.status == "pending") androidx.compose.material3.LoadingIndicator(Modifier.size(28.dp))
             }
             when {
                 shown != null -> {
@@ -620,7 +620,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     if (!more && (shown.wentWell.isNotEmpty() || shown.toWorkOn.isNotEmpty()))
                         androidx.compose.material3.TextButton(onClick = { more = true }) { Text("What went well, what to work on") }
                     Text((if (shown.trigger == "auto") "Written automatically for this new run · " else "") +
-                        (if (shown.model == "gemini-nano") "AI (Gemini Nano, on this phone)" else "AI (${shown.model ?: "OpenAI"})") +
+                        "AI (${shown.model ?: "OpenAI"})" +
                         (if (shown.keySource == "user") " with your key" else "") +
                         " · numbers come from the app · guidance, not medical advice", style = MaterialTheme.typography.labelSmall,
                         color = cs.onSurfaceVariant)
@@ -629,11 +629,9 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Get AI input")
                 }
                 v.status == "pending" -> Text("Reading this run…", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                v.status == "on_device" -> Text("Writing on this phone… (Gemini Nano; this can take a little while)",
-                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 v.status == "disabled" -> Text("Turn on the AI coach in Settings to get input on your runs.",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                v.status == "not_configured" -> Text("The server's AI is off. In Settings, add your own OpenAI key, or have AI input written on this phone (Gemini Nano).",
+                v.status == "not_configured" -> Text("Add your own OpenAI key in Settings to get AI input on your runs.",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 else -> {
                     Text(when (v.status) {

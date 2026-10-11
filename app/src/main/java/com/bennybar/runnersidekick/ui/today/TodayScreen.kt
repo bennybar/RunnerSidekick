@@ -143,7 +143,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 scrollBehavior = scroll,
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
     ) { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(isRefreshing = busy && report != null, onRefresh = vm::refresh, modifier = Modifier.padding(padding).fillMaxSize()) {
             if (report == null) {

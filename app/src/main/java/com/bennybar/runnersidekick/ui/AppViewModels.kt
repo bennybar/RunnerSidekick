@@ -244,18 +244,6 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     /** Asks for the AI input, then follows it (bounded) while it is written in the background. */
     fun askAi() = launchIo {
         val st = repo.refreshRunAi(id, request = true)
-        if (st == "on_device") {  // you chose to have AI input written on this phone
-            try {
-                repo.localRunAi(id)
-            } catch (e: com.google.mlkit.genai.common.GenAiException) {
-                runCatching { repo.refreshRunAi(id) }  // never left showing "writing"
-                throw com.bennybar.runnersidekick.data.remote.ApiException.Sync(
-                    "Gemini Nano on this phone couldn't write it (${e.message ?: "error ${e.errorCode}"}). Try again, or switch AI input to the server in Settings.")
-            } finally {
-                runCatching { repo.refreshRunAi(id) }
-            }
-            return@launchIo
-        }
         if (st != "pending") return@launchIo
         viewModelScope.launch {
             for (attempt in 0 until 20) {

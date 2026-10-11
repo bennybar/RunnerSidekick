@@ -332,6 +332,13 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## AI: your own key only (2026-10-11, v0.52.0)
+- AI runs only with the runner's own OpenAI key (the server's key stays switched off), on gpt-6.1-sol only: no model
+  choice (the setting and the allowed-models list are gone; `ai_config` always uses `narrative.DEFAULT_MODEL`).
+- Gemini Nano (on-device AI input) removed: on the S26 Ultra the download/enable path kept failing. The ML Kit library,
+  its keep rules, the setting and the server's prompt/local-answer endpoints are gone.
+- Messages (snackbars) sit above the floating bottom bar on every screen; they were hidden behind it.
+
 ## Gemini Nano in release builds, server AI off (2026-10-11, v0.51.1)
 - Release builds: R8 had broken ML Kit's setup (it finds classes by reflection), so the Gemini Nano status check threw a
   NullPointerException and the phone option stayed hidden even on supported phones (seen on a Galaxy S26 Ultra).

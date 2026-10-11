@@ -307,10 +307,14 @@ def test_ai_calls_on_the_server_key_share_one_daily_cap(monkeypatch):
     assert nv.reserve_call(users[0], "coach", 25, server_key=False) is not None  # the runner's own key isn't capped by it
 
 
-def test_only_allowed_models_run_on_the_server_key(monkeypatch):
+def test_the_ai_model_is_fixed(tmp_path):
     from sidekick import narrative as nv
-    monkeypatch.setenv("RSK_AI_MODELS", "gpt-6.1-sol-mini")
-    assert nv.server_models() == {nv.DEFAULT_MODEL, "gpt-6.1-sol-mini"}
+    from sidekick.auth import create_token
+    from test_multiuser import client
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    assert nv.DEFAULT_MODEL == "gpt-6.1-sol"
+    assert c.put("/v1/settings", headers=h, json={"ai_model": "something-else"}).json()["ai_model"] == "gpt-6.1-sol"  # not a choice
 
 
 def test_one_bad_record_doesnt_stop_the_sync_and_syncs_dont_overlap():
@@ -1168,38 +1172,6 @@ def test_route_review_regressions():
     # The outline is a shape only: within a unit box
     o = routes.outline(shape(loop))
     assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in o)
-
-
-def test_on_device_ai_input_is_checked_like_the_servers(tmp_path, monkeypatch):
-    import json as _json
-    from sidekick import run_ai
-    from sidekick.auth import create_token
-    from test_multiuser import client
-    c = client(tmp_path)
-    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
-    c.post("/v1/sync", headers=h)
-    import time as _t
-    for _ in range(200):
-        if not c.get("/v1/status", headers=h).json()["sync_running"]:
-            break
-        _t.sleep(0.05)
-    sid = c.get("/v1/activities", headers=h).json()[0]["source_id"]
-    c.put("/v1/settings", headers=h, json={"ai_enabled": True, "ai_engine": "device"})
-    assert c.post(f"/v1/activities/{sid}/ai", headers=h).json()["status"] == "on_device"  # never sent to OpenAI
-    p = c.get(f"/v1/activities/{sid}/ai/prompt", headers=h).json()
-    assert p["model"] == "gemini-nano" and "one JSON object" in p["system"] and _json.loads(p["input"])["evidence"]
-    ids = [e["id"] for e in _json.loads(p["input"])["evidence"]]
-    good = {"tldr": "A steady run that held together.", "summary": "It went as planned. The pacing stayed even.",
-            "summary_evidence_ids": ids[:1], "went_well": [{"text": "Even pacing.", "evidence_ids": ids[:1]}],
-            "to_work_on": [], "next_time": {"text": "Keep the next run easy.", "evidence_ids": ids[:1], "direction": "easier"}}
-    # Small models wrap their JSON: the object inside is read
-    r = c.post(f"/v1/activities/{sid}/ai/local", headers=h,
-               json={"input_hash": p["input_hash"], "output": "Here you go:\n```json\n" + _json.dumps(good) + "\n```"}).json()
-    assert r["status"] == "ok" and r["model"] == "gemini-nano" and r["key_source"] == "device"
-    assert c.get(f"/v1/activities/{sid}/ai", headers=h).json()["status"] == "ok"  # served from the store afterwards
-    bad = {**good, "summary": "You ran 12 km at 150 bpm."}  # digits: rejected, as for the server's model
-    assert c.post(f"/v1/activities/{sid}/ai/local", headers=h, json={"input_hash": p["input_hash"], "output": _json.dumps(bad)}).json()["status"] == "rejected"
-    assert c.post(f"/v1/activities/{sid}/ai/local", headers=h, json={"input_hash": "stale", "output": "{}"}).status_code == 409
 
 
 def test_server_ai_can_be_switched_off(tmp_path, monkeypatch):

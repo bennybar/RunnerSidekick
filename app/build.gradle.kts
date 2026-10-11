@@ -15,8 +15,8 @@ android {
         applicationId = "com.bennybar.runnersidekick"
         minSdk = 35
         targetSdk = 36
-        versionCode = 83
-        versionName = "0.51.1"
+        versionCode = 85
+        versionName = "0.52.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).
@@ -87,7 +87,6 @@ dependencies {
     implementation(libs.androidx.credentials.play)
     implementation(libs.googleid)
     implementation(libs.androidx.browser)
-    implementation(libs.mlkit.genai.prompt)  // Gemini Nano on supported phones (AI input written on the phone)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

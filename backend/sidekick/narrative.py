@@ -34,15 +34,6 @@ DEFAULT_MODEL = "gpt-6.1-sol"
 ALL_USERS_DAILY_CAP = 300  # AI calls a day on the server's key, across every user (RSK_AI_MAX_CALLS_ALL)
 
 
-def server_model(chosen: str | None) -> str:
-    """The model to run on the server's key: the runner's choice if it's allowed there, else the default."""
-    return chosen if chosen in server_models() else DEFAULT_MODEL
-
-
-def server_models() -> set[str]:
-    """Models that may run on the server's OpenAI key (RSK_AI_MODELS, comma separated); the default model always may."""
-    import os
-    return {DEFAULT_MODEL, *(m.strip() for m in os.getenv("RSK_AI_MODELS", "").split(",") if m.strip())}
 MAX_SENTENCES = 4
 PLACEHOLDER = re.compile(r"\{(value|median|delta):([A-Za-z0-9:_.\-]+)\}")
 # Conservative wording guard: no diagnoses, no causal claims, no certainty upgrades.
