@@ -222,7 +222,8 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
     val sheetError by vm.sheetError.collectAsStateWithLifecycle()
     // Whether this phone has Gemini Nano (AICore): checked once per visit; the choice is offered only when it does
     var localAi by remember { mutableStateOf(com.google.mlkit.genai.common.FeatureStatus.UNAVAILABLE) }
-    LaunchedEffect(Unit) { localAi = com.bennybar.runnersidekick.data.LocalAi.status() }
+    var localAiWhy by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { com.bennybar.runnersidekick.data.LocalAi.check().let { (s, why) -> localAi = s; localAiWhy = why } }
     val close = vm::closeSheet
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -355,10 +356,11 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
                                 onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it)) }) })
                         if (r.aiEnabled) row("Model", supporting = r.aiModel, icon = Icons.Outlined.Tune, iconShape = MaterialShapes.Cookie4Sided,
                             onClick = { vm.openSheet("model") })
-                        // Gemini Nano: only offered on phones that have it
-                        if (r.aiEnabled && (localAi != com.google.mlkit.genai.common.FeatureStatus.UNAVAILABLE || r.aiEngine == "device"))
-                            row("Where AI input is written", supporting = if (r.aiEngine == "device") "On this phone (Gemini Nano): your runs aren't sent to OpenAI for it"
-                                else "On the server (OpenAI)", icon = Icons.Outlined.PhoneAndroid, iconShape = MaterialShapes.Cookie9Sided,
+                        // Always shown with the AI coach on, with what this phone says about Gemini Nano (and why, when asking failed)
+                        if (r.aiEnabled)
+                            row("Where AI input is written", supporting = (if (r.aiEngine == "device") "On this phone (Gemini Nano): your runs aren't sent to OpenAI for it"
+                                else "On the server (OpenAI)") + "\nGemini Nano: " + com.bennybar.runnersidekick.data.LocalAi.describe(localAi) +
+                                (localAiWhy?.let { " ($it)" } ?: ""), icon = Icons.Outlined.PhoneAndroid, iconShape = MaterialShapes.Cookie9Sided,
                                 onClick = { vm.openSheet("engine") })
                         row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone" else "Optional", icon = Icons.Outlined.Key,
                             iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("key") })
@@ -411,7 +413,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
         "about" -> r?.let { AboutYouSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "about") } }
         "window" -> r?.let { WindowSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "window") } }
         "model" -> r?.let { ModelDialog(it, local?.hasOwnAiKey == true, sheetError, onClose = close) { m -> vm.saveRemote(it.copy(aiModel = m), "model") } }
-        "engine" -> r?.let { EngineDialog(it, localAi, onClose = close) { engine -> vm.chooseEngine(it, engine) } }
+        "engine" -> r?.let { EngineDialog(it, localAi, localAiWhy, onClose = close) { engine -> vm.chooseEngine(it, engine) } }
         "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); close() }
         "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = close) {
             Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per sync, never for older " +
@@ -745,14 +747,15 @@ private fun TimeDialog(value: String, onClose: () -> Unit, onPick: (String) -> U
 
 /** Where AI input on a run is written. The phone option exists only where Gemini Nano does. */
 @Composable
-private fun EngineDialog(r: SettingsDto, local: Int, onClose: () -> Unit, onPick: (String) -> Unit) {
+private fun EngineDialog(r: SettingsDto, local: Int, why: String?, onClose: () -> Unit, onPick: (String) -> Unit) {
     val ready = local == com.google.mlkit.genai.common.FeatureStatus.AVAILABLE
     val canGet = local == com.google.mlkit.genai.common.FeatureStatus.DOWNLOADABLE || local == com.google.mlkit.genai.common.FeatureStatus.DOWNLOADING
     AlertDialog(onDismissRequest = onClose, title = { Text("Where AI input is written") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf(
                 Triple("server", "On the server (OpenAI)", "The server's model (or your own key). Can run automatically for new runs."),
-                Triple("device", "On this phone (Gemini Nano)", (if (ready) "" else if (canGet) "Downloads the model first (once). " else "Not available on this phone. ") +
+                Triple("device", "On this phone (Gemini Nano)", (if (ready) "" else if (canGet) "Downloads the model first (once). "
+                    else "Not available on this phone${why?.let { " ($it)" } ?: ""}. Gemini Nano needs a supported phone (e.g. recent Pixel or Galaxy S) with Android AICore up to date. ") +
                     "Your run isn't sent to OpenAI for it; the phone writes it when you tap Get AI input, and the server checks it " +
                     "like any other. A small model: shorter and plainer than the server's."),
             ).forEach { (k, title, note) ->

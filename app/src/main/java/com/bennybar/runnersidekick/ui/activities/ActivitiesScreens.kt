@@ -633,7 +633,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 v.status == "disabled" -> Text("Turn on the AI coach in Settings to get input on your runs.",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                v.status == "not_configured" -> Text("Add your own OpenAI key in Settings to get input on your runs.",
+                v.status == "not_configured" -> Text("The server's AI is off. In Settings, add your own OpenAI key, or have AI input written on this phone (Gemini Nano).",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 else -> {
                     Text(when (v.status) {

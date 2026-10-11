@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Gemini Nano in release builds, server AI off (2026-10-11, v0.51.1)
+- Release builds: R8 had broken ML Kit's setup (it finds classes by reflection), so the Gemini Nano status check threw a
+  NullPointerException and the phone option stayed hidden even on supported phones (seen on a Galaxy S26 Ultra).
+  Keep rules for ML Kit in proguard-rules.pro; the release build now answers like the unshrunk one.
+- Settings always shows "Where AI input is written" with the AI coach on, with what the phone reports about Gemini Nano
+  (and the error when asking failed), so "unsupported" can be told from "couldn't ask".
+- Server AI switched off (`"server_ai_enabled": false` in data/secrets.json, read by `config.server_openai_key`): AI runs
+  only with a runner's own key or on the phone. The server's key stays stored; set the flag to true to turn it back on.
+
 ## AI input on the phone, plain AI errors (2026-10-11, v0.51.0)
 - Settings → AI coach → "Where AI input is written": on the server (OpenAI) or on this phone (Gemini Nano, through ML
   Kit's GenAI Prompt API, `com.google.mlkit:genai-prompt` 1.0.0-beta4). Offered only where the phone has Gemini Nano;

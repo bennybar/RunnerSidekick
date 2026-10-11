@@ -18,7 +18,26 @@ object LocalAi {
     private val model: GenerativeModel by lazy { Generation.getClient() }
 
     /** UNAVAILABLE (this phone can't), DOWNLOADABLE, DOWNLOADING or AVAILABLE (FeatureStatus). */
-    suspend fun status(): Int = runCatching { model.checkStatus() }.getOrDefault(FeatureStatus.UNAVAILABLE)
+    suspend fun status(): Int = check().first
+
+    /** The status and, when the check itself failed, why (shown in Settings, so "not available" can be told apart from
+     *  "couldn't ask"). */
+    suspend fun check(): Pair<Int, String?> = try {
+        model.checkStatus() to null
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("RunnerSidekick", "Gemini Nano status check failed", e)
+        FeatureStatus.UNAVAILABLE to ((e as? com.google.mlkit.genai.common.GenAiException)?.let { "error ${it.errorCode}: ${it.message}" }
+            ?: "${e.javaClass.simpleName}: ${e.message}")
+    }
+
+    fun describe(status: Int): String = when (status) {
+        FeatureStatus.AVAILABLE -> "ready"
+        FeatureStatus.DOWNLOADABLE -> "can be downloaded"
+        FeatureStatus.DOWNLOADING -> "downloading"
+        else -> "not available on this phone"
+    }
 
     fun download(): Flow<DownloadStatus> = model.download()
 
