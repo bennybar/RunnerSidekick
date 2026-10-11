@@ -10,6 +10,7 @@ Contract:
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 import logging
@@ -22,6 +23,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from pymongo.database import Database
 
+from .ai_errors import failure as ai_failure
 from .db import next_id, one, plain, put, utc_now
 from .reports import fmt_delta, fmt_value
 
@@ -291,7 +293,7 @@ def generate(conn: Database, report: dict, cfg: AiConfig, provider: Provider | N
     except NarrativeError as e:
         status, detail = "rejected", str(e)
     except Exception as e:  # network, auth, timeout. Never log the key or the bundle
-        status, detail = "failed", type(e).__name__
+        status, detail = "failed", ai_failure(e, "server")
     finish_call(conn, call, status, provider)
     log.info("narrative %s for %s/%s: %s", status, report["type"], _key(report), detail or "")
     put(conn.narrative, _nkey(report, cfg.model), {

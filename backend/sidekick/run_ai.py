@@ -6,11 +6,13 @@ Cached per run and input hash; counts against the shared daily AI budget."""
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 
+from .ai_errors import failure as ai_failure
 from . import coach as ch
 from . import reports as rp
 from .analytics.insights import EVENING_HOUR
@@ -179,6 +181,38 @@ def validate(raw: str, b: ch.Bundle) -> dict:
                           "evidence_ids": ch.check_ids(nt.get("evidence_ids"), b, "next_time"), "direction": nt["direction"]}}
 
 
+LOCAL_MODEL = "gemini-nano"  # on the runner's phone (Android's built-in model), when they choose it
+
+
+def local_prompt(b: ch.Bundle) -> dict:
+    """The same task for the phone's own model: the instructions with the output format spelled out (small on-device
+    models may not take a schema), the evidence bundle, and the hash its answer is filed under."""
+    shape = json.dumps({"tldr": "...", "summary": "...", "summary_evidence_ids": ["<id>"],
+                        "went_well": [{"text": "...", "evidence_ids": ["<id>"]}], "to_work_on": [{"text": "...", "evidence_ids": ["<id>"]}],
+                        "next_time": {"text": "...", "evidence_ids": ["<id>"], "direction": "|".join(ch.DIRECTIONS)}})
+    system = SYSTEM + f"\nAnswer with one JSON object only, no other text, exactly in this shape:\n{shape}\n"
+    return {"system": system, "input": json.dumps(b.to_json()), "input_hash": input_hash(b, LOCAL_MODEL),
+            "prompt_version": PROMPT_VERSION, "model": LOCAL_MODEL}
+
+
+def store_local(conn, sid: str, b: ch.Bundle, raw: str) -> dict:
+    """The phone's answer, checked exactly like the server's (format, evidence ids, numbers, wording) and filed with the
+    run. Small models often wrap JSON in prose or code fences: only the outermost object is read."""
+    text = raw or ""
+    if "{" in text and "}" in text:
+        text = text[text.index("{"): text.rindex("}") + 1]
+    status, out, detail = "ok", None, None
+    try:
+        out = validate(text, b)
+    except ch.CoachError as e:
+        status, detail = "rejected", str(e)
+    h = input_hash(b, LOCAL_MODEL)
+    conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": h, "model": LOCAL_MODEL,
+                            "prompt_version": PROMPT_VERSION, "status": status, "detail": detail, "output": plain(out) if out else None,
+                            "key_source": "device", "trigger": "asked", "created_at": utc_now()})
+    return view(latest(conn, sid, h))
+
+
 def input_hash(b: ch.Bundle, model: str) -> str:
     return hashlib.sha256(json.dumps([b.to_json(), model, PROMPT_VERSION], sort_keys=True, default=str).encode()).hexdigest()[:24]
 
@@ -215,7 +249,7 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
         except ch.CoachError as e:
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
-            status, detail = "failed", type(e).__name__
+            status, detail = "failed", ai_failure(e, key_source)
         finish_call(conn, call, status, provider)
     log.info("run ai %s %s: %s", sid, status, detail or "")
     conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": h, "model": model, "prompt_version": PROMPT_VERSION,

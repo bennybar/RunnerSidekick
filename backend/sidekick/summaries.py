@@ -5,11 +5,13 @@ One summary per screen (and Trends window) per day; regenerated within the day o
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 import logging
 from datetime import date, datetime, timezone
 
+from .ai_errors import failure as ai_failure
 from . import coach as ch
 from .db import next_id, one, plain, utc_now
 from .narrative import OpenAIProvider, finish_call, reserve_call
@@ -181,7 +183,7 @@ def generate(conn, kind: str, b: ch.Bundle, day: date, model: str, api_key: str,
         except ch.CoachError as e:
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
-            status, detail = "failed", type(e).__name__
+            status, detail = "failed", ai_failure(e, "server")
         finish_call(conn, call, status, provider)
     log.info("summary %s %s: %s", kind, status, detail or "")
     conn.section_summary.insert_one({"id": next_id(conn, "section_summary"), "kind": kind, "local_date": day.isoformat(),

@@ -92,7 +92,7 @@ def test_unknown_evidence_reference_and_bad_json_rejected(setup):
 def test_provider_failure_is_recorded_not_raised(setup):
     conn, report = setup
     out = nv.generate(conn, report, cfg(), provider=FakeProvider(TimeoutError("slow")))
-    assert out["status"] == "failed" and out["detail"] == "TimeoutError"
+    assert out["status"] == "failed" and out["detail"].startswith("Couldn't reach OpenAI")
 
 
 def test_disabled_never_calls_provider(setup):

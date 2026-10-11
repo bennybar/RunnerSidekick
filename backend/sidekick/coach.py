@@ -12,6 +12,7 @@ Same trust contract as the report narrative (narrative.py), extended to the whol
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 import logging
@@ -19,6 +20,7 @@ import re
 from datetime import date, datetime, timedelta
 from statistics import median
 
+from .ai_errors import failure as ai_failure
 from . import focus as fc
 from . import reports as rp
 from .analytics.insights import EVENING_HOUR
@@ -364,7 +366,7 @@ def run(conn, source: str, today: date, model: str, api_key: str, key_source: st
         except CoachError as e:
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle
-            status, detail = "failed", type(e).__name__
+            status, detail = "failed", ai_failure(e, key_source)
         finish_call(conn, call, status, provider)
     log.info("coach %s: %s", status, detail or "")
     # Where each evidence id leads in the app (run ids map back to activities internally, never sent to the model)

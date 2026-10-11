@@ -93,6 +93,11 @@ SYNC_WAIT_S, SYNC_WAIT_TRIES = 3, 80  # a manual sync waits up to 4 minutes for 
 DATED_SETTINGS = ("activity_par", "profile_weight_kg", "profile_height_cm", "hr_max")
 
 
+class LocalAiIn(BaseModel):
+    input_hash: str = Field(max_length=64)
+    output: str = Field(max_length=20_000)
+
+
 class GarminTicketIn(BaseModel):
     ticket: str = Field(pattern=r"^ST-[A-Za-z0-9._\-]{8,300}$")
 
@@ -106,6 +111,7 @@ class SettingsIn(BaseModel):
     goal_type: Literal["consistency", "distance", "performance", "health"] | None = None
     ai_enabled: bool | None = None
     weather_enabled: bool | None = None
+    ai_engine: Literal["server", "device"] | None = None  # where AI input on a run is written
     ai_model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._:\-]{1,64}$")
     morning_window_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     morning_window_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -707,8 +713,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """New runs from the last 36 hours get AI input right after a sync, in the background, with the server's key."""
         from . import run_ai
         ai = ai_config(conn)
-        if not sids or not ai.enabled or not (ai.api_key or run_ai_provider):
-            return
+        if not sids or not ai.enabled or not (ai.api_key or run_ai_provider) or rp.get_setting(conn, "ai_engine", "server") == "device":
+            return  # on-device AI input is written on the phone, when asked
         name = conn.name
 
         def work():
@@ -734,14 +740,18 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         ai = ai_config(conn, x_openai_key)
         if not ai.enabled:
             return {"status": "disabled"}
+        on_device = rp.get_setting(conn, "ai_engine", "server") == "device"
         key = (x_openai_key or "").strip() or ai.api_key
-        if not key and run_ai_provider is None:
+        if not on_device and not key and run_ai_provider is None:
             return {"status": "not_configured"}
         try:
             b = run_ai.bundle(conn, cfg.source, sid, today(conn))
         except run_ai.NotFound:
             raise HTTPException(404)
-        hit = run_ai.latest(conn, sid, run_ai.input_hash(b, ai.model))
+        hit = run_ai.latest(conn, sid, run_ai.input_hash(b, run_ai.LOCAL_MODEL if on_device else ai.model))
+        if on_device and start:
+            # Written on the phone: the server never sends this run to OpenAI (the app asks for the prompt instead)
+            return run_ai.view(hit) if hit and hit["status"] == "ok" else {"status": "on_device"}
         if hit and hit["status"] == "ok":
             return run_ai.view(hit)
         if (conn.name, sid) in run_ai_inflight:
@@ -777,6 +787,28 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def get_run_ai(sid: str, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
         return run_ai_state(conn, sid, x_openai_key, start=False)
 
+    @api.get("/v1/activities/{sid}/ai/prompt")
+    def run_ai_prompt(sid: str, conn=Depends(db)):
+        """For AI input written on the phone: the instructions and the run's evidence bundle (no notes or free text, as
+        for the server's model)."""
+        from . import run_ai
+        try:
+            return run_ai.local_prompt(run_ai.bundle(conn, cfg.source, sid, today(conn)))
+        except run_ai.NotFound:
+            raise HTTPException(404)
+
+    @api.post("/v1/activities/{sid}/ai/local")
+    def run_ai_local(sid: str, body: LocalAiIn, conn=Depends(db)):
+        """The phone's answer: checked like the server's own and stored with the run."""
+        from . import run_ai
+        try:
+            b = run_ai.bundle(conn, cfg.source, sid, today(conn))
+        except run_ai.NotFound:
+            raise HTTPException(404)
+        if run_ai.input_hash(b, run_ai.LOCAL_MODEL) != body.input_hash:
+            raise HTTPException(409, "The run's data changed while the phone was writing; please ask again.")
+        return run_ai.store_local(conn, sid, b, body.output)
+
     @api.post("/v1/activities/{sid}/ai")
     def post_run_ai(sid: str, conn=Depends(db), x_openai_key: str | None = Header(default=None)):
         return run_ai_state(conn, sid, x_openai_key, start=True)
@@ -807,6 +839,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 "goal_type": rp.get_setting(conn, "goal_type", None),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
                 "weather_enabled": rp.get_setting(conn, "weather_enabled", True),
+                "ai_engine": rp.get_setting(conn, "ai_engine", "server"),
                 "ai_model": rp.get_setting(conn, "ai_model", nv.DEFAULT_MODEL),
                 "ai_models": sorted(nv.server_models()),  # what the server's key may run; your own key may use any
                 "ai_available": bool(os.getenv("OPENAI_API_KEY") or secrets(cfg.data_dir).get("openai_api_key")) or narrative_provider is not None,
