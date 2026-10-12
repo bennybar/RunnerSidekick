@@ -332,6 +332,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## AI hidden when it's off (2026-10-12, v0.52.1)
+- With "AI coach and summaries" off in Settings, nothing AI shows anywhere: no "Get AI input" button or AI card on a run,
+  no coach on Today or Insights, no AI summary on Compare or Trends. The Settings section stays, to turn it on. The
+  app keeps the server's settings in its cache (refreshed with everything else) and hides AI until it knows it's on.
+
 ## AI: your own key only (2026-10-11, v0.52.0)
 - AI runs only with the runner's own OpenAI key (the server's key stays switched off), on gpt-6.1-sol only: no model
   choice (the setting and the allowed-models list are gone; `ai_config` always uses `narrative.DEFAULT_MODEL`).

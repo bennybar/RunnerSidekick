@@ -116,6 +116,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
     val coach by vm.coach.collectAsStateWithLifecycle()
+    val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
     val checkins by vm.checkins.collectAsStateWithLifecycle()
     val focus by vm.focus.collectAsStateWithLifecycle()
 
@@ -173,7 +174,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 focus?.value?.let { f -> animatedItem(key = "focus") { FocusLine(f) { sheet = "focus" } } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
                 // Coach advice written before "not feeling well" reached the server would contradict the rest above: held back
-                val coachShown = if (pending) null else coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
+                val coachShown = if (pending || !aiOn) null else coach?.value?.let { c -> if (c.status == "ok") c else c.previous?.takeIf { it.status == "ok" } }
                 (coachShown?.tldr ?: coachShown?.summary)?.let { s ->
                     val c = coach!!.value
                     // Older advice is labelled as such, so it never reads as current next to a changed briefing

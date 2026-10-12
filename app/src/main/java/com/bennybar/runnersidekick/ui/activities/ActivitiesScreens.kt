@@ -233,6 +233,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     val ai by vm.ai.collectAsStateWithLifecycle()
     val routes by vm.routes.collectAsStateWithLifecycle()
     var routeOpen by remember { mutableStateOf(false) }
+    val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
     val aiScroll = remember { mutableStateOf(0) }
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
     // The AI card comes after the header and (when there's one) the decoupling card
@@ -263,7 +264,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         vm.export(context, start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")) + "-running.md")
                     }) { Icon(Icons.Outlined.Download, "Export run to Downloads") }
                     // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
-                    if (r != null) {
+                    if (r != null && aiOn) {
                         // Any finished AI input for this run counts (also one kept from before the run's data was refreshed)
                         // ...unless you changed the run's type since: then it can be rewritten for the new type
                         val st = ai?.value?.let { v -> if (v.status != "ok" && v.previous?.status == "ok" && !v.stale) "ok" else v.status }
@@ -298,7 +299,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 // Shown also when it couldn't be measured, saying why (a short run, missing heart rate), instead of nothing
                 if (r.decoupling.decouplingPct != null || r.decoupling.reasons.isNotEmpty()) item { DecouplingCard(r.decoupling) }
                 // Shown at the top once asked for (or already written); the button lives in the top bar
-                if (ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
+                if (aiOn && ai?.value?.let { it.status != "none" || it.previous != null } == true) item(key = "ai") { RunAiCard(ai?.value, onAsk = vm::askAi) }
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
                 // The repeat route this run belongs to, recognised from its shape; opens how the route has gone
                 detail?.value?.route?.let { rt -> item(key = "route") {

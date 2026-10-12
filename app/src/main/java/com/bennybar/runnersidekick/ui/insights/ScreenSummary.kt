@@ -31,7 +31,7 @@ import com.bennybar.runnersidekick.ui.components.ShapeBadge
 @Composable
 fun ScreenSummaryCard(s: ScreenSummary?) {
     val cs = MaterialTheme.colorScheme
-    if (s == null || s.status in setOf("disabled", "not_configured")) return
+    if (s == null || s.status in setOf("disabled", "not_configured") || !com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current) return
     val shown = if (s.status == "ok") s else s.previous?.takeIf { it.status == "ok" }
     if (shown == null) {
         if (s.status == "pending") Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {

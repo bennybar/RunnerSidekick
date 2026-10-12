@@ -186,7 +186,9 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             }
         },
     ) { padding ->
-        androidx.compose.runtime.CompositionLocalProvider(com.bennybar.runnersidekick.ui.components.LocalNavBarPadding provides padding.calculateBottomPadding()) {
+        val aiOn by repo.aiEnabled.collectAsStateWithLifecycle(initialValue = false)
+        androidx.compose.runtime.CompositionLocalProvider(com.bennybar.runnersidekick.ui.components.LocalNavBarPadding provides padding.calculateBottomPadding(),
+            com.bennybar.runnersidekick.ui.components.LocalAiEnabled provides aiOn) {
         NavHost(nav, startDestination = "today",
             enterTransition = { quickIn },
             exitTransition = { quickOut },

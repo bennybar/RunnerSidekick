@@ -231,6 +231,9 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
 /** Room for the floating navigation bar at the bottom of a tab's list: tab pages scroll underneath it. */
 val LocalNavBarPadding = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
 
+/** Whether the AI coach is on (Settings): every AI card, button and summary is hidden when it isn't. */
+val LocalAiEnabled = androidx.compose.runtime.compositionLocalOf { false }
+
 
 /** "14:32" in the phone's time zone, from an ISO instant. */
 fun clockOf(iso: String): String = runCatching {

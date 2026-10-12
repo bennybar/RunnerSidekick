@@ -115,6 +115,7 @@ fun InsightsScreen(
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val coach by vm.coach.collectAsStateWithLifecycle()
+    val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
     val coachLoading by vm.coachLoading.collectAsStateWithLifecycle()
     val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
     val cardio by vm.cardio.collectAsStateWithLifecycle()
@@ -157,7 +158,8 @@ fun InsightsScreen(
                 }
                 data?.value?.stats?.let { st -> if (st.items.isNotEmpty()) animatedItem(key = "stats") { StatsGrid(st) } }
                 // Advice written before "not feeling well" reached the server is held back until it has (it would say train)
-                if (unwellPending) animatedItem(key = "coach") {
+                if (!aiOn) Unit  // AI off: no coach at all
+                else if (unwellPending) animatedItem(key = "coach") {
                     com.bennybar.runnersidekick.ui.components.Group(title = "AI coach") {
                         row("Waiting for today's check-in", supporting = "You said you're not feeling well. The coach's advice comes back once the " +
                             "server has your check-in (when you're online). Until then: rest or a short walk.",

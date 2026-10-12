@@ -314,6 +314,7 @@ class Repository(
             key == "coach" -> json.decodeFromString<CoachView>(body)
             key == "compare" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body)
             key == "trophies" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(body)
+            key == "settings" -> json.decodeFromString<SettingsDto>(body)
             key == "cardio" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(body)
             key == "numbers" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.TrainingNumbers>(body)
             key == "routes" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(body)
@@ -376,7 +377,7 @@ class Repository(
     private suspend fun refreshAllNow(from: Float, to: Float) {
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Checking the connection" to {
-                refreshStatus(); establishAccount(); ensureTimezone(); pushPendingCheckins(); pullCheckins()
+                refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
                 db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
             },
             "Loading today" to {
@@ -564,11 +565,18 @@ class Repository(
         ))
     }
 
-    suspend fun remoteSettings(): SettingsDto = offMain { json.decodeFromString(api.getRaw("/v1/settings")) }
+    suspend fun remoteSettings(): SettingsDto {
+        val body = api.getRaw("/v1/settings")
+        put("settings", body)  // kept, so the app knows (offline too) whether AI is on
+        return offMain { json.decodeFromString(body) }
+    }
+
+    /** Whether the AI coach is on (Settings). Everything AI is hidden when it isn't, and until it's known. */
+    val aiEnabled: Flow<Boolean> = observe("settings") { json.decodeFromString<SettingsDto>(it) }.map { it?.value?.aiEnabled == true }
 
     suspend fun saveRemoteSettings(s: SettingsDto): SettingsDto =
         // Nulls are sent on purpose: a cleared goal or usual time must clear it on the server too
-        offMain { json.decodeFromString(api.putRaw("/v1/settings", withNulls.encodeToString(s))) }
+        api.putRaw("/v1/settings", withNulls.encodeToString(s)).let { body -> put("settings", body); offMain { json.decodeFromString(body) } }
 
     suspend fun exportJson(): String = api.getRaw("/v1/export")
 
