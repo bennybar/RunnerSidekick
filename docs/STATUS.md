@@ -332,6 +332,18 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Samsung Health check (2026-10-13, v0.53.0)
+- Galaxy Watch support starts with a check: Settings › Your data › Samsung Health check reads what Samsung Health on the
+  phone shares through the Samsung Health Data SDK 1.1.0: the latest run in detail (log points and spacing; heart rate,
+  speed, cadence and power; GPS route and altitude; climb, VO2 max), workouts over 30 days and a year, all-day heart rate
+  spacing, sleep stages and score, skin temperature, blood oxygen and Energy Score. Read only; Copy report to share it.
+- Samsung has no cloud API, so a Samsung connector has to read on the phone and upload. Until Samsung approves the app
+  as a partner, Samsung Health needs developer mode ("Developer Mode for Data Read"). No HRV or resting HR from Samsung.
+- The SDK AAR is Samsung's licensed download, not committed (public repo): put `samsung-health-data-api-*.aar` from
+  developer.samsung.com in `app/libs` to build. The SDK doesn't run on emulators (it reports Samsung Health missing).
+- Decided for switching watches: a setting picks Garmin or Samsung; history from both is kept; on a day both have data
+  the watch current that day wins (a run recorded by both shows once); baselines blend, with the switch date marked.
+
 ## AI hidden when it's off (2026-10-12, v0.52.1)
 - With "AI coach and summaries" off in Settings, nothing AI shows anywhere: no "Get AI input" button or AI card on a run,
   no coach on Today or Insights, no AI summary on Compare or Trends. The Settings section stays, to turn it on. The

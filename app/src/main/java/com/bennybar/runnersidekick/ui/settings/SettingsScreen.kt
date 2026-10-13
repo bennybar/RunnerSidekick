@@ -179,7 +179,7 @@ private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 360
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
+fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit = {}, vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
     val local by vm.settings.collectAsStateWithLifecycle()
     val me by vm.me.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
@@ -352,6 +352,8 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, vm: SettingsVm = viewModel(
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "local" })
                     row("Delete raw Garmin payloads", supporting = "On the backend. Records and reports stay.", icon = Icons.Outlined.DeleteOutline,
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "raw" })
+                    row("Samsung Health check", supporting = "What the app can read from a Galaxy Watch on this phone. Read only, a test for now",
+                        icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie4Sided, onClick = onSamsungCheck)
                     row("Delete everything on the backend", supporting = "Records, reports, check-ins and settings", icon = Icons.Outlined.DeleteOutline,
                         iconShape = MaterialShapes.Burst, onClick = { confirm = "all" })
                     custom {

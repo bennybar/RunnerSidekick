@@ -29,3 +29,6 @@ garmin_tokens/
 
 # Live data audit describes personal data coverage; generated locally, never committed
 docs/data-audit.md
+
+# Samsung Health Data SDK: licensed download from developer.samsung.com, kept out of this public repo
+/app/libs/samsung-health-data-api-*.aar

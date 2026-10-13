@@ -15,8 +15,8 @@ android {
         applicationId = "com.bennybar.runnersidekick"
         minSdk = 35
         targetSdk = 36
-        versionCode = 86
-        versionName = "0.52.1"
+        versionCode = 87
+        versionName = "0.53.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).
@@ -87,6 +87,11 @@ dependencies {
     implementation(libs.androidx.credentials.play)
     implementation(libs.googleid)
     implementation(libs.androidx.browser)
+    // Samsung Health Data SDK: reads a Galaxy Watch's runs, sleep and heart rate from Samsung Health on this phone. Samsung
+    // hands it out after sign-in, so it isn't committed: put samsung-health-data-api-*.aar from developer.samsung.com in app/libs
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("samsung-health-data-api-*.aar"))))
+    implementation(libs.gson)  // the Samsung SDK's own dependencies
+    implementation(libs.kotlin.parcelize.runtime)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

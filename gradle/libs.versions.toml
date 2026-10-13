@@ -1,4 +1,5 @@
 [versions]
+gson = "2.13.2"
 agp = "9.4.1"
 kotlin = "2.3.21"
 ksp = "2.3.12"
@@ -25,6 +26,8 @@ espressoCore = "3.7.0"
 materialKolor = "5.0.1"  # Material 3 colour schemes from a seed colour (port of material-color-utilities)
 
 [libraries]
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+kotlin-parcelize-runtime = { group = "org.jetbrains.kotlin", name = "kotlin-parcelize-runtime", version.ref = "kotlin" }
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
