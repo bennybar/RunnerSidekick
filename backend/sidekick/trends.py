@@ -19,7 +19,8 @@ DAILY_METRICS = {
 
 
 def era_starts(conn, source: str, start: date, end: date) -> list[str]:
-    """Device-change dates within [start, end] (inferred from activity device IDs)."""
+    """Device-change dates within [start, end] (inferred from activity device IDs), and the days the runner switched
+    between their Garmin and Samsung watches."""
     out = []
     d = start
     prev = rp.device_era_start(conn, source, start)
@@ -29,6 +30,8 @@ def era_starts(conn, source: str, start: date, end: date) -> list[str]:
             out.append(e.isoformat())
         prev = e
         d += timedelta(days=1)
+    from .samsung import watch_history
+    out += [h["from"] for h in watch_history(conn) if start.isoformat() <= h["from"] <= end.isoformat()]  # watch switches
     return sorted(set(out))
 
 

@@ -27,6 +27,7 @@ WATCHES = ("garmin", "samsung")
 SAME_RUN_S = 300             # two runs starting within 5 minutes of each other are the same run on two watches
 RHR_WINDOW_S = 30 * 60       # resting heart rate: the lowest 30-minute average of the day, as Garmin defines it
 RHR_MIN_READINGS = 24        # ...from at least 24 readings (4 hours at Samsung's default of one every 10 minutes)
+RHR_NIGHT_READINGS = 6       # ...6 of them between midnight and 6 am: worn overnight, so the lowest is a resting value
 NAP_MAX_S = 3 * 3600
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
 CONVERSION = 2  # raised when the way a run is converted changes, so runs sent again are converted again
@@ -175,7 +176,7 @@ def sleep(s: dict) -> SleepSession:
 
 def resting_hr(readings: list[list], offset_s: int | None) -> dict[str, float]:
     """Resting heart rate per local day: the lowest average over any 30 minutes (Garmin's definition), from the watch's
-    all-day readings [ms, bpm]. Samsung doesn't share its own resting heart rate, so it's worked out here."""
+    all-day readings [ms, bpm], on days it was worn overnight. Samsung doesn't share its own, so it's worked out here."""
     days: dict[str, list[tuple[float, float]]] = {}
     for r in readings:
         bpm = _num(r[1]) if len(r) > 1 else None
@@ -184,7 +185,8 @@ def resting_hr(readings: list[list], offset_s: int | None) -> dict[str, float]:
         days.setdefault(_local_date(r[0], offset_s), []).append((r[0] / 1000, bpm))
     out = {}
     for d, rs in days.items():
-        if len(rs) < RHR_MIN_READINGS:
+        night = sum(1 for ts, _ in rs if (_utc(ts * 1000) + timedelta(seconds=offset_s or 0)).hour < 6)
+        if len(rs) < RHR_MIN_READINGS or night < RHR_NIGHT_READINGS:  # a day the watch wasn't worn at night has no resting value
             continue
         rs.sort()
         best, j, total = None, 0, 0.0

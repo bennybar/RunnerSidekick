@@ -97,17 +97,25 @@ def samples_for(conn, aid: int) -> Samples | None:
 
 def device_era_start(conn, source: str, d: date) -> date | None:
     """First day of the device era containing d, inferred from activity device IDs (daily payloads carry none).
-    The era starts the day after the last run recorded by a different device. Precision is limited to the days
-    between runs."""
-    rows = list(conn.activity.find({"source": source, "device_id": {"$ne": None}}, {"_id": 0, "local_date": 1, "device_id": 1},
-                                   sort=[("start_utc", 1)]))
+    The era starts the day after the last run recorded by a different device of the same maker. Switching between
+    Garmin and Samsung isn't a new era: the runner chose to keep using all history across it (the switch is marked in
+    trends instead). Precision is limited to the days between runs."""
+    rows = list(conn.activity.find({"source": source, "device_id": {"$ne": None}},
+                                   {"_id": 0, "local_date": 1, "device_id": 1, "manufacturer": 1}, sort=[("start_utc", 1)]))
     if not rows:
         return None
     ds = d.isoformat()
     before = [r for r in rows if r["local_date"] <= ds]
-    current = before[-1]["device_id"] if before else rows[0]["device_id"]
-    others = [r["local_date"] for r in before if r["device_id"] != current]
-    return date.fromisoformat(max(others)) + timedelta(days=1) if others else None
+    maker = lambda r: (r.get("manufacturer") or "garmin").lower()  # noqa: E731 (runs from before makers were kept are Garmin's)
+    cur = before[-1] if before else rows[0]
+    current = cur["device_id"]
+    others = [r["local_date"] for r in before if r["device_id"] != current and maker(r) == maker(cur)
+              and r["local_date"] > max([x["local_date"] for x in before if maker(x) != maker(cur)], default="")]
+    if others:
+        return date.fromisoformat(max(others)) + timedelta(days=1)
+    # No change since switching makers: the era in force at the switch carries on
+    prev = [r for r in before if maker(r) != maker(cur)]
+    return device_era_start(conn, source, date.fromisoformat(prev[-1]["local_date"])) if prev else None
 
 
 def hr_zones(conn) -> dict | None:

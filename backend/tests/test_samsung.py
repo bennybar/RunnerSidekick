@@ -49,6 +49,8 @@ def test_resting_hr_is_the_lowest_half_hour_and_needs_enough_readings():
         readings[i][1] = 50
     assert samsung.resting_hr(readings, 3 * 3600) == {day.isoformat(): 50.0}
     assert samsung.resting_hr(readings[:10], 3 * 3600) == {}
+    daytime = [r for r in readings if r[0] >= ms(day, 8)]  # a new watch put on in the morning: no night, no resting value
+    assert samsung.resting_hr(daytime, 3 * 3600) == {}
 
 
 def test_sleep_counts_only_time_asleep_and_spots_naps():
@@ -134,3 +136,18 @@ def test_km_splits_from_the_samples_and_samsungs_vo2_kept_apart():
     assert conn.daily_observation.find_one({"metric": "samsung_vo2max_running"})["value"] == 55.4
     assert conn.daily_observation.find_one({"metric": "garmin_vo2max_running"}) is None
     assert conn.activity_lap.count_documents({}) == 2  # 1.8 km: one full km and what's left
+
+
+def test_switching_maker_blends_but_a_new_garmin_still_starts_an_era():
+    from sidekick import reports as rp
+    conn = connect(user_db_name(1, "garmin"))
+    def add(i, d, device, maker):
+        conn.activity.insert_one({"source": "garmin", "source_id": f"a{i}", "id": i, "local_date": d, "start_utc": d + "T06:00:00Z",
+                                  "device_id": device, "manufacturer": maker})
+    add(1, "2026-09-01", "g1", None)
+    add(2, "2026-09-10", "g2", "GARMIN")
+    add(3, "2026-09-20", "s1", "Samsung")
+    assert rp.device_era_start(conn, "garmin", date(2026, 9, 15)) == date(2026, 9, 2)  # a new Garmin: baselines restart
+    assert rp.device_era_start(conn, "garmin", date(2026, 9, 25)) == date(2026, 9, 2)  # Garmin → Samsung: the era carries on
+    add(4, "2026-09-28", "s2", "Samsung")
+    assert rp.device_era_start(conn, "garmin", date(2026, 9, 29)) == date(2026, 9, 21)  # a new Samsung watch: restart
