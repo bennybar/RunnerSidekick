@@ -22,6 +22,7 @@ from .connectors.base import AuthRequired, Capability, Connector, ConnectionStat
 from pymongo.database import Database
 
 from .db import get_setting, next_id, one, set_setting, utc_now
+from .samsung import SAMSUNG, watch_on
 from .store import activity_hash, purge_raw, save_activity, save_day
 
 REFETCH_EVERY_H = 6  # recent activities (within refetch_days) are re-read at most this often, for late samples/laps
@@ -128,6 +129,8 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
              force: bool = False, now: datetime | None = None) -> SyncResult:
     source = connector.source
     now = now or datetime.now(timezone.utc)
+    if watch_on(conn, today.isoformat()) == SAMSUNG:  # one watch at a time: the phone sends the Samsung watch's data
+        return SyncResult("paused", "Your watch is the Samsung one, so Garmin isn't synced")
     set_connection(conn, source)
     row = get_connection_row(conn, source)
     if row["state"] == ConnectionState.REAUTH_REQUIRED.value and not force:
@@ -245,6 +248,8 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
             res.skipped.append(f"day:{d}")
             continue
         for b in bundles:
+            if watch_on(conn, b.local_date) == SAMSUNG:  # a day the Samsung watch counts for
+                continue
             res.changed_dates |= save_day(conn, source, b)
             oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
             _update_checkpoint(conn, source, "days", oldest_done=oldest)
@@ -269,6 +274,8 @@ def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max
                 res.skipped.append(f"day:{d}")
                 bundles = []
             for b in bundles:
+                if watch_on(conn, b.local_date) == SAMSUNG:
+                    continue
                 res.changed_dates |= save_day(conn, source, b)
                 res.days_fetched += 1
             _update_checkpoint(conn, source, "days", oldest_done=d.isoformat())
@@ -291,6 +298,8 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
     stale_before = (datetime.now(timezone.utc) - timedelta(hours=REFETCH_EVERY_H)).isoformat().replace("+00:00", "Z")
     todo = []
     for s in summaries:
+        if watch_on(conn, s["start"][:10]) == SAMSUNG:  # a run on a Samsung day (start date in UTC: close enough)
+            continue
         if activity_hash(conn, source, s["source_id"]) == s["content_hash"]:
             # Samples and laps can arrive or be corrected after the summary; re-read recent runs now and then
             row = one(conn.activity, {"source": source, "source_id": s["source_id"]})

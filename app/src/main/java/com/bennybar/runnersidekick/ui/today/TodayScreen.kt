@@ -260,7 +260,7 @@ private fun Freshness(status: Status?, fetchedAt: Instant?, report: MorningRepor
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill(if (stale) Icons.Outlined.WarningAmber else Icons.Outlined.CheckCircle,
-                (if (status?.synthetic == true) "Demo source synced " else "Garmin synced ") + Format.ago(lastSource) +
+                (if (status?.synthetic == true) "Demo source synced " else if (status?.watch == "samsung") "Samsung synced " else "Garmin synced ") + Format.ago(lastSource) +
                     (if (report.provisional) " · last night not in yet" else ""), attention = stale)
         }
         if (offline) OfflineBanner("Offline: showing the briefing saved ${Format.ago(fetchedAt)}.")

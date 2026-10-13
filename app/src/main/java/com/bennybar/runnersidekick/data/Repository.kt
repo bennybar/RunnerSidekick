@@ -10,6 +10,7 @@ import com.bennybar.runnersidekick.data.local.SidekickDb
 import com.bennybar.runnersidekick.data.remote.ActivityDetail
 import com.bennybar.runnersidekick.data.remote.ActivitySummary
 import com.bennybar.runnersidekick.data.remote.ApiClient
+import com.bennybar.runnersidekick.data.remote.ApiException
 import com.bennybar.runnersidekick.data.remote.CheckinDto
 import com.bennybar.runnersidekick.data.remote.AuthResult
 import com.bennybar.runnersidekick.data.remote.CoachView
@@ -52,6 +53,7 @@ class Repository(
     private val db: SidekickDb,
     private val api: ApiClient,
     val settings: SettingsStore,
+    val samsung: SamsungHealth? = null,
 ) {
     private val json = api.json
     // encodeDefaults: without it, a value equal to its default (ai_enabled = false, a cleared goal = null) is left out of
@@ -377,7 +379,8 @@ class Repository(
     private suspend fun refreshAllNow(from: Float, to: Float) {
         val steps = listOf<Pair<String, suspend () -> Unit>>(
             "Checking the connection" to {
-                refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
+                val s = refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
+                runCatching { uploadSamsung(s) }  // the Samsung watch's new data first, so what loads next includes it
                 db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
             },
             "Loading today" to {
@@ -445,6 +448,43 @@ class Repository(
         return offMain { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body) }.status
     }
 
+    /** Why the last read from Samsung Health failed (shown under Settings › Your watch), or null. */
+    val samsungProblem = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** Sends the Samsung watch's data since the last upload (a year of history the first time) to the server, which
+     *  stores it and rebuilds the reports. Only when Samsung is the runner's watch. Re-sending overlaps is harmless. */
+    private suspend fun uploadSamsung(status: Status) {
+        val sh = samsung ?: return
+        if (status.watch != "samsung") return
+        try {
+            if (!sh.allowed()) throw ApiException.Sync("Samsung Health hasn't allowed reading yet: tap Settings › Your watch")
+            val now = Instant.now()
+            val since = settings.samsungUploadedAt()?.minus(java.time.Duration.ofDays(2)) ?: now.minus(java.time.Duration.ofDays(365))
+            val offset = java.time.ZoneId.systemDefault().rules.getOffset(now).totalSeconds
+            suspend fun send(body: kotlinx.serialization.json.JsonObject) = api.postJson("/v1/samsung", body.toString())
+            sh.workouts(since, now).chunked(1).forEach { runs ->  // one run per request: a long one is over a megabyte
+                send(kotlinx.serialization.json.buildJsonObject { put("activities", kotlinx.serialization.json.JsonArray(runs)) })
+            }
+            sh.sleep(since, now).chunked(300).forEach { nights ->
+                send(kotlinx.serialization.json.buildJsonObject { put("sleep", kotlinx.serialization.json.JsonArray(nights)) })
+            }
+            // Resting heart rate needs the all-day readings; two months of them is plenty for its history
+            sh.heartRate(maxOf(since, now.minus(java.time.Duration.ofDays(60))), now).chunked(20_000).forEach { rs ->
+                send(kotlinx.serialization.json.buildJsonObject {
+                    put("heart_rate", kotlinx.serialization.json.JsonArray(rs)); put("offset_s", kotlinx.serialization.json.JsonPrimitive(offset))
+                })
+            }
+            settings.setSamsungUploadedAt(now)
+            samsungProblem.value = null
+        } catch (e: ApiException) {
+            samsungProblem.value = e.message
+            throw e
+        } catch (e: Exception) {  // Samsung Health missing, developer mode off, not allowed…
+            samsungProblem.value = "Couldn't read Samsung Health: ${e.message}"
+            throw ApiException.Sync(samsungProblem.value!!)
+        }
+    }
+
     /** Syncs with Garmin now and says how many new runs arrived. */
     suspend fun syncRunsNow(pause: suspend (Int) -> Unit): Int {
         val before = activities.first()?.value.orEmpty().map { it.sourceId }.toSet()
@@ -454,7 +494,7 @@ class Repository(
 
     /** The background worker's small refresh: what the notifications read, nothing else. */
     suspend fun backgroundRefresh() {
-        refreshStatus()
+        runCatching { uploadSamsung(refreshStatus()) }  // Samsung Health may not answer in the background; the next open catches up
         pushPendingCheckins()
         put("today", api.getRaw("/v1/today"))
         put("activities", api.getRaw("/v1/activities"))
@@ -465,6 +505,12 @@ class Repository(
     /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. For an explicit tap only. */
     suspend fun syncNow(pause: suspend (Int) -> Unit) {
         try {
+            if (refreshStatus().watch == "samsung") {  // nothing to sync on the server: this phone sends the watch's data
+                _progress.value = Progress(0f, "Reading your Samsung watch")
+                uploadSamsung(refreshStatus())
+                refreshAll(0.5f, 1f)
+                return
+            }
             _progress.value = Progress(0f, "Starting the Garmin sync")
             // The server holds a sync back only when Garmin asked us to wait: say until when
             val started = json.parseToJsonElement(api.post("/v1/sync")).jsonObject

@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -63,6 +64,7 @@ class SettingsStore(private val context: Context) {
     private val kTheme = stringPreferencesKey("theme")
     private val kAppearance = stringPreferencesKey("appearance")
     private val kGarminSkipped = booleanPreferencesKey("garmin_prompt_skipped")
+    private val kSamsungAt = longPreferencesKey("samsung_uploaded_at")  // when this phone last sent the Samsung watch's data
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -119,7 +121,12 @@ class SettingsStore(private val context: Context) {
     suspend fun setMode(mode: String) = context.dataStore.edit { it[kMode] = mode }
 
     /** Signing out also forgets the runner's own OpenAI key, so a later account never inherits it. */
-    suspend fun clearToken() = context.dataStore.edit { it.remove(kToken); it.remove(kAccount); it.remove(kAiKey); it.remove(kGarminSkipped) }
+    suspend fun clearToken() = context.dataStore.edit {
+        it.remove(kToken); it.remove(kAccount); it.remove(kAiKey); it.remove(kGarminSkipped); it.remove(kSamsungAt)
+    }
+
+    suspend fun samsungUploadedAt(): java.time.Instant? = context.dataStore.data.first()[kSamsungAt]?.let { java.time.Instant.ofEpochMilli(it) }
+    suspend fun setSamsungUploadedAt(at: java.time.Instant) = context.dataStore.edit { it[kSamsungAt] = at.toEpochMilli() }
 
     suspend fun setGarminPromptSkipped(on: Boolean) = context.dataStore.edit { it[kGarminSkipped] = on }
 

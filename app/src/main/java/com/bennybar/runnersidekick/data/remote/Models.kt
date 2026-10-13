@@ -24,6 +24,8 @@ data class Status(
     @SerialName("garmin_official") val garminOfficial: GarminOfficial? = null,
     /** Garmin is connected for this account (always true on demo data; true when an older server doesn't say) */
     @SerialName("garmin_linked") val garminLinked: Boolean = true,
+    /** The runner's watch today: "garmin" or "samsung" (whose data this phone sends) */
+    val watch: String = "garmin",
 )
 
 /** The latest sync on the server and how it ended. */
@@ -610,6 +612,8 @@ data class SettingsDto(
     @SerialName("profile_height_cm_at") val profileHeightCmAt: String? = null,
     @SerialName("hr_max") val hrMax: Int? = null,
     @SerialName("hr_max_at") val hrMaxAt: String? = null,
+    /** The runner's watch from today: "garmin" or "samsung"; the server keeps each switch with its date */
+    val watch: String? = null,
 )
 
 @Serializable

@@ -29,7 +29,8 @@ from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
 from .db import WEEKDAYS, connect, many, one, put, put_if_newer, set_setting, utc_now
-from .sync import get_connection_row, next_manual_sync, run_sync
+from . import samsung
+from .sync import get_connection_row, next_manual_sync, run_sync, set_connection
 
 log = logging.getLogger(__name__)
 MAX_CHART_POINTS = 240  # ~20 s buckets for a 75-min run: readable trend without hiding stops
@@ -119,6 +120,15 @@ class SettingsIn(BaseModel):
     profile_height_cm: float | None = Field(default=None, ge=100, le=250)
     hr_max: int | None = Field(default=None, ge=120, le=230)             # your own maximum heart rate, when you know it
     week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
+    watch: Literal["garmin", "samsung"] | None = None   # the runner's watch from today; switches are kept with their dates
+
+
+class SamsungUploadIn(BaseModel):
+    """What the app read from Samsung Health (see samsung.py for the shapes). Bounded: the app sends a few runs at a time."""
+    activities: list[dict] = Field(default_factory=list, max_length=20)
+    sleep: list[dict] = Field(default_factory=list, max_length=400)
+    heart_rate: list[list] = Field(default_factory=list, max_length=200_000)  # [ms, bpm]
+    offset_s: int | None = Field(default=None, ge=-14 * 3600, le=14 * 3600)    # the phone's UTC offset, for the heart-rate days
 
 
 def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
@@ -344,14 +354,15 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/status")
     def status(conn=Depends(db), user=Depends(current_user)):
-        row = get_connection_row(conn, cfg.source)
+        watch = samsung.watch_on(conn, today(conn).isoformat())
+        row = get_connection_row(conn, samsung.SAMSUNG if watch == samsung.SAMSUNG else cfg.source)
         lo = one(conn.daily_observation, {"source": cfg.source, "state": "measured"}, sort=[("local_date", -1)])
         la = one(conn.activity, {"source": cfg.source}, sort=[("start_utc", -1)])
         latest, latest_act = (lo or {}).get("local_date"), (la or {}).get("start_utc")
         cps = {r["stream"]: r for r in many(conn.sync_checkpoint, {"source": cfg.source})}
         job = one(conn.sync_job, {"source": cfg.source}, sort=[("id", -1)])
         return {
-            "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)),
+            "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)), "watch": watch,
             "week_start_day": WEEKDAYS[rp.first_weekday(conn)],
             "connection": {k: row[k] for k in ("state", "detail", "last_attempt_at", "last_success_at", "retry_not_before")} if row else
             {"state": make_connector(conn, user_cfg(user)).connection_state().value, "detail": None, "last_attempt_at": None, "last_success_at": None, "retry_not_before": None},
@@ -379,6 +390,26 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             return {"started": False, "detail": "synced recently", "next_allowed_at": wait.isoformat().replace("+00:00", "Z")}
         threading.Thread(target=do_sync, args=(user_cfg(user), user["id"]), daemon=True).start()
         return {"started": True}
+
+    @api.get("/v1/samsung")
+    def samsung_status(conn=Depends(db)):
+        return samsung.status(conn, today(conn))
+
+    @api.post("/v1/samsung")
+    def samsung_upload(body: SamsungUploadIn, conn=Depends(db)):
+        """The Samsung watch's runs, sleep and all-day heart rate, read by the app from Samsung Health. Stored, then the
+        reports for the days and runs that changed are rebuilt, as after a Garmin sync."""
+        set_connection(conn, samsung.SAMSUNG, last_attempt_at=utc_now())
+        with report_lock(conn):
+            dates, runs = samsung.ingest(conn, cfg.source, body.model_dump())
+            if runs and not synthetic:
+                from . import weather
+                runs = list(dict.fromkeys(runs + weather.for_new_runs(conn, cfg.source, runs)))
+            if dates or runs:
+                rp.regenerate(conn, cfg.source, synthetic, dates, runs, today(conn))
+        set_connection(conn, samsung.SAMSUNG, state="connected", detail=None, last_success_at=utc_now())
+        auto_run_ai(conn, runs)
+        return {"changed_dates": sorted(dates), "changed_runs": runs}
 
     @api.get("/v1/today")
     def today_report(day: str | None = Query(default=None, alias="date"), conn=Depends(db)):
@@ -813,7 +844,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 **{k: rp.get_setting(conn, k, None) for k in ("race_date", "race_distance", "race_target_s", "race_name", "week_start_day")},
                 # Answers that change over time, each with the day it was given
                 **{k: rp.get_setting(conn, k, None) for k in DATED_SETTINGS}, **{k + "_at": rp.get_setting(conn, k + "_at", None) for k in DATED_SETTINGS},
-                "week_start_effective": WEEKDAYS[rp.first_weekday(conn)]}
+                "week_start_effective": WEEKDAYS[rp.first_weekday(conn)],
+                "watch": samsung.watch_on(conn, today(conn).isoformat()), "watch_history": samsung.watch_history(conn)}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):
@@ -832,6 +864,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             except ValueError:
                 raise HTTPException(422, f"{k} is not a real date")
         for k, v in body.model_dump(exclude_unset=True).items():
+            if k == "watch":
+                if v is not None:
+                    samsung.switch(conn, v, today(conn))
+                continue
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
                 if k in ("goal", "available_minutes", "goal_type", "profile_sex", "profile_birth_date", "race_date", "race_distance",

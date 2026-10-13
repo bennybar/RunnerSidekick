@@ -332,6 +332,22 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Galaxy Watch connector (2026-10-13, v0.54.0)
+- Settings › Your watch: Garmin or Samsung Galaxy Watch, from today. Every switch is kept with its date
+  (`watch_history`). A day's data comes from the watch that was current that day; earlier data stays.
+- With the Samsung watch, the app reads Samsung Health (Samsung Health Data SDK) and uploads to `POST /v1/samsung`:
+  on every refresh, from the background worker (when it runs), and on Sync. The first upload reads a year of runs and
+  sleep and two months of all-day heart rate; after that, from 2 days before the last upload. One run per request.
+- Server (`samsung.py`): runs become 1-second samples (heart rate, speed, cadence; distance from speed scaled to the
+  watch's total; altitude from the route), the simplified route and the start point for weather; sleep from its
+  stages (time awake left out; naps under 3 h in the daytime); resting heart rate as the day's lowest 30-minute
+  average from at least 24 readings (Samsung doesn't share its own).
+- Samsung data for a Samsung day goes into the stream the analysis reads; data from other days is kept under source
+  `samsung`, outside it. A Garmin run starting within 5 minutes of a Samsung run on a Samsung day is set aside
+  (`garmin_aside`), not deleted. Garmin's sync pauses while Samsung is the watch and never fills a Samsung day.
+- A new watch starts a device era (by device ID), as a new Garmin watch did, so baselines rebuild from the switch.
+- Not from Samsung: HRV, running dynamics, power, laps, Garmin's training scores. nginx body limit 1 MB → 16 MB.
+
 ## Samsung Health check (2026-10-13, v0.53.0)
 - Galaxy Watch support starts with a check: Settings › Your data › Samsung Health check reads what Samsung Health on the
   phone shares through the Samsung Health Data SDK 1.1.0: the latest run in detail (log points and spacing; heart rate,

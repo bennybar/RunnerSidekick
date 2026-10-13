@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Straighten
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -150,6 +151,20 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     fun saveRemote(s: SettingsDto, sheet: String? = null) = saveFrom(sheet, "Saved") { remote.value = repo.saveRemoteSettings(s) }
 
+    val samsungProblem = repo.samsungProblem
+
+    /** Makes [watch] the runner's watch from today. The Samsung one first needs Samsung Health to allow reading; the
+     *  refresh after the save then sends its data (a year of history the first time). */
+    fun chooseWatch(watch: String, activity: android.app.Activity?) =
+        saveFrom(null, if (watch == "samsung") "Your Samsung watch counts from today" else "Your Garmin counts from today") {
+            if (watch == "samsung") {
+                val sh = repo.samsung ?: throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health isn't available here")
+                if (!sh.allowed() && (activity == null || !sh.ask(activity)))
+                    throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health didn't allow reading, so your watch didn't change")
+            }
+            remote.value = repo.saveRemoteSettings((remote.value ?: repo.remoteSettings()).copy(watch = watch))
+        }
+
     /** AI input on this phone or the server. Choosing the phone downloads Gemini Nano first when it isn't there yet. */
     fun setOwnAiKey(key: String?) = launchIo {
         repo.settings.setOwnAiKey(key)
@@ -201,6 +216,9 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     val close = vm::closeSheet
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val samsungProblem by vm.samsungProblem.collectAsStateWithLifecycle()
+    var watchDialog by remember { mutableStateOf(false) }
+    val activity = androidx.activity.compose.LocalActivity.current
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
@@ -231,8 +249,13 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                     row(m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in",
                         supporting = when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
                         icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle)
+                    if (s?.synthetic != true) row("Your watch", supporting = when (s?.watch) {
+                        "samsung" -> "Samsung Galaxy Watch · this phone sends its data" + (samsungProblem?.let { "\n$it" } ?: "")
+                        else -> "Garmin"
+                    }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided, onClick = { watchDialog = true })
                     row("Garmin", supporting = when {
                         s?.synthetic == true -> "Demo data source"
+                        s?.watch == "samsung" && s.garminLinked -> "Paused while your watch is the Samsung one. Your Garmin history stays."
                         g?.connected == true -> "Connected with Garmin's official sign-in. " + (g.dataImport ?: "")
                         s != null && !s.garminLinked -> "Not connected. Connect to download your runs, sleep and health data."
                         s?.connection?.state == "connected" -> "Connected · last fetch ${Format.ago(s.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
@@ -390,6 +413,30 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                 "summaries are filled in from the report, not written by the AI. If its output doesn't pass checks, nothing is shown.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+    if (watchDialog) {
+        val current = status?.value?.watch ?: "garmin"
+        AlertDialog(
+            onDismissRequest = { watchDialog = false },
+            title = { Text("Your watch") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    listOf("garmin" to "Garmin", "samsung" to "Samsung Galaxy Watch").forEach { (id, label) ->
+                        androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().clickable {
+                            watchDialog = false
+                            if (id != current) vm.chooseWatch(id, activity)
+                        }.padding(vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            androidx.compose.material3.RadioButton(selected = id == current, onClick = null)
+                            Text(label, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                    Text("From today, your days and runs come from this watch. Everything from before stays, and on a day both " +
+                        "watches recorded, the one you chose counts. With the Samsung watch, this phone reads Samsung Health and " +
+                        "sends its data; Garmin pauses.", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                }
+            },
+            confirmButton = { TextButton(onClick = { watchDialog = false }) { Text("Close") } })
     }
     confirm?.let { scope ->
         AlertDialog(
