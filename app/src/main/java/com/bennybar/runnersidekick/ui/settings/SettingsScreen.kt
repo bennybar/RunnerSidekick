@@ -159,8 +159,10 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         saveFrom(null, if (watch == "samsung") "Your Samsung watch counts from today" else "Your Garmin counts from today") {
             if (watch == "samsung") {
                 val sh = repo.samsung ?: throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health isn't available here")
-                if (!sh.allowed() && (activity == null || !sh.ask(activity)))
-                    throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health didn't allow reading, so your watch didn't change")
+                val ok = try { sh.allowed() || (activity != null && sh.ask(activity)) } catch (e: Exception) {  // not installed, developer mode off…
+                    throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Couldn't reach Samsung Health (${e.message}), so your watch didn't change")
+                }
+                if (!ok) throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health didn't allow reading, so your watch didn't change")
             }
             remote.value = repo.saveRemoteSettings((remote.value ?: repo.remoteSettings()).copy(watch = watch))
         }
