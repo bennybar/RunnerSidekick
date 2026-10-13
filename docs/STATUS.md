@@ -333,6 +333,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
 ## Galaxy Watch connector (2026-10-13, v0.54.0)
+- Server fixes after the first real upload (same day, no new app): 1 km splits built from the samples (Samsung keeps
+  no laps); Samsung's per-run VO2 max kept as `samsung_vo2max_running`, shown on Samsung runs and as "Samsung's VO₂ max"
+  in Cardio while Samsung is the watch, never mixed into Garmin's series; resting HR only from days the watch was worn
+  overnight (6+ readings midnight–6 am); switching between Garmin and Samsung no longer starts a device era (the era in
+  force carries on; a new watch of the same maker still restarts it), and trends mark the switch date. A daytime-only
+  Samsung resting HR (64) had replaced Garmin's 50 on 2026-10-13; restored from Garmin's raw record.
 - Settings › Your watch: Garmin or Samsung Galaxy Watch, from today. Every switch is kept with its date
   (`watch_history`). A day's data comes from the watch that was current that day; earlier data stays.
 - With the Samsung watch, the app reads Samsung Health (Samsung Health Data SDK) and uploads to `POST /v1/samsung`:
