@@ -22,13 +22,25 @@ import java.time.Instant
  *  all-day heart rate. Read only. Samsung has no cloud API, so this is how the watch's data reaches the server. */
 class SamsungHealth(context: Context) {
     private val store by lazy { HealthDataService.getStore(context.applicationContext) }
-    private val permissions = listOf(DataTypes.EXERCISE, DataTypes.EXERCISE_LOCATION, DataTypes.HEART_RATE, DataTypes.SLEEP)
-        .map { Permission.of(it, AccessType.READ) }.toSet()
+    private val types = listOf(DataTypes.EXERCISE, DataTypes.EXERCISE_LOCATION, DataTypes.HEART_RATE, DataTypes.SLEEP)
+    private val permissions = types.map { Permission.of(it, AccessType.READ) }.toSet()
 
-    suspend fun allowed(): Boolean = store.getGrantedPermissions(permissions).containsAll(permissions)
+    /** What Samsung Health lets the app read. Each kind works on its own: without routes, runs still come (no map). */
+    data class Allowed(val workouts: Boolean, val routes: Boolean, val heartRate: Boolean, val sleep: Boolean) {
+        val missing get() = listOfNotNull("workouts".takeIf { !workouts }, "routes".takeIf { !routes },
+            "heart rate".takeIf { !heartRate }, "sleep".takeIf { !sleep })
+    }
 
-    /** Samsung Health's own screen asking to allow reading. True when everything needed was allowed. */
-    suspend fun ask(activity: Activity): Boolean = store.requestPermissions(permissions, activity).containsAll(permissions)
+    private fun allowedOf(granted: Set<Permission>) = Allowed(
+        workouts = Permission.of(DataTypes.EXERCISE, AccessType.READ) in granted,
+        routes = Permission.of(DataTypes.EXERCISE_LOCATION, AccessType.READ) in granted,
+        heartRate = Permission.of(DataTypes.HEART_RATE, AccessType.READ) in granted,
+        sleep = Permission.of(DataTypes.SLEEP, AccessType.READ) in granted)
+
+    suspend fun allowed(): Allowed = allowedOf(store.getGrantedPermissions(permissions))
+
+    /** Samsung Health's own screen asking to allow reading; what was allowed afterwards. */
+    suspend fun ask(activity: Activity): Allowed = allowedOf(store.requestPermissions(permissions, activity))
 
     /** Every data point a request pages through. */
     private suspend fun read(request: (String?) -> ReadDataRequest<HealthDataPoint>): List<HealthDataPoint> {
@@ -52,7 +64,7 @@ class SamsungHealth(context: Context) {
                 p.getValue(DataType.ExerciseType.SESSIONS).orEmpty().mapIndexed { i, s ->
                     buildJsonObject {
                         put("uid", p.uid + if (i > 0) "-$i" else "")
-                        put("type", p.getValue(DataType.ExerciseType.EXERCISE_TYPE)?.name)
+                        put("type", (s.exerciseType ?: p.getValue(DataType.ExerciseType.EXERCISE_TYPE))?.name)  // each part its own
                         put("title", s.customTitle ?: p.getValue(DataType.ExerciseType.CUSTOM_TITLE))
                         put("start", s.startTime.toEpochMilli())
                         put("end", s.endTime.toEpochMilli())
@@ -95,12 +107,14 @@ class SamsungHealth(context: Context) {
                 }
             }
 
-    /** All-day heart rate in [from, to) as [ms, bpm]: each reading's series when it has one, else the reading itself. */
+    /** All-day heart rate in [from, to) as [ms, bpm, UTC offset s]: each reading's series when it has one, else the
+     *  reading itself, each with its own offset (a day's readings belong to the time zone they were taken in). */
     suspend fun heartRate(from: Instant, to: Instant): List<JsonArray> =
         read { DataTypes.HEART_RATE.readDataRequestBuilder.setInstantTimeFilter(InstantTimeFilter.of(from, to)).setPageToken(it).build() }
             .flatMap { p ->
+                val off = num(p.zoneOffset?.totalSeconds)
                 val series = p.getValue(DataType.HeartRateType.SERIES_DATA).orEmpty()
-                if (series.isNotEmpty()) series.map { JsonArray(listOf(num(it.startTime.toEpochMilli()), num(it.heartRate))) }
-                else listOfNotNull(p.getValue(DataType.HeartRateType.HEART_RATE)?.let { JsonArray(listOf(num(p.startTime.toEpochMilli()), num(it))) })
+                if (series.isNotEmpty()) series.map { JsonArray(listOf(num(it.startTime.toEpochMilli()), num(it.heartRate), off)) }
+                else listOfNotNull(p.getValue(DataType.HeartRateType.HEART_RATE)?.let { JsonArray(listOf(num(p.startTime.toEpochMilli()), num(it), off)) })
             }
 }

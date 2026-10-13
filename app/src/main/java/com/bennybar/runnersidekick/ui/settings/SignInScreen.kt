@@ -82,7 +82,7 @@ fun SignInScreen() {
         ShapeBadge(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided, Modifier.size(96.dp),
             container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer, iconSize = 48.dp)
         Text("Runner Sidekick", style = MaterialTheme.typography.displaySmall, textAlign = TextAlign.Center)
-        Text("Your Garmin data, turned into a daily briefing, run analysis and insights you can check.",
+        Text("Your watch's data (Garmin or Samsung Galaxy Watch), turned into a daily briefing, run analysis and insights you can check.",
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         Spacer(Modifier.height(24.dp))
         if (busy) LoadingIndicator(Modifier.size(56.dp))

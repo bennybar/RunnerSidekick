@@ -576,10 +576,13 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
 
     # 20. Data provenance
     add("## Data provenance")
-    prov = [("Activity source", "Garmin Connect (watch recording)"),
-            ("Heart rate, pace, cadence, elevation", "Garmin watch samples"),
+    samsung = a.get("manufacturer") == "Samsung"
+    prov = [("Activity source", "Samsung Health (Galaxy Watch recording)" if samsung else "Garmin Connect (watch recording)"),
+            ("Heart rate, pace, cadence, elevation", "Galaxy Watch samples" if samsung else "Garmin watch samples"),
             ("Power and running dynamics", "Garmin" if g.get("avgPower") or dyn else None),
-            ("VO₂ max, training effect, training load, HR zones", "Garmin"),
+            ("VO₂ max", "Samsung" if samsung else "Garmin"),
+            ("Training effect, training load", None if samsung else "Garmin"),
+            ("HR zones", "Your Garmin profile"),
             ("Recovery context", "Garmin daily data" if rc else None),
             ("Weather", f"{wx['source']} (external estimate)" if wx else None),
             ("Athlete context", "Entered by the runner" if said else None),

@@ -194,6 +194,10 @@ def metric_finding(conn, source: str, metric: str, d: date, obs_row) -> dict | N
     }
     if metric == "hrv_overnight_avg":
         base["limitations"].append("Compared only with overnight HRV of the same measurement type.")
+    if method == "samsung_lowest_30min_hr":  # Samsung doesn't share its own resting heart rate
+        base["title"] = "Resting heart rate (Sidekick's estimate)"
+        base["limitations"].append("Worked out by Runner Sidekick from your Samsung watch's all-day heart rate (the lowest "
+                                   "30 minutes of the day), not Samsung's own resting heart rate.")
     if era is not None and era > d - timedelta(days=window_days):
         base["limitations"].append(f"Your watch changed around {era.isoformat()}; earlier days aren't compared, "
                                    "because different devices measure differently.")
@@ -289,6 +293,9 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
         r = obs.get(m)
         if r is not None and r["state"] == "measured":
             garmin_ctx.append({"metric": m, "value": r["value"], "unit": r["unit"], "label": r["label"], "origin": "Garmin"})
+    r = obs.get("samsung_sleep_score")  # Samsung's own score, beside Garmin's, never in place of it
+    if r is not None and r["state"] == "measured":
+        garmin_ctx.append({"metric": "samsung_sleep_score", "value": r["value"], "unit": r["unit"], "label": None, "origin": "Samsung"})
     completeness = {m: (obs[m]["state"] if m in obs else "not_synced") for m in CORE_METRICS}
     completeness["checkin"] = checkin is not None
     recent = activities(conn, source, (d - timedelta(days=7)).isoformat(), ds)
@@ -434,6 +441,7 @@ def records(conn, source: str) -> dict:
 
 
 def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
+    from .readiness import run_load  # readiness imports this module
     a = activity_by_source_id(conn, source, sid)
     if a is None or a["sport"] == "other":
         return None
@@ -581,6 +589,8 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "splits": [{**rn.as_dict(s), **{k: v for k, v in dt.items() if k != "idx"}}
                    for s, dt in zip(splits, details or [{}] * len(splits))],
         "story": story, "best_efforts": best_efforts,
+        # The app's own training load for the run (Edwards: minutes per heart-rate zone × 1–5), what load and readiness use
+        "load": round(run_load(conn, a, zones["floors"] if zones else None)),
         "classification": an["classification"], "decoupling": dc,
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_begin.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,

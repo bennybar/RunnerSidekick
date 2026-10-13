@@ -159,10 +159,11 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         saveFrom(null, if (watch == "samsung") "Your Samsung watch counts from today" else "Your Garmin counts from today") {
             if (watch == "samsung") {
                 val sh = repo.samsung ?: throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health isn't available here")
-                val ok = try { sh.allowed() || (activity != null && sh.ask(activity)) } catch (e: Exception) {  // not installed, developer mode off…
+                // Runs are the minimum; routes, heart rate and sleep each work on their own when allowed
+                val ok = try { sh.allowed().workouts || (activity != null && sh.ask(activity).workouts) } catch (e: Exception) {  // not installed, developer mode off…
                     throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Couldn't reach Samsung Health (${e.message}), so your watch didn't change")
                 }
-                if (!ok) throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health didn't allow reading, so your watch didn't change")
+                if (!ok) throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Samsung Health didn't allow reading your workouts, so your watch didn't change")
             }
             remote.value = repo.saveRemoteSettings((remote.value ?: repo.remoteSettings()).copy(watch = watch))
         }
@@ -230,7 +231,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
         LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
             verticalArrangement = Arrangement.spacedBy(20.dp)) {
             // Only a Garmin problem is shown up here; everything else lives in its own section
-            status?.value?.connection?.state?.takeIf { it == "reauth_required" || it == "not_configured" || it == "error" }?.let { st ->
+            status?.value?.takeIf { it.watch != "samsung" }?.connection?.state?.takeIf { it == "reauth_required" || it == "not_configured" || it == "error" }?.let { st ->
                 item {
                     Group {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
@@ -328,7 +329,8 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                         })
                     row("Background refresh", supporting = if (local?.notificationsEnabled == true)
                             "Already on with notifications (about hourly)."
-                        else "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.",
+                        else "Keeps today's briefing and your runs ready offline, about every 3 hours. " +
+                            if (status?.value?.watch == "samsung") "It's also when this phone sends your Samsung watch's new data." else "Garmin itself syncs on the server either way.",
                         icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
                         trailing = {
                             Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
@@ -390,7 +392,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
             }
             item {
                 Group(title = "About") {
-                    row("Runner Sidekick", supporting = "Guidance only, not medical advice. Garmin data via an unofficial, read-only connector.",
+                    row("Runner Sidekick", supporting = "Guidance only, not medical advice. Garmin data via an unofficial, read-only connector; Samsung data read from Samsung Health on this phone.",
                         icon = Icons.Outlined.Straighten, iconShape = MaterialShapes.Circle)
                 }
             }

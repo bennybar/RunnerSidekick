@@ -54,7 +54,7 @@ fun CardioCard(c: Cardio, onOpen: () -> Unit) {
     }
 }
 
-private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> "Garmin"; "questionnaire" -> "Questionnaire"; else -> p.title }
+private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> p.maker ?: "Garmin"; "questionnaire" -> "Questionnaire"; else -> p.title }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable

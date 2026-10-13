@@ -428,6 +428,8 @@ data class PostRunReport(
     @SerialName("pace_moving_s_per_km") val paceMovingSPerKm: Double? = null,
     @SerialName("garmin_metrics") val garminMetrics: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
     @SerialName("garmin_vo2max_day") val garminVo2maxDay: Point? = null,
+    /** The app's own training load for the run (Edwards, from heart-rate zones) */
+    val load: Int? = null,
     @SerialName("garmin_readiness_day") val garminReadinessDay: Point? = null,
     val splits: List<Split> = emptyList(),
     val classification: Classification,
@@ -534,7 +536,8 @@ data class CardioInputs(@SerialName("weight_kg") val weightKg: Double? = null, @
 
 @Serializable
 data class CardioPart(
-    val id: String, val title: String, val status: String = "ok", val value: Double? = null,
+    /** For the watch's own estimate: whose it is, "Garmin" or "Samsung" */
+    val id: String, val title: String, val maker: String? = null, val status: String = "ok", val value: Double? = null,
     val headline: String? = null, val detail: String? = null, val caveat: String? = null, val source: String? = null,
     val comparison: CardioComparison? = null, val spread: List<Int>? = null, val sensitivity: String? = null,
     @SerialName("runs_used") val runsUsed: Int? = null, @SerialName("left_out") val leftOut: Map<String, Int>? = null,
@@ -775,6 +778,8 @@ data class RecordEntry(val label: String, val best: RecordBest? = null, val prog
 data class Fitness(
     val garmin: GarminFitness? = null,
     @SerialName("vo2max_series") val vo2maxSeries: List<Point> = emptyList(),
+    /** Whose VO2 max the series is: "Garmin", or "Samsung" while the Samsung watch is the runner's */
+    @SerialName("vo2_maker") val vo2Maker: String = "Garmin",
     val records: Map<String, RecordEntry> = emptyMap(),
     @SerialName("easy_pace") val easyPace: Insight? = null,
     val synthetic: Boolean = false,

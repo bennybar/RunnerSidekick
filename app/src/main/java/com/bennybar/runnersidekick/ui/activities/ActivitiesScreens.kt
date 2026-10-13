@@ -432,9 +432,11 @@ private fun RunHero(r: PostRunReport, units: Units) {
             val vo2 = r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"')
             val tiles = listOf(
                 (a.avgHr?.roundToInt()?.toString() ?: "—") to "avg bpm",
-                (te?.let { "%.1f".format(it) } ?: "—") to "aerobic TE",
-                // Garmin's training readiness on the morning of the run
-                (r.garminReadinessDay?.value?.roundToInt()?.toString() ?: "—") to "Garmin readiness",
+                // Garmin's Training Effect; a watch without it (Samsung) shows the app's own training load for the run
+                te?.let { "%.1f".format(it) to "aerobic TE" } ?: ((r.load?.toString() ?: "—") to "training load"),
+                // Garmin's training readiness on the morning of the run; without it, the run's highest heart rate
+                r.garminReadinessDay?.value?.roundToInt()?.let { it.toString() to "Garmin readiness" }
+                    ?: ((a.maxHr?.roundToInt()?.toString() ?: "—") to "max bpm"),
                 // Elapsed only when stops made it differ
                 Format.duration(a.movingS) to (if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "moving · ${Format.duration(a.elapsedS)} total" else "moving"),
                 "+${Format.elevation(a.elevationGainM, units)}" to "climb",
@@ -474,7 +476,8 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
                 return@Column
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-                listOf(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct to "power:HR").forEach { (v, l) ->
+                // power:HR only when the watch records running power (Samsung's doesn't)
+                listOfNotNull(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct?.let { it to "power:HR" }).forEach { (v, l) ->
                     Column(Modifier.weight(1f).fillMaxHeight().background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {
                         Text(v?.let { "%.1f%%".format(it) } ?: "—", style = MaterialTheme.typography.headlineMedium, color = cs.onSecondaryContainer)
                         Text(if (v == null && l.startsWith("power")) "no power" else l, style = MaterialTheme.typography.labelMedium,
@@ -484,7 +487,8 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
             }
             Text(if (!dc.eligible) "Indicative here: " + (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady"
                 else dc.reasons.firstOrNull() ?: "not a steady run") + "."
-                else "Under 5% means heart rate kept pace with the effort. Lower is better; on hills, power:HR is the better read.",
+                else "Under 5% means heart rate kept pace with the effort. Lower is better" +
+                    (if (dc.powerDecouplingPct != null) "; on hills, power:HR is the better read." else "."),
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }

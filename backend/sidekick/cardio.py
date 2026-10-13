@@ -248,7 +248,7 @@ def build(conn, source: str, today: date) -> dict:
                                      f"about {round(median(lower))}.",
                          headline=f"from your last {len(recent)} qualifying runs",
                          detail=f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
-                                f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: Garmin's overnight value (the "
+                                f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: your watch's overnight value (the "
                                 f"published relationship used seated resting measurements).")
     else:
         runs_part.update(status="not_enough", headline="Not enough qualifying runs yet",
@@ -305,18 +305,18 @@ def build(conn, source: str, today: date) -> dict:
     from .scores import vo2_on
     found = vo2_on(conn, source, today, today)  # the newest reading, from the daily series or Garmin's snapshot, and not stale
     gv = (found[0], found[1].isoformat()) if found else None
-    out["garmin"] = ({"id": "garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
+    out["garmin"] = ({"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
                       "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
-                     if gv else {"id": "garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
+                     if gv else {"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
     # With the Samsung watch, this place is Samsung's estimate instead (its own formula, so not Garmin's series)
     from .samsung import SAMSUNG, watch_on
     from .scores import VO2_MAX_AGE_DAYS
     if watch_on(conn, today.isoformat()) == SAMSUNG:
         sv = [(k, v) for k, v in rp.series(conn, source, "samsung_vo2max_running", today.isoformat()).items()
               if k >= (today - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()]
-        out["garmin"] = ({"id": "garmin", "title": "Samsung's VO₂ max", "status": "ok", "value": round(max(sv)[1]), "date": max(sv)[0],
+        out["garmin"] = ({"id": "garmin", "maker": "Samsung", "title": "Samsung's VO₂ max", "status": "ok", "value": round(max(sv)[1]), "date": max(sv)[0],
                           "headline": f"as of {max(sv)[0]}", "detail": "Samsung's estimate from your runs with the watch."}
-                         if sv else {"id": "garmin", "title": "Samsung's VO₂ max", "status": "unavailable",
+                         if sv else {"id": "garmin", "maker": "Samsung", "title": "Samsung's VO₂ max", "status": "unavailable",
                                      "headline": "After a run with the Samsung watch"})
 
     # Each VO2 max estimate placed among people of your sex and age (performance isn't: a different quantity)
@@ -339,7 +339,7 @@ def build(conn, source: str, today: date) -> dict:
     notes = []
     r, gg, qq = out["runs"].get("value"), out["garmin"].get("value"), out["questionnaire"].get("value")
     if r is not None and gg is not None:
-        notes.append(f"Your runs and Garmin {'are within 2 of each other' if abs(r - gg) <= 2 else f'differ by {abs(r - gg)}'}. Both read "
+        notes.append(f"Your runs and {out['garmin']['maker']} {'are within 2 of each other' if abs(r - gg) <= 2 else f'differ by {abs(r - gg)}'}. Both read "
                      "heart rate against pace, but with different methods and assumptions"
                      + ("." if abs(r - gg) <= 2 else ". Possible reasons include the maximum heart rate assumed, how resting heart rate "
                         "is measured, running economy, conditions and data quality; the app can't tell which. The line above shows how "

@@ -17,6 +17,8 @@ from datetime import date, datetime, timedelta, timezone
 from pymongo.database import Database
 
 from .connectors.base import Activity, DayBundle, Lap, Observation, RawPayload, Samples, SleepSession, valid_hr
+from statistics import median
+
 from .db import get_setting, many, set_setting
 from .routes import shape_from_track
 from .store import save_activity, save_day
@@ -26,11 +28,12 @@ GARMIN_ASIDE = "garmin_aside"  # a Garmin run set aside because the Samsung watc
 WATCHES = ("garmin", "samsung")
 SAME_RUN_S = 300             # two runs starting within 5 minutes of each other are the same run on two watches
 RHR_WINDOW_S = 30 * 60       # resting heart rate: the lowest 30-minute average of the day, as Garmin defines it
-RHR_MIN_READINGS = 24        # ...from at least 24 readings (4 hours at Samsung's default of one every 10 minutes)
-RHR_NIGHT_READINGS = 6       # ...6 of them between midnight and 6 am: worn overnight, so the lowest is a resting value
+RHR_MIN_WORN_S = 4 * 3600    # ...on a day the watch measured for at least 4 hours
+RHR_NIGHT_WORN_S = 3600      # ...an hour of it between midnight and 6 am: worn overnight, so the lowest is a resting value
+WORN_GAP_S = 15 * 60         # time between two readings counts as worn up to 15 minutes (Samsung's default is every 10)
 NAP_MAX_S = 3 * 3600
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
-CONVERSION = 2  # raised when the way a run is converted changes, so runs sent again are converted again
+CONVERSION = 3  # raised when the way a run is converted changes, so runs sent again are converted again
 
 
 # ---------------------------------------------------------------- which watch counts for a day
@@ -48,12 +51,41 @@ def watch_on(conn: Database, d: str) -> str:
     return current
 
 
-def switch(conn: Database, watch: str, today: date) -> None:
-    """Make `watch` the runner's watch from today. A switch back on the same day replaces that day's switch."""
+def switch(conn: Database, stream: str, watch: str, today: date) -> set[str]:
+    """Make `watch` the runner's watch from today. A switch back on the same day replaces that day's switch. Data already
+    imported is then filed again by the new history (see reconcile); returns the dates whose analysis inputs changed."""
     hist = [h for h in watch_history(conn) if h["from"] < today.isoformat()]
     if (hist[-1]["watch"] if hist else "garmin") != watch:
         hist.append({"watch": watch, "from": today.isoformat()})
     set_setting(conn, "watch_history", hist)
+    return reconcile(conn, stream)
+
+
+def reconcile(conn: Database, stream: str) -> set[str]:
+    """Files every record by the watch history: Samsung records into the analysis stream on Samsung days and out of it on
+    Garmin days, and Garmin runs set aside back in on Garmin days. Garmin's own daily readings for a day that changes to
+    Garmin come back with its next sync (which re-reads recent days). Returns the dates whose inputs changed."""
+    changed: set[str] = set()
+    is_samsung = lambda d: watch_on(conn, d) == SAMSUNG  # noqa: E731
+    for coll, date_key in ((conn.activity, "local_date"), (conn.sleep_session, "wake_date")):
+        for r in coll.find({"source": {"$in": [stream, SAMSUNG]}, "source_id": {"$regex": "^samsung-"}}, {"source": 1, "source_id": 1, date_key: 1}):
+            want = stream if is_samsung(r[date_key]) else SAMSUNG
+            if r["source"] != want:
+                coll.delete_one({"source": want, "source_id": r["source_id"]})
+                coll.update_one({"_id": r["_id"]}, {"$set": {"source": want}})
+                changed.add(r[date_key])
+    for r in conn.activity.find({"source": GARMIN_ASIDE}, {"source_id": 1, "local_date": 1}):
+        if not is_samsung(r["local_date"]):
+            conn.activity.update_one({"_id": r["_id"]}, {"$set": {"source": stream}})
+            changed.add(r["local_date"])
+    for r in conn.daily_observation.find({"source": {"$in": [stream, SAMSUNG]}, "method": {"$regex": "^samsung"}}):
+        want = stream if is_samsung(r["local_date"]) else SAMSUNG
+        if r["source"] != want:
+            conn.daily_observation.replace_one({"source": want, "local_date": r["local_date"], "metric": r["metric"]},
+                                               {**{k: v for k, v in r.items() if k != "_id"}, "source": want}, upsert=True)
+            conn.daily_observation.delete_one({"_id": r["_id"]})
+            changed.add(r["local_date"])
+    return changed
 
 
 # ---------------------------------------------------------------- converting what the phone sends
@@ -102,13 +134,15 @@ def activity(a: dict) -> Activity:
     secs = sorted(by_s)
     total = _num(a.get("distance_m"))
     samples, shape = None, None
+    # Time between samples counts up to a gap: 10 s, or three times the watch's usual spacing when it samples less often
+    steps = [b - a for a, b in zip(secs, secs[1:]) if b > a]
+    gap = max(10, 3 * median(steps)) if steps else 10
+    dt = [0] + [b - a if b - a <= gap else 0 for a, b in zip(secs, secs[1:])]  # the time each sample closes
+    moving = sum(d for d, s in zip(dt, secs) if (by_s[s][1] or 0) >= 0.5) if secs else 0
     if secs:
-        dist, run, prev = [], 0.0, secs[0]
-        for s in secs:
-            sp = by_s[s][1]
-            if sp is not None:
-                run += sp * min(s - prev, 5)  # a gap longer than 5 s (a pause) adds no distance
-            prev = s
+        dist, run = [], 0.0
+        for d, s in zip(dt, secs):
+            run += (by_s[s][1] or 0) * d
             dist.append(run)
         k = total / run if total and run > 0 else 1.0
         dist = [round(d * k, 1) for d in dist]
@@ -129,7 +163,7 @@ def activity(a: dict) -> Activity:
             el = [s.elev[j] for j in range(first, i + 1, 10) if s.elev[j] is not None]  # every 10 s: GPS altitude is noisy
             laps.append(Lap(idx=len(laps), start_utc=_iso(start + timedelta(seconds=s.t[first])),
                             distance_m=round(s.dist[i] - s.dist[first], 1), elapsed_s=s.t[i] - s.t[first],
-                            moving_s=float(sum(min(s.t[j] - s.t[j - 1], 5) for j in seg if (s.speed[j] or 0) >= 0.5)),
+                            moving_s=float(sum(dt[j] for j in seg if (s.speed[j] or 0) >= 0.5)),
                             avg_hr=round(sum(hr) / len(hr), 1) if hr else None, max_hr=max(hr) if hr else None,
                             elevation_gain_m=round(sum(max(0.0, b - a) for a, b in zip(el, el[1:])), 1) if len(el) > 1 else None,
                             avg_cadence_spm=round(sum(cad) / len(cad), 1) if cad else None))
@@ -141,7 +175,6 @@ def activity(a: dict) -> Activity:
             run += _haversine(p[1:3], q[1:3])
             along.append(run)
         shape = shape_from_track(along, [p[1] for p in route], [p[2] for p in route])
-    moving = sum(1 for s in secs if (by_s[s][1] or 0) >= 0.5) if secs else None
     summary = {k: v for k, v in a.items() if k not in ("log", "route")}
     if route:  # where the run started, for its weather (rounded to ~1 km when looked up); the track itself isn't kept
         summary.update(startLatitude=route[0][1], startLongitude=route[0][2])
@@ -150,7 +183,8 @@ def activity(a: dict) -> Activity:
         source_id=sid, sport=SPORTS.get(str(a.get("type") or "").upper(), "other"), name=a.get("title") or None,
         start_utc=_iso(start), utc_offset_s=offset, local_date=_local_date(start_ms, offset),
         distance_m=total, elapsed_s=(a["end"] - start_ms) / 1000 if a.get("end") else _num(a.get("duration_s")),
-        moving_s=float(moving) if moving else None, timer_s=_num(a.get("duration_s")),
+        # Without a log (a workout entered by hand, say), the session's own duration stands in for moving time
+        moving_s=float(moving) if moving else _num(a.get("duration_s")), timer_s=_num(a.get("duration_s")),
         avg_hr=_num(a.get("avg_hr")), max_hr=_num(a.get("max_hr")), elevation_gain_m=_num(a.get("climb_m")),
         elevation_loss_m=_num(a.get("descent_m")), avg_cadence_spm=_num(a.get("avg_cadence")),
         device_id=a.get("device") or None, manufacturer="Samsung", laps=laps, samples=samples, shape=shape,
@@ -174,23 +208,23 @@ def sleep(s: dict) -> SleepSession:
         deep_s=stage_s["DEEP"] or None, light_s=stage_s["LIGHT"] or None, rem_s=stage_s["REM"] or None, awake_s=stage_s["AWAKE"] or None)
 
 
-def resting_hr(readings: list[list], offset_s: int | None) -> dict[str, float]:
-    """Resting heart rate per local day: the lowest average over any 30 minutes (Garmin's definition), from the watch's
-    all-day readings [ms, bpm], on days it was worn overnight. Samsung doesn't share its own, so it's worked out here."""
-    days: dict[str, list[tuple[float, float]]] = {}
-    for r in readings:
-        bpm = _num(r[1]) if len(r) > 1 else None
-        if bpm is None or not 30 <= bpm <= 240:
-            continue
-        days.setdefault(_local_date(r[0], offset_s), []).append((r[0] / 1000, bpm))
+def resting_hr(readings: list[tuple[float, float, int]]) -> dict[str, float]:
+    """Sidekick's estimate of resting heart rate per local day (Samsung doesn't share its own): the lowest average over
+    any 30 minutes (Garmin's definition), from the watch's all-day readings (ms, bpm, the reading's UTC offset), on days
+    it measured for 4 hours or more, one of them between midnight and 6 am."""
+    days: dict[str, list[tuple[float, float, int]]] = {}
+    for ms, bpm, off in readings:
+        if 30 <= bpm <= 240:
+            days.setdefault(_local_date(ms, off), []).append((ms / 1000, bpm, off))
     out = {}
     for d, rs in days.items():
-        night = sum(1 for ts, _ in rs if (_utc(ts * 1000) + timedelta(seconds=offset_s or 0)).hour < 6)
-        if len(rs) < RHR_MIN_READINGS or night < RHR_NIGHT_READINGS:  # a day the watch wasn't worn at night has no resting value
-            continue
         rs.sort()
+        worn = [min(b[0] - a[0], WORN_GAP_S) for a, b in zip(rs, rs[1:])]
+        night = sum(w for w, a in zip(worn, rs) if (_utc(a[0] * 1000) + timedelta(seconds=a[2] or 0)).hour < 6)
+        if sum(worn) < RHR_MIN_WORN_S or night < RHR_NIGHT_WORN_S:
+            continue
         best, j, total = None, 0, 0.0
-        for i, (t0, _) in enumerate(rs):  # a sliding window: rs[i..j) are the readings within 30 minutes of rs[i]
+        for i, (t0, _, _) in enumerate(rs):  # a sliding window: rs[i..j) are the readings within 30 minutes of rs[i]
             while j < len(rs) and rs[j][0] - t0 < RHR_WINDOW_S:
                 total += rs[j][1]
                 j += 1
@@ -239,24 +273,38 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
         if mine:
             changed_runs.append(act.source_id)
             changed_dates.add(act.local_date)
-    days: dict[str, DayBundle] = {}
-
-    def bundle(d: str) -> DayBundle:
-        return days.setdefault(d, DayBundle(local_date=d))
+    # Sleep: each night stored, then the day's totals from every night stored for it (an upload in parts can't shorten it)
     for s in body.get("sleep") or []:
         ss = sleep(s)
-        bundle(ss.wake_date).sleep.append(ss)
-    for d, b in days.items():
-        main = [s.duration_s for s in b.sleep if not s.is_nap and s.duration_s]
-        if main:
-            b.observations.append(Observation(d, "sleep_duration", float(sum(main)), method="samsung_sleep_stages"))
-    for d, v in resting_hr(body.get("heart_rate") or [], body.get("offset_s")).items():
-        bundle(d).observations.append(Observation(d, "resting_hr", v, method="samsung_lowest_30min_hr"))
-    for d, b in days.items():
-        mine = watch_on(conn, d) == SAMSUNG
-        changed = save_day(conn, stream if mine else SAMSUNG, b)
+        mine = watch_on(conn, ss.wake_date) == SAMSUNG
+        source = stream if mine else SAMSUNG
+        save_day(conn, source, DayBundle(local_date=ss.wake_date, sleep=[ss]))
+        nights = list(conn.sleep_session.find({"source": source, "wake_date": ss.wake_date, "is_nap": False,
+                                                "source_id": {"$regex": "^samsung-"}}))
+        obs = [Observation(ss.wake_date, "sleep_duration", float(sum(n["duration_s"] or 0 for n in nights)), method="samsung_sleep_stages")]
+        score = _num(s.get("score"))
+        if score is not None and not ss.is_nap:
+            obs.append(Observation(ss.wake_date, "samsung_sleep_score", score, method="samsung_sleep_score"))
+        changed = save_day(conn, source, DayBundle(local_date=ss.wake_date, observations=obs))
         if mine:
             changed_dates |= changed
+    # All-day heart rate: every reading kept (by its time, so sending one twice changes nothing), then each day it touches
+    # worked out again from all the readings stored for it, whatever parts they arrived in
+    rs = [(int(r[0]), float(r[1]), int(r[2]) if len(r) > 2 and r[2] is not None else body.get("offset_s") or 0)
+          for r in body.get("heart_rate") or [] if len(r) > 1 and _num(r[0]) is not None and _num(r[1]) is not None]
+    if rs:
+        from pymongo import UpdateOne
+        conn.samsung_hr.bulk_write([UpdateOne({"t": t}, {"$set": {"t": t, "bpm": b, "off": o}}, upsert=True) for t, b, o in rs], ordered=False)
+        touched = {_local_date(t, o) for t, _, o in rs}
+        lo, hi = min(t for t, _, _ in rs) - 2 * 86_400_000, max(t for t, _, _ in rs) + 2 * 86_400_000
+        stored = [(r["t"], r["bpm"], r["off"]) for r in conn.samsung_hr.find({"t": {"$gte": lo, "$lte": hi}}, {"_id": 0})]
+        for d, v in resting_hr(stored).items():
+            if d in touched:
+                mine = watch_on(conn, d) == SAMSUNG
+                obs = Observation(d, "resting_hr", v, method="samsung_lowest_30min_hr")
+                changed = save_day(conn, stream if mine else SAMSUNG, DayBundle(local_date=d, observations=[obs]))
+                if mine:
+                    changed_dates |= changed
     return changed_dates, changed_runs
 
 

@@ -457,25 +457,26 @@ class Repository(
         val sh = samsung ?: return
         if (status.watch != "samsung") return
         try {
-            if (!sh.allowed()) throw ApiException.Sync("Samsung Health hasn't allowed reading yet: tap Settings › Your watch")
+            val ok = sh.allowed()
+            if (!ok.workouts && !ok.heartRate && !ok.sleep) throw ApiException.Sync("Samsung Health hasn't allowed reading yet: tap Settings › Your watch")
             val now = Instant.now()
             val since = settings.samsungUploadedAt()?.minus(java.time.Duration.ofDays(2)) ?: now.minus(java.time.Duration.ofDays(365))
             val offset = java.time.ZoneId.systemDefault().rules.getOffset(now).totalSeconds
             suspend fun send(body: kotlinx.serialization.json.JsonObject) = api.postJson("/v1/samsung", body.toString())
-            sh.workouts(since, now).chunked(1).forEach { runs ->  // one run per request: a long one is over a megabyte
+            if (ok.workouts) sh.workouts(since, now).chunked(1).forEach { runs ->  // one run per request: a long one is over a megabyte
                 send(kotlinx.serialization.json.buildJsonObject { put("activities", kotlinx.serialization.json.JsonArray(runs)) })
             }
-            sh.sleep(since, now).chunked(300).forEach { nights ->
+            if (ok.sleep) sh.sleep(since, now).chunked(300).forEach { nights ->
                 send(kotlinx.serialization.json.buildJsonObject { put("sleep", kotlinx.serialization.json.JsonArray(nights)) })
             }
             // Resting heart rate needs the all-day readings; two months of them is plenty for its history
-            sh.heartRate(maxOf(since, now.minus(java.time.Duration.ofDays(60))), now).chunked(20_000).forEach { rs ->
+            if (ok.heartRate) sh.heartRate(maxOf(since, now.minus(java.time.Duration.ofDays(60))), now).chunked(20_000).forEach { rs ->
                 send(kotlinx.serialization.json.buildJsonObject {
                     put("heart_rate", kotlinx.serialization.json.JsonArray(rs)); put("offset_s", kotlinx.serialization.json.JsonPrimitive(offset))
                 })
             }
             settings.setSamsungUploadedAt(now)
-            samsungProblem.value = null
+            samsungProblem.value = ok.missing.takeIf { it.isNotEmpty() }?.let { "Not allowed in Samsung Health: ${it.joinToString()}" }
         } catch (e: ApiException) {
             samsungProblem.value = e.message
             throw e

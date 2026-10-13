@@ -10,7 +10,7 @@ MEANING = {
     "hrv_overnight_avg": "Variation between heartbeats overnight; higher than your usual tends to mean well recovered, lower "
                          "can mean strain. Compare it only with your own normal.",
     "running_moving_time_7d": "How much you ran in the last 7 days; sudden jumps raise the load on your body.",
-    "vo2max": "Garmin's estimate of how much oxygen you can use; it's the best single number for aerobic fitness.",
+    "vo2max": "Your watch's estimate of how much oxygen you can use; it's the best single number for aerobic fitness.",
 }
 
 

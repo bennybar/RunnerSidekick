@@ -161,9 +161,9 @@ def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
             "headline": f"Lower than about {lower_than}% of {grp}" if lower_than >= 50 else f"Around or above most {grp}",
             "detail": f"Your typical resting heart rate over the last 4 weeks is {round(v)} bpm (median of {len(vals)} days), {pos} "
                       f"in a US national survey, where the middle was {pts[4]} bpm.",
-            "method": "Median of Garmin's daily resting heart rate (last 28 days) placed among the survey's published percentiles.",
+            "method": "Median of your watch's daily resting heart rate (last 28 days) placed among the survey's published percentiles.",
             "caveats": nearest_note(outside, age, lo, hi) + [
-                "The survey measured a seated pulse after about 4 minutes' rest. Garmin's resting heart rate is the lowest stretch of "
+                "The survey measured a seated pulse after about 4 minutes' rest. Your watch's resting heart rate is the lowest stretch of "
                 "the day, usually during sleep, so it reads lower, and this comparison flatters you by a few beats.",
                 "A low resting heart rate is common in people who train, but on its own it isn't a measure of health."],
             "chart": {"type": "distribution", "unit": "bpm", "percentiles": list(nm.RHR_PERCENTILES), "points": list(pts), "value": round(v),
@@ -180,7 +180,7 @@ def hrv_item(conn, source: str, today: date) -> dict:
     # Comparable HRV only: the measurement method currently in use (as in Trends)
     latest = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured"}, sort=[("local_date", -1)])
     if latest is None:
-        return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "Garmin records it while you sleep with the watch on."}
+        return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "A Garmin records it while you sleep with the watch on; Samsung watches don't share it."}
     values = rp.series(conn, source, "hrv_overnight_avg", today.isoformat(), latest.get("method"))
     era = rp.device_era_start(conn, source, today)
     in_era = {d: v for d, v in values.items() if not era or d >= era.isoformat()}

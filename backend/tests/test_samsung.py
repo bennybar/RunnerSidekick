@@ -44,13 +44,12 @@ def test_a_run_becomes_one_second_samples_with_distance_altitude_and_route():
 
 def test_resting_hr_is_the_lowest_half_hour_and_needs_enough_readings():
     day = ANCHOR
-    readings = [[ms(day, 0) + i * 600_000, 70] for i in range(144)]  # every 10 minutes
-    for i in range(18, 22):  # 03:00-03:30: 50 bpm
-        readings[i][1] = 50
-    assert samsung.resting_hr(readings, 3 * 3600) == {day.isoformat(): 50.0}
-    assert samsung.resting_hr(readings[:10], 3 * 3600) == {}
+    readings = [(ms(day, 0) + i * 600_000, 70, 3 * 3600) for i in range(144)]  # every 10 minutes
+    readings = [(t, 50 if 18 <= i < 22 else b, o) for i, (t, b, o) in enumerate(readings)]  # 03:00-03:30: 50 bpm
+    assert samsung.resting_hr(readings) == {day.isoformat(): 50.0}
+    assert samsung.resting_hr(readings[:10]) == {}  # under 4 hours measured
     daytime = [r for r in readings if r[0] >= ms(day, 8)]  # a new watch put on in the morning: no night, no resting value
-    assert samsung.resting_hr(daytime, 3 * 3600) == {}
+    assert samsung.resting_hr(daytime) == {}
 
 
 def test_sleep_counts_only_time_asleep_and_spots_naps():
@@ -85,11 +84,11 @@ def test_only_samsung_days_reach_the_analysis_and_a_run_on_both_watches_shows_on
 
 def test_switching_keeps_dated_history():
     conn = connect(user_db_name(1, "garmin"))
-    samsung.switch(conn, "samsung", ANCHOR)
-    samsung.switch(conn, "garmin", ANCHOR)  # changed their mind the same day
+    samsung.switch(conn, "garmin", "samsung", ANCHOR)
+    samsung.switch(conn, "garmin", "garmin", ANCHOR)  # changed their mind the same day
     assert samsung.watch_history(conn) == []
-    samsung.switch(conn, "samsung", ANCHOR)
-    samsung.switch(conn, "garmin", ANCHOR + timedelta(days=10))
+    samsung.switch(conn, "garmin", "samsung", ANCHOR)
+    samsung.switch(conn, "garmin", "garmin", ANCHOR + timedelta(days=10))
     assert samsung.watch_on(conn, (ANCHOR - timedelta(days=1)).isoformat()) == "garmin"
     assert samsung.watch_on(conn, (ANCHOR + timedelta(days=3)).isoformat()) == "samsung"
     assert samsung.watch_on(conn, (ANCHOR + timedelta(days=10)).isoformat()) == "garmin"
@@ -151,3 +150,52 @@ def test_switching_maker_blends_but_a_new_garmin_still_starts_an_era():
     assert rp.device_era_start(conn, "garmin", date(2026, 9, 25)) == date(2026, 9, 2)  # Garmin → Samsung: the era carries on
     add(4, "2026-09-28", "s2", "Samsung")
     assert rp.device_era_start(conn, "garmin", date(2026, 9, 29)) == date(2026, 9, 21)  # a new Samsung watch: restart
+
+
+def test_moving_time_follows_the_samples_spacing_and_a_summary_only_workout_keeps_its_duration():
+    r = run(ANCHOR, seconds=600, speed=3.0)
+    r["log"] = [e for e in r["log"] if (e[0] - r["start"]) % 5000 < 1000]  # one sample every 5 s
+    a = samsung.activity(r)
+    assert abs(a.moving_s - 595) <= 5 and abs(a.samples.dist[-1] - 1800) < 1
+    bare = samsung.activity({**run(ANCHOR, "b"), "log": [], "route": []})
+    assert bare.moving_s == 600 and bare.samples is None
+
+
+def test_resting_hr_is_the_same_however_the_readings_are_sent():
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    readings = [[ms(ANCHOR, 0) + i * 600_000, 50 if 18 <= i < 22 else 70, 3 * 3600] for i in range(144)]
+    for part in (readings[:50], readings[50:100], readings[100:], readings[40:60]):  # in parts, one part twice
+        samsung.ingest(conn, "garmin", {"heart_rate": part})
+    assert conn.daily_observation.find_one({"metric": "resting_hr"})["value"] == 50.0
+
+
+def test_switching_back_after_an_import_files_the_data_again():
+    conn = connect(user_db_name(1, "garmin"))
+    samsung.switch(conn, "garmin", "samsung", ANCHOR)
+    conn.activity.insert_one({"source": "garmin", "source_id": "g1", "id": 999, "local_date": ANCHOR.isoformat(),
+                              "start_utc": datetime.fromtimestamp(ms(ANCHOR, 7, 1) / 1000, timezone.utc).isoformat().replace("+00:00", "Z"),
+                              "manufacturer": "Garmin", "sport": "running"})
+    samsung.ingest(conn, "garmin", {"activities": [run(ANCHOR, "x")], "sleep": [{"uid": "n", "start": ms(ANCHOR, 0), "end": ms(ANCHOR, 6),
+                   "offset_s": 3 * 3600, "score": 81, "stages": [[ms(ANCHOR, 0), ms(ANCHOR, 6), "LIGHT"]]}]})
+    assert {r["source_id"]: r["source"] for r in conn.activity.find({})} == {"g1": "garmin_aside", "samsung-x": "garmin"}
+    assert conn.daily_observation.find_one({"metric": "samsung_sleep_score"})["source"] == "garmin"
+    moved = samsung.switch(conn, "garmin", "garmin", ANCHOR)  # changed their mind the same day
+    assert ANCHOR.isoformat() in moved
+    assert {r["source_id"]: r["source"] for r in conn.activity.find({})} == {"g1": "garmin", "samsung-x": "samsung"}
+    assert conn.sleep_session.find_one({"source_id": "samsung-n"})["source"] == "samsung"
+    assert conn.daily_observation.count_documents({"source": "garmin", "method": {"$regex": "^samsung"}}) == 0
+
+
+def test_fitness_vo2_follows_the_watch_and_isnt_compared_across_a_switch():
+    from sidekick import scores
+    conn = connect(user_db_name(1, "garmin"))
+    conn.daily_observation.insert_one({"source": "garmin", "local_date": "2026-09-01", "metric": "garmin_vo2max_running",
+                                       "value": 46.3, "state": "measured"})
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-09-20"}])
+    assert scores.vo2_on(conn, "garmin", date(2026, 9, 15), ANCHOR)[0] == 46.3
+    assert scores.vo2_on(conn, "garmin", ANCHOR, ANCHOR) is None  # Samsung's day: Garmin's old estimate doesn't count
+    samsung.ingest(conn, "garmin", {"activities": [{**run(ANCHOR, "v"), "vo2max": 55.4}]})
+    assert scores.vo2_on(conn, "garmin", ANCHOR, ANCHOR)[0] == 55.4
+    from sidekick import progress
+    assert progress.vo2_signal(conn, "garmin", ANCHOR)["direction"] is None

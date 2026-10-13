@@ -211,7 +211,7 @@ class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
     fun syncNow() = launchIo {
         val n = repo.syncRunsNow { pause(it, 2_000.0, 8_000.0) }
-        _syncResult.value = "Synced with Garmin · " + when (n) { 0 -> "no new runs"; 1 -> "1 new run"; else -> "$n new runs" }
+        _syncResult.value = (if (status.value?.value?.watch == "samsung") "Synced your Samsung watch · " else "Synced with Garmin · ") + when (n) { 0 -> "no new runs"; 1 -> "1 new run"; else -> "$n new runs" }
     }
     fun clearSyncResult() { _syncResult.value = null }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)

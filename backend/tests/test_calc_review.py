@@ -75,6 +75,7 @@ def test_best_effort_finds_a_segment_that_starts_on_a_sample():
 def test_one_old_vo2_reading_is_not_evidence_of_stability(monkeypatch):
     today = date(2026, 10, 5)
     old = (46.0, today - timedelta(days=45))
+    monkeypatch.setattr("sidekick.scores.vo2_maker", lambda conn, d: "Garmin")  # no database here: always the Garmin
     monkeypatch.setattr("sidekick.scores.vo2_on", lambda conn, s, d, t: old)
     assert progress.vo2_signal(None, "x", today)["direction"] is None
     monkeypatch.setattr("sidekick.scores.vo2_on", lambda conn, s, d, t: (46.2, today - timedelta(days=2)) if d == today else (47.0, today - timedelta(days=30)))

@@ -28,11 +28,14 @@ def signal(sid: str, title: str, direction: str | None, say: str, note: str) -> 
 
 
 def vo2_signal(conn, source: str, today: date) -> dict:
-    from .scores import vo2_on
+    from .scores import vo2_maker, vo2_on
+    maker = vo2_maker(conn, today)
     now, then = vo2_on(conn, source, today, today), vo2_on(conn, source, today - timedelta(days=28), today)
-    note = ("Garmin's VO₂ max estimate now against 4 weeks ago; a change under 0.5 counts as stable. A device estimate "
+    note = (f"{maker}'s VO₂ max estimate now against 4 weeks ago; a change under 0.5 counts as stable. A device estimate "
             "trend: heat, hills, fatigue or a run of easy weeks can lower it for a while without any loss of fitness")
-    title = "Garmin VO₂ estimate"
+    title = f"{maker} VO₂ estimate"
+    if vo2_maker(conn, today - timedelta(days=28)) != maker:  # a watch switch: different formulas, not a change in fitness
+        return signal("vo2", title, None, "Needs 4 weeks of readings from your current watch", note)
     # Two different, dated measurements: the same old reading twice isn't evidence of stability
     if not now or not then or now[1] < today - timedelta(days=VO2_FRESH_DAYS) or (now[1] - then[1]).days < VO2_MIN_GAP_DAYS \
             or then[1] < today - timedelta(days=VO2_OLDEST_DAYS):

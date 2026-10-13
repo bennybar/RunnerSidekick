@@ -89,12 +89,21 @@ def clock(sec: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
+def vo2_maker(conn, d: date) -> str:
+    """Whose VO2 max estimate counts on d: the watch the runner had then ("Garmin" or "Samsung")."""
+    from .samsung import SAMSUNG, watch_on
+    return "Samsung" if watch_on(conn, d.isoformat()) == SAMSUNG else "Garmin"
+
+
 def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
-    """Garmin's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today) Garmin's
-    current value with its own date. Nothing older than VO2_MAX_AGE_DAYS."""
+    """The watch's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today)
+    Garmin's current value with its own date. Samsung's on a Samsung day, Garmin's otherwise: the two use different
+    formulas, so they're never mixed. Nothing older than VO2_MAX_AGE_DAYS."""
     oldest = (d - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()
-    found = [(k, v) for k, v in rp.series(conn, source, "garmin_vo2max_running", d.isoformat()).items() if k >= oldest]
-    snap = (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}
+    samsung = vo2_maker(conn, d) == "Samsung"
+    metric = "samsung_vo2max_running" if samsung else "garmin_vo2max_running"
+    found = [(k, v) for k, v in rp.series(conn, source, metric, d.isoformat()).items() if k >= oldest]
+    snap = {} if samsung else (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}
     if d == today and snap.get("value") and snap.get("date") and oldest <= snap["date"] <= d.isoformat():
         found.append((snap["date"], snap["value"]))
     if not found:
@@ -116,6 +125,7 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str,
     parts = []
     vd = vo2_on(conn, source, d, today)
     v, measured = vd if vd else (None, None)
+    maker = vo2_maker(conn, d)
     if v:
         i, _ = nm.band_index(nm.VO2_BANDS, age)
         lo, hi = nm.VO2_BANDS[i]
@@ -133,11 +143,11 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str,
         ago = (d - measured).days
         when = "today" if ago == 0 else "yesterday" if ago == 1 else f"{ago} days ago"
         vo2 = part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · {rank} of {grp} · measured {when}",
-                   "Garmin's VO₂ max against the Cooper/ACSM table for your age and sex", imp)
+                   f"{maker}'s VO₂ max against the Cooper/ACSM table for your age and sex", imp)
         vo2["vo2"], vo2["stale"] = v, ago > VO2_STALE_DAYS
         parts.append(vo2)
     else:
-        parts.append(part("vo2max", "VO₂ max for your age", None, "No VO₂ max from Garmin yet", "Needs a recent VO₂ max from Garmin"))
+        parts.append(part("vo2max", "VO₂ max for your age", None, f"No VO₂ max from {maker} yet", f"Needs a recent VO₂ max from {maker}"))
     # Context: recent age-graded running (the best graded effort of the last 90 days)
     best = None
     for a in rp.activities(conn, source, (d - timedelta(days=89)).isoformat(), d.isoformat()):
@@ -259,7 +269,7 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     say = ("Not enough days yet" if now is None else f"{round(now)} bpm · 4-week median" + (
         "" if then is None else " · same as 4 weeks before" if round(now) == round(then)
         else f" · {abs(round(now - then))} {'lower' if now < then else 'higher'} than 4 weeks before"))
-    rhr = part("resting_hr", "Resting heart rate", None, say, "Garmin's lowest 30-minute value of the day; your own trend, not counted")
+    rhr = part("resting_hr", "Resting heart rate", None, say, "Your watch's lowest 30-minute value of the day; your own trend, not counted")
     rhr["verdict"] = "info" if now is not None else "unknown"
     parts.append(context(rhr))
     parts.append(context(body_part(conn, source, d, age)))
@@ -347,16 +357,18 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
     for cur, old in ((fitness, old_fit), (health, old_health)):
         same = {p["id"] for p in cur["components"] if p["points"] is not None and not p.get("context")} == \
                {p["id"] for p in old["components"] if p["points"] is not None and not p.get("context")}
+        # Not across a watch switch: Garmin's and Samsung's VO2 max differ by formula, not by fitness
+        same = same and (cur is not fitness or vo2_maker(conn, today) == vo2_maker(conn, today - timedelta(days=TREND_DAYS)))
         if cur.get("score") is not None and old.get("score") is not None and same:
             cur["trend"] = {"delta": cur["score"] - old["score"], "days": TREND_DAYS}
     # The measurement behind the fitness trend, so the change reads as VO2 max, not just points
     now_v = next((p.get("vo2") for p in fitness.get("components", []) if p["id"] == "vo2max"), None)
     old_v = next((p.get("vo2") for p in old_fit.get("components", []) if p["id"] == "vo2max"), None)
     if fitness.get("trend") and now_v and old_v:
-        fitness["trend"]["detail"] = f"Garmin VO₂ estimate {old_v:.1f} → {now_v:.1f}"
+        fitness["trend"]["detail"] = f"{vo2_maker(conn, today)} VO₂ estimate {old_v:.1f} → {now_v:.1f}"
         if now_v < old_v:
             fitness["trend"]["note"] = ("A device estimate trend, not a measured decline: heat, hills, fatigue or easy weeks can "
-                                        "lower Garmin's estimate for a while.")
+                                        "lower the watch's estimate for a while.")
     if fitness.get("status") != "unavailable":
         from . import progress
         fitness["progress"] = progress.build(conn, source, today)

@@ -59,7 +59,8 @@ METRIC_UNITS: dict[str, str] = {
     "garmin_training_readiness": "garmin_score_0_100",
     "garmin_vo2max_running": "ml/kg/min",
     "garmin_sleep_score": "garmin_score_0_100",
-    "samsung_vo2max_running": "ml/kg/min",  # Samsung's estimate from a run; its own formula, so never mixed with Garmin's
+    "samsung_vo2max_running": "ml/kg/min",
+    "samsung_sleep_score": "samsung_score_0_100",  # Samsung's estimate from a run; its own formula, so never mixed with Garmin's
 }
 
 # Values Garmin computes itself. Shown under their own names; never fed into our recommendation rules.

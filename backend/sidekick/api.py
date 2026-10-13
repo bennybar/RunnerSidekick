@@ -573,13 +573,17 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/fitness")
     def fitness(conn=Depends(db)):
-        """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace."""
+        """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace. With the Samsung
+        watch, its VO2 max series instead, and none of Garmin's (they'd only be its last numbers before the switch)."""
         d = today(conn)
-        vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, "garmin_vo2max_running", d.isoformat()).items())
+        on_samsung = samsung.watch_on(conn, d.isoformat()) == samsung.SAMSUNG
+        vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, "samsung_vo2max_running" if on_samsung
+                                                                     else "garmin_vo2max_running", d.isoformat()).items())
                if k >= (d - timedelta(days=120)).isoformat()]
         report = rp.build_insights(conn, cfg.source, d, synthetic)
         easy = next((i for i in report["insights"] if i["id"] == "easy_pace"), None)
-        return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2, "records": rp.records(conn, cfg.source),
+        return {"garmin": None if on_samsung else rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2,
+                "vo2_maker": "Samsung" if on_samsung else "Garmin", "records": rp.records(conn, cfg.source),
                 "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
     summary_inflight: set[tuple] = set()
@@ -865,8 +869,12 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 raise HTTPException(422, f"{k} is not a real date")
         for k, v in body.model_dump(exclude_unset=True).items():
             if k == "watch":
-                if v is not None:
-                    samsung.switch(conn, v, today(conn))
+                if v is not None:  # data already imported is filed again by the new history, and its reports rebuilt
+                    moved = samsung.switch(conn, cfg.source, v, today(conn))
+                    if moved:
+                        runs = [r["source_id"] for r in many(conn.activity, {"source": cfg.source, "local_date": {"$in": sorted(moved)}})]
+                        with report_lock(conn):
+                            rp.regenerate(conn, cfg.source, synthetic, moved, runs, today(conn))
                 continue
             if v is None:
                 # An explicit null clears an optional setting; it never clears required ones
@@ -884,7 +892,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
-                  "all": ["raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["samsung_hr", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override"]}[scope]
         for t in tables:
             conn[t].delete_many({})

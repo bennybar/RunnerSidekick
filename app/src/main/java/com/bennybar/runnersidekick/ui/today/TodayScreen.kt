@@ -138,7 +138,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     val wait = com.bennybar.runnersidekick.ui.components.syncWait(status?.value?.syncNextAllowedAt)
                     androidx.compose.material3.TextButton(onClick = vm::syncNow, enabled = !busy && wait == null) {
                         Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                        Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: "Sync Garmin")
+                        Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: if (status?.value?.watch == "samsung") "Sync watch" else "Sync Garmin")
                     }
                 },
                 scrollBehavior = scroll,
@@ -340,7 +340,9 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
 @Composable
 private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
                      onTap: (Finding) -> Unit) {
-    val vo2 = fitness?.garmin?.vo2max
+    // Garmin's current VO2 max; with the Samsung watch, its latest estimate
+    val vo2 = fitness?.garmin?.vo2max?.value ?: fitness?.vo2maxSeries?.lastOrNull()?.value
+    val maker = fitness?.vo2Maker ?: "Garmin"
     // null marks the VO2 max tile's slot, right after the overnight readings
     val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -350,19 +352,19 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { f ->
                     if (f == null) {
-                        // Garmin's VO2 max (one decimal, as Garmin shows it), with the change over about four weeks
+                        // The watch's VO2 max (one decimal, as the watch shows it), with the change over about four weeks
                         val series = fitness!!.vo2maxSeries
                         val old = series.lastOrNull { java.time.LocalDate.parse(it.date) <= java.time.LocalDate.parse(r.localDate).minusDays(28) }
-                        val ch = old?.let { vo2!!.value - it.value }
-                        MetricTile(label = "VO₂ max", value = "%.1f".format(vo2!!.value), unit = null,
-                            status = ch?.let { if (kotlin.math.abs(it) < 0.05) "Same as 4 weeks ago" else "%+.1f in 4 weeks".format(it) } ?: "Garmin",
+                        val ch = old?.let { vo2!! - it.value }
+                        MetricTile(label = "VO₂ max", value = "%.1f".format(vo2!!), unit = null,
+                            status = ch?.let { if (kotlin.math.abs(it) < 0.05) "Same as 4 weeks ago" else "%+.1f in 4 weeks".format(it) } ?: maker,
                             statusIcon = ch?.let { if (it > 0.05) Icons.AutoMirrored.Outlined.TrendingUp else if (it < -0.05) Icons.AutoMirrored.Outlined.TrendingDown
                                 else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false,
-                            modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, Garmin".format(vo2.value) },
+                            modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, %s".format(vo2, maker) },
                             onClick = onOpenFitness,
                             chart = if (series.size >= 2) {
                                 { Sparkline(series.takeLast(14).map { it.value }, Modifier.fillMaxWidth().height(32.dp),
-                                    color = MaterialTheme.colorScheme.primary, description = "VO2 max, recent Garmin readings") }
+                                    color = MaterialTheme.colorScheme.primary, description = "VO2 max, recent $maker readings") }
                             } else null)
                         return@forEach
                     }
@@ -409,10 +411,11 @@ private fun BriefingSheet(r: MorningReport, onDismiss: () -> Unit, onFinding: (F
         Text("Full briefing", style = MaterialTheme.typography.headlineSmall)
         Group(title = "Findings") { r.findings.forEach { f -> row(f.title, supporting = f.statement, onClick = { onFinding(f) }) } }
         if (r.garminContext.isNotEmpty()) {
-            Group(title = "From Garmin") {
+            val origins = r.garminContext.map { it.origin }.distinct()
+            Group(title = "From " + (origins.singleOrNull() ?: "your watches")) {
                 r.garminContext.forEach { g -> row(garminName(g.metric), supporting = "${g.value.roundToInt()}" + (g.label?.let { " · $it" } ?: "")) }
             }
-            Text("Garmin's own scores, shown for context. They don't feed the suggestion, which avoids counting sleep and HRV twice.",
+            Text("The watch's own scores, shown for context. They don't feed the suggestion, which avoids counting sleep and HRV twice.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         HorizontalDivider()
@@ -424,7 +427,7 @@ private fun BriefingSheet(r: MorningReport, onDismiss: () -> Unit, onFinding: (F
 
 private fun garminName(metric: String) = when (metric) {
     "garmin_training_readiness" -> "Training readiness"
-    "garmin_sleep_score" -> "Sleep score"
+    "garmin_sleep_score", "samsung_sleep_score" -> "Sleep score"
     "body_battery_high" -> "Body Battery high"
     "body_battery_low" -> "Body Battery low"
     "avg_stress" -> "Average stress"

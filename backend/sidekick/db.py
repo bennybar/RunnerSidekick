@@ -44,6 +44,7 @@ USER_INDEXES = {
     "section_summary": [(("id",), U), (("kind", "local_date", "input_hash"), N)],
     "run_ai": [(("id",), U), (("source_id", "input_hash"), N)],
     "run_weather": [(("source_id",), U)],
+    "samsung_hr": [(("t",), U)],  # the Samsung watch's all-day heart-rate readings, for resting heart rate
 }
 APP_INDEXES = {
     "users": [(("id",), U)],

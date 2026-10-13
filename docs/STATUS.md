@@ -332,6 +332,23 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Samsung review fixes, wording (2026-10-13, v0.55.0)
+- Moving time and distance from the actual time between samples (gap: 10 s or 3× the watch's spacing), so a watch that
+  samples every 5 s isn't cut to a fifth; a workout without a log keeps its session duration.
+- All-day heart rate kept per reading (`samsung_hr`, by time, with its own UTC offset); resting HR worked out again from
+  everything stored for each day touched, so upload parts and retries give the same value. It needs 4 h measured
+  (gaps count up to 15 min) and 1 h between midnight and 6 am; shown as "Resting heart rate (Sidekick's estimate)".
+- Sleep totals from every Samsung night stored for the day; Samsung's sleep score kept (`samsung_sleep_score`) and
+  shown with the watch's own scores on Today ("From Samsung").
+- Switching watches files already-imported data again (`reconcile`): Samsung records out of the analysis on Garmin
+  days and in on Samsung days, Garmin runs set aside come back; reports for those days rebuilt.
+- The fitness score and VO2 progress use the current watch's VO2 max (Samsung's on Samsung days), and never trend
+  across a switch. /v1/fitness gives Samsung's series (and none of Garmin's stale snapshot) on Samsung.
+- App: each part of a multi-part workout keeps its own type; workouts, routes, heart rate and sleep each work with
+  their own permission. Runs without Garmin's Training Effect show the app's training load; the power:HR tile only
+  with power. Wording that named Garmin for data from either watch now follows the watch.
+- HRV from Samsung: skipped for now (only via a watch app with the Sensor SDK).
+
 ## Galaxy Watch connector (2026-10-13, v0.54.0)
 - Server fixes after the first real upload (same day, no new app): 1 km splits built from the samples (Samsung keeps
   no laps); Samsung's per-run VO2 max kept as `samsung_vo2max_running`, shown on Samsung runs and as "Samsung's VO₂ max"
