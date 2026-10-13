@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from pymongo.database import Database
 
-from .connectors.base import Activity, DayBundle, Observation, RawPayload, Samples, SleepSession, valid_hr
+from .connectors.base import Activity, DayBundle, Lap, Observation, RawPayload, Samples, SleepSession, valid_hr
 from .db import get_setting, many, set_setting
 from .routes import shape_from_track
 from .store import save_activity, save_day
@@ -29,6 +29,7 @@ RHR_WINDOW_S = 30 * 60       # resting heart rate: the lowest 30-minute average 
 RHR_MIN_READINGS = 24        # ...from at least 24 readings (4 hours at Samsung's default of one every 10 minutes)
 NAP_MAX_S = 3 * 3600
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
+CONVERSION = 2  # raised when the way a run is converted changes, so runs sent again are converted again
 
 
 # ---------------------------------------------------------------- which watch counts for a day
@@ -114,6 +115,25 @@ def activity(a: dict) -> Activity:
         power = [by_s[s][3] for s in secs]
         samples = Samples(t=[float(s) for s in secs], hr=valid_hr([by_s[s][0] for s in secs]), speed=[by_s[s][1] for s in secs],
                           dist=dist, elev=elev, cad=[by_s[s][2] for s in secs], power=power if any(p is not None for p in power) else None)
+    # Samsung keeps no laps: 1 km splits from the samples, like Garmin's automatic laps (the last one is what's left)
+    laps: list[Lap] = []
+    if samples:
+        s, first = samples, 0
+        for i in range(1, len(s.t)):
+            if s.dist[i] < (len(laps) + 1) * 1000 and i < len(s.t) - 1:
+                continue
+            seg = range(first + 1, i + 1)
+            hr = [s.hr[j] for j in seg if s.hr[j] is not None]
+            cad = [s.cad[j] for j in seg if s.cad[j] is not None]
+            el = [s.elev[j] for j in range(first, i + 1, 10) if s.elev[j] is not None]  # every 10 s: GPS altitude is noisy
+            laps.append(Lap(idx=len(laps), start_utc=_iso(start + timedelta(seconds=s.t[first])),
+                            distance_m=round(s.dist[i] - s.dist[first], 1), elapsed_s=s.t[i] - s.t[first],
+                            moving_s=float(sum(min(s.t[j] - s.t[j - 1], 5) for j in seg if (s.speed[j] or 0) >= 0.5)),
+                            avg_hr=round(sum(hr) / len(hr), 1) if hr else None, max_hr=max(hr) if hr else None,
+                            elevation_gain_m=round(sum(max(0.0, b - a) for a, b in zip(el, el[1:])), 1) if len(el) > 1 else None,
+                            avg_cadence_spm=round(sum(cad) / len(cad), 1) if cad else None))
+            first = i
+        laps = [l for l in laps if l.distance_m and l.distance_m > 0]
     if len(route) >= 10:
         along, run = [0.0], 0.0
         for p, q in zip(route, route[1:]):
@@ -132,7 +152,7 @@ def activity(a: dict) -> Activity:
         moving_s=float(moving) if moving else None, timer_s=_num(a.get("duration_s")),
         avg_hr=_num(a.get("avg_hr")), max_hr=_num(a.get("max_hr")), elevation_gain_m=_num(a.get("climb_m")),
         elevation_loss_m=_num(a.get("descent_m")), avg_cadence_spm=_num(a.get("avg_cadence")),
-        device_id=a.get("device") or None, manufacturer="Samsung", samples=samples, shape=shape,
+        device_id=a.get("device") or None, manufacturer="Samsung", laps=laps, samples=samples, shape=shape,
         raw=[RawPayload("activity_summary", sid, summary)])
 
 
@@ -184,7 +204,7 @@ def resting_hr(readings: list[list], offset_s: int | None) -> dict[str, float]:
 # ---------------------------------------------------------------- storing
 
 def _hash(a: dict) -> str:
-    return hashlib.sha256(json.dumps(a, sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([CONVERSION, a], sort_keys=True, default=str).encode()).hexdigest()
 
 
 def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]]:
@@ -208,6 +228,12 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
         if prev and prev.get("content_hash") == h:
             continue
         save_activity(conn, source, act, h)
+        if act.sport != "other" and _num(a.get("vo2max")):  # Samsung's VO2 max estimate from this run
+            v = Observation(act.local_date, "samsung_vo2max_running", round(_num(a["vo2max"]), 1), method="samsung_run",
+                            source_record_id=act.source_id)
+            changed = save_day(conn, source, DayBundle(local_date=act.local_date, observations=[v]))
+            if mine:
+                changed_dates |= changed
         if mine:
             changed_runs.append(act.source_id)
             changed_dates.add(act.local_date)

@@ -122,3 +122,15 @@ def test_upload_through_the_api(tmp_path):
         if not client.get("/v1/status", headers=h).json()["sync_running"]:
             break
         time.sleep(0.05)
+
+
+def test_km_splits_from_the_samples_and_samsungs_vo2_kept_apart():
+    a = samsung.activity(run(ANCHOR, seconds=1000, speed=3.0))  # 3 km
+    assert len(a.laps) == 3 and all(abs(l.distance_m - 1000) <= 5 for l in a.laps)
+    assert abs(a.laps[0].elapsed_s - 333) <= 2 and a.laps[0].avg_hr and a.laps[0].avg_cadence_spm == 164
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": ANCHOR.isoformat()}])
+    samsung.ingest(conn, "garmin", {"activities": [{**run(ANCHOR, "v"), "vo2max": 55.4}]})
+    assert conn.daily_observation.find_one({"metric": "samsung_vo2max_running"})["value"] == 55.4
+    assert conn.daily_observation.find_one({"metric": "garmin_vo2max_running"}) is None
+    assert conn.activity_lap.count_documents({}) == 2  # 1.8 km: one full km and what's left

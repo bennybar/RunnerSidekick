@@ -543,7 +543,9 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                 "limitations": ["Garmin zones; wrist heart rate can read high early in a run."],
                 "algorithm_version": rn.RUNNING_VERSION, "derived": True,
             })
-    vo2_series = series(conn, source, "garmin_vo2max_running", a["local_date"])
+    # The watch's own VO2 max estimate: Samsung's on a Samsung run, Garmin's otherwise (never mixed: different formulas)
+    vo2_series = series(conn, source, "samsung_vo2max_running" if a.get("manufacturer") == "Samsung" else "garmin_vo2max_running",
+                        a["local_date"])
     recent_vo2 = [k for k in vo2_series if k >= (d - timedelta(days=7)).isoformat()]
     vo2_day = {"value": vo2_series[max(recent_vo2)], "date": max(recent_vo2)} if recent_vo2 else None
     # Garmin's training readiness on the morning of the run (that day only)

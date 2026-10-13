@@ -308,6 +308,16 @@ def build(conn, source: str, today: date) -> dict:
     out["garmin"] = ({"id": "garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
                       "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
                      if gv else {"id": "garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
+    # With the Samsung watch, this place is Samsung's estimate instead (its own formula, so not Garmin's series)
+    from .samsung import SAMSUNG, watch_on
+    from .scores import VO2_MAX_AGE_DAYS
+    if watch_on(conn, today.isoformat()) == SAMSUNG:
+        sv = [(k, v) for k, v in rp.series(conn, source, "samsung_vo2max_running", today.isoformat()).items()
+              if k >= (today - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()]
+        out["garmin"] = ({"id": "garmin", "title": "Samsung's VO₂ max", "status": "ok", "value": round(max(sv)[1]), "date": max(sv)[0],
+                          "headline": f"as of {max(sv)[0]}", "detail": "Samsung's estimate from your runs with the watch."}
+                         if sv else {"id": "garmin", "title": "Samsung's VO₂ max", "status": "unavailable",
+                                     "headline": "After a run with the Samsung watch"})
 
     # Each VO2 max estimate placed among people of your sex and age (performance isn't: a different quantity)
     if p.get("sex") and p.get("age"):
