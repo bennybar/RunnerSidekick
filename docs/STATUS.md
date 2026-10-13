@@ -332,6 +332,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Last night (2026-10-13, v0.56.0)
+- The app also reads the Samsung watch's skin temperature and blood oxygen (each its own permission; picking Samsung
+  again in Your watch asks for what wasn't allowed) and uploads them with heart rate (`samsung_skin`, `samsung_spo2`).
+- Each night (non-nap Samsung sleep for a wake date): how much was measured (heart-rate readings, gaps up to 15 min),
+  sleeping heart rate (average, lowest 30 minutes), skin temperature (average) and blood oxygen (average, lowest), from
+  at least 3 readings; observations `night_*`, method `samsung_night`.
+- Today's "Last night" card (`overnight` in the morning report, report-2.8): each value against the previous 14 nights
+  once there are 5 (sleeping HR and skin temperature as a difference from the median, blood oxygen as the 25th–75th
+  percentile range), plus coverage. Context only: nothing feeds readiness or the suggestion.
+
 ## Samsung review fixes, wording (2026-10-13, v0.55.0)
 - Moving time and distance from the actual time between samples (gap: 10 s or 3× the watch's spacing), so a watch that
   samples every 5 s isn't cut to a fifth; a workout without a log keeps its session duration.

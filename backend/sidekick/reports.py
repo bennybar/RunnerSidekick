@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from datetime import date, timedelta
-from statistics import median, pstdev
+from statistics import median, pstdev, quantiles
 
 from pymongo.errors import DuplicateKeyError
 
@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.7"  # 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.8"  # 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -259,6 +259,38 @@ def load_finding(conn, source: str, d: date) -> dict | None:
     }
 
 
+NIGHT_USUAL_DAYS = 14   # last night against the nights of the two weeks before it
+NIGHT_USUAL_MIN = 5     # ...once there are at least 5 of them
+
+
+def overnight(conn, source: str, d: date, obs: dict) -> dict | None:
+    """Last night with the Samsung watch, for context next to the briefing (in no score): how much of it was measured,
+    sleeping heart rate, skin temperature and blood oxygen, each against your own previous nights."""
+    val = lambda m: obs[m]["value"] if m in obs and obs[m]["state"] == "measured" else None  # noqa: E731
+    if val("night_measured_s") is None:
+        return None
+    since = (d - timedelta(days=NIGHT_USUAL_DAYS)).isoformat()
+
+    def before(metric: str) -> list[float]:
+        return sorted(v for k, v in series(conn, source, metric, (d - timedelta(days=1)).isoformat()).items() if k >= since)
+    out = {"measured_s": val("night_measured_s"), "asleep_s": val("sleep_duration")}
+    if val("night_hr_avg") is not None:
+        prior = before("night_hr_low")
+        low = val("night_hr_low")
+        out["sleep_hr"] = {"avg": val("night_hr_avg"), "low": low, "nights": len(prior),
+                           "delta": round(low - median(prior), 1) if len(prior) >= NIGHT_USUAL_MIN and low is not None else None}
+    if val("night_skin_temp") is not None:
+        prior = before("night_skin_temp")
+        out["skin_temp"] = {"value": val("night_skin_temp"), "nights": len(prior),
+                            "delta": round(val("night_skin_temp") - median(prior), 2) if len(prior) >= NIGHT_USUAL_MIN else None}
+    if val("night_spo2_avg") is not None:
+        prior = before("night_spo2_avg")
+        q = quantiles(prior, n=4) if len(prior) >= NIGHT_USUAL_MIN else None
+        out["spo2"] = {"avg": val("night_spo2_avg"), "min": val("night_spo2_min"), "nights": len(prior),
+                       "usual": [round(q[0], 1), round(q[2], 1)] if q else None}
+    return out
+
+
 def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     ds = d.isoformat()
     obs = day_obs(conn, source, ds)
@@ -310,6 +342,7 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
         "provisional": completeness["sleep_duration"] != "measured",
         "headline": headline(rec, findings, checkin), "recommendation": rec,
         "top_finding_ids": [f["id"] for f in top], "findings": findings, "garmin_context": garmin_ctx,
+        "overnight": overnight(conn, source, d, obs),
         "completeness": completeness, "checkin": checkin, "recent_run": recent_run, "narrative": None,
     }
     inputs = {"findings": [{k: f.get(k) for k in ("id", "observed", "comparison", "status", "last")} for f in findings],

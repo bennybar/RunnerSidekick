@@ -32,6 +32,7 @@ RHR_MIN_WORN_S = 4 * 3600    # ...on a day the watch measured for at least 4 hou
 RHR_NIGHT_WORN_S = 3600      # ...an hour of it between midnight and 6 am: worn overnight, so the lowest is a resting value
 WORN_GAP_S = 15 * 60         # time between two readings counts as worn up to 15 minutes (Samsung's default is every 10)
 NAP_MAX_S = 3 * 3600
+NIGHT_MIN_READINGS = 3       # a night's skin temperature or blood oxygen needs at least 3 readings inside it
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
 CONVERSION = 3  # raised when the way a run is converted changes, so runs sent again are converted again
 
@@ -100,6 +101,10 @@ def _iso(t: datetime) -> str:
 
 def _local_date(ms: float, offset_s: int | None) -> str:
     return (_utc(ms) + timedelta(seconds=offset_s or 0)).date().isoformat()
+
+
+def _ms(iso: str) -> int:
+    return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
 
 
 def _haversine(a, b) -> float:
@@ -223,18 +228,61 @@ def resting_hr(readings: list[tuple[float, float, int]]) -> dict[str, float]:
         night = sum(w for w, a in zip(worn, rs) if (_utc(a[0] * 1000) + timedelta(seconds=a[2] or 0)).hour < 6)
         if sum(worn) < RHR_MIN_WORN_S or night < RHR_NIGHT_WORN_S:
             continue
-        best, j, total = None, 0, 0.0
-        for i, (t0, _, _) in enumerate(rs):  # a sliding window: rs[i..j) are the readings within 30 minutes of rs[i]
-            while j < len(rs) and rs[j][0] - t0 < RHR_WINDOW_S:
-                total += rs[j][1]
-                j += 1
-            n = j - i
-            if n >= 3 and rs[j - 1][0] - t0 >= RHR_WINDOW_S / 2:  # at least 3 readings spread over 15 minutes or more
-                best = total / n if best is None else min(best, total / n)
-            total -= rs[i][1]
+        best = lowest_30min([(ts, b) for ts, b, _ in rs])
         if best is not None:
             out[d] = round(best, 1)
     return out
+
+
+def lowest_30min(rs: list[tuple[float, float]]) -> float | None:
+    """The lowest average over any 30 minutes of (seconds, bpm) readings in time order, from at least 3 readings spread
+    over 15 minutes or more."""
+    best, j, total = None, 0, 0.0
+    for i, (t0, _) in enumerate(rs):  # a sliding window: rs[i..j) are the readings within 30 minutes of rs[i]
+        while j < len(rs) and rs[j][0] - t0 < RHR_WINDOW_S:
+            total += rs[j][1]
+            j += 1
+        n = j - i
+        if n >= 3 and rs[j - 1][0] - t0 >= RHR_WINDOW_S / 2:
+            best = total / n if best is None else min(best, total / n)
+        total -= rs[i][1]
+    return best
+
+
+def nights(conn: Database, stream: str, wake_dates: set[str]) -> set[str]:
+    """Each night's readings from the Samsung watch, as the day's observations (context only, in no score): sleeping
+    heart rate (average and lowest 30 minutes), skin temperature, blood oxygen (average and lowest), and how much of
+    the time asleep the watch measured (heart-rate readings, gaps counted up to 15 minutes). Returns changed dates."""
+    changed: set[str] = set()
+    for d in sorted(wake_dates):
+        mine = watch_on(conn, d) == SAMSUNG
+        source = stream if mine else SAMSUNG
+        spans = [(_ms(n["start_utc"]), _ms(n["end_utc"])) for n in conn.sleep_session.find(
+            {"source": source, "wake_date": d, "is_nap": False, "source_id": {"$regex": "^samsung-"}})]
+        if not spans:
+            continue
+
+        def inside(coll) -> list[tuple[float, float]]:
+            q = {"$or": [{"t": {"$gte": a, "$lte": b}} for a, b in spans]}
+            return sorted((r["t"] / 1000, r["v"] if "v" in r else r["bpm"]) for r in coll.find(q, {"_id": 0}))
+        hr, skin, spo2 = inside(conn.samsung_hr), inside(conn.samsung_skin), inside(conn.samsung_spo2)
+        asleep = sum(b - a for a, b in spans) / 1000
+        measured = sum(min(b[0] - a[0], WORN_GAP_S) for a, b in zip(hr, hr[1:]))
+        obs = [Observation(d, "night_measured_s", round(min(measured, asleep)), method="samsung_night")]
+        if len(hr) >= NIGHT_MIN_READINGS:
+            obs.append(Observation(d, "night_hr_avg", round(sum(b for _, b in hr) / len(hr), 1), method="samsung_night"))
+            low = lowest_30min(hr)
+            if low is not None:
+                obs.append(Observation(d, "night_hr_low", round(low, 1), method="samsung_night"))
+        if len(skin) >= NIGHT_MIN_READINGS:
+            obs.append(Observation(d, "night_skin_temp", round(sum(v for _, v in skin) / len(skin), 2), method="samsung_night"))
+        if len(spo2) >= NIGHT_MIN_READINGS:
+            obs.append(Observation(d, "night_spo2_avg", round(sum(v for _, v in spo2) / len(spo2), 1), method="samsung_night"))
+            obs.append(Observation(d, "night_spo2_min", round(min(v for _, v in spo2), 1), method="samsung_night"))
+        got = save_day(conn, source, DayBundle(local_date=d, observations=obs))
+        if mine:
+            changed |= got
+    return changed
 
 
 # ---------------------------------------------------------------- storing
@@ -273,15 +321,17 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
         if mine:
             changed_runs.append(act.source_id)
             changed_dates.add(act.local_date)
+    night_dates: set[str] = set()
     # Sleep: each night stored, then the day's totals from every night stored for it (an upload in parts can't shorten it)
     for s in body.get("sleep") or []:
         ss = sleep(s)
+        night_dates.add(ss.wake_date)
         mine = watch_on(conn, ss.wake_date) == SAMSUNG
         source = stream if mine else SAMSUNG
         save_day(conn, source, DayBundle(local_date=ss.wake_date, sleep=[ss]))
-        nights = list(conn.sleep_session.find({"source": source, "wake_date": ss.wake_date, "is_nap": False,
+        stored = list(conn.sleep_session.find({"source": source, "wake_date": ss.wake_date, "is_nap": False,
                                                 "source_id": {"$regex": "^samsung-"}}))
-        obs = [Observation(ss.wake_date, "sleep_duration", float(sum(n["duration_s"] or 0 for n in nights)), method="samsung_sleep_stages")]
+        obs = [Observation(ss.wake_date, "sleep_duration", float(sum(n["duration_s"] or 0 for n in stored)), method="samsung_sleep_stages")]
         score = _num(s.get("score"))
         if score is not None and not ss.is_nap:
             obs.append(Observation(ss.wake_date, "samsung_sleep_score", score, method="samsung_sleep_score"))
@@ -290,11 +340,21 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
             changed_dates |= changed
     # All-day heart rate: every reading kept (by its time, so sending one twice changes nothing), then each day it touches
     # worked out again from all the readings stored for it, whatever parts they arrived in
-    rs = [(int(r[0]), float(r[1]), int(r[2]) if len(r) > 2 and r[2] is not None else body.get("offset_s") or 0)
-          for r in body.get("heart_rate") or [] if len(r) > 1 and _num(r[0]) is not None and _num(r[1]) is not None]
+    from pymongo import UpdateOne
+
+    def readings(key: str) -> list[tuple[int, float, int]]:
+        return [(int(r[0]), float(r[1]), int(r[2]) if len(r) > 2 and r[2] is not None else body.get("offset_s") or 0)
+                for r in body.get(key) or [] if len(r) > 1 and _num(r[0]) is not None and _num(r[1]) is not None]
+    # Overnight skin temperature and blood oxygen: kept per reading like heart rate; a night's values are worked out below
+    for key, coll in (("skin_temp", conn.samsung_skin), ("spo2", conn.samsung_spo2)):
+        got = readings(key)
+        if got:
+            coll.bulk_write([UpdateOne({"t": t}, {"$set": {"t": t, "v": v, "off": o}}, upsert=True) for t, v, o in got], ordered=False)
+            night_dates |= {_local_date(t, o) for t, _, o in got} | {_local_date(t + 86_400_000, o) for t, _, o in got}
+    rs = readings("heart_rate")
     if rs:
-        from pymongo import UpdateOne
         conn.samsung_hr.bulk_write([UpdateOne({"t": t}, {"$set": {"t": t, "bpm": b, "off": o}}, upsert=True) for t, b, o in rs], ordered=False)
+        night_dates |= {_local_date(t, o) for t, _, o in rs} | {_local_date(t + 86_400_000, o) for t, _, o in rs}
         touched = {_local_date(t, o) for t, _, o in rs}
         lo, hi = min(t for t, _, _ in rs) - 2 * 86_400_000, max(t for t, _, _ in rs) + 2 * 86_400_000
         stored = [(r["t"], r["bpm"], r["off"]) for r in conn.samsung_hr.find({"t": {"$gte": lo, "$lte": hi}}, {"_id": 0})]
@@ -305,6 +365,7 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
                 changed = save_day(conn, stream if mine else SAMSUNG, DayBundle(local_date=d, observations=[obs]))
                 if mine:
                     changed_dates |= changed
+    changed_dates |= nights(conn, stream, night_dates)
     return changed_dates, changed_runs
 
 

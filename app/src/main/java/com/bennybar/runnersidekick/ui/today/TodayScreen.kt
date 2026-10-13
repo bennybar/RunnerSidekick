@@ -194,6 +194,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 animatedItem(key = "readings") {
                     Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }) { evidence = it }
                 }
+                report.overnight?.let { n -> animatedItem(key = "night") { LastNight(n) } }
                 report.recentRun?.let { run -> animatedItem(key = "lastrun") { LastRunCard(run, units) { onOpenRun(run.sourceId) } } }
             }
         }
@@ -792,6 +793,41 @@ private fun FocusLine(state: com.bennybar.runnersidekick.data.remote.FocusState,
                     Text(statusLabel(it.status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
+        }
+    }
+}
+
+/** Last night with the Samsung watch: how much was measured, sleeping heart rate, skin temperature and blood oxygen,
+ *  each against your own previous nights. Context next to the briefing; none of it feeds the suggestion. */
+@Composable
+private fun LastNight(n: com.bennybar.runnersidekick.data.remote.Overnight) {
+    val cs = MaterialTheme.colorScheme
+    val learning = "your usual comes after 5 nights"
+    val lines = listOfNotNull(
+        n.sleepHr?.let { h ->
+            "Sleeping heart rate ${h.low?.roundToInt() ?: h.avg.roundToInt()} bpm" + (h.delta?.let { d ->
+                if (kotlin.math.abs(d) < 1) ", as usual" else ", ${kotlin.math.abs(d).roundToInt()} ${if (d > 0) "above" else "below"} your usual"
+            } ?: " · $learning")
+        },
+        n.skinTemp?.let { s ->
+            "Skin temperature " + (s.delta?.let { d -> if (kotlin.math.abs(d) < 0.1) "as usual" else "%+.1f °C vs your usual".format(d) }
+                ?: "%.1f °C · $learning".format(s.value))
+        },
+        n.spo2?.let { o ->
+            "Blood oxygen ${o.avg.roundToInt()}%" + (o.min?.let { " (lowest ${it.roundToInt()}%)" } ?: "") +
+                (o.usual?.let { u -> " · usual ${u[0].roundToInt()}–${u[1].roundToInt()}%" } ?: "")
+        },
+    )
+    val covered = n.asleepS?.takeIf { it > 0 }?.let { (n.measuredS / it).coerceAtMost(1.0) }
+    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Last night", style = MaterialTheme.typography.titleMedium)
+            lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            Text(
+                (covered?.let { c -> if (c >= 0.9) "Measured through the night" else "Measured ${Format.duration(n.measuredS)} of ${Format.duration(n.asleepS)} asleep, so read it loosely" }
+                    ?: "Measured ${Format.duration(n.measuredS)}") +
+                    ". From your Samsung watch; context only, not part of the suggestion. Skin temperature isn't body temperature.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }

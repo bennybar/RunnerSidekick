@@ -127,7 +127,9 @@ class SamsungUploadIn(BaseModel):
     """What the app read from Samsung Health (see samsung.py for the shapes). Bounded: the app sends a few runs at a time."""
     activities: list[dict] = Field(default_factory=list, max_length=20)
     sleep: list[dict] = Field(default_factory=list, max_length=400)
-    heart_rate: list[list] = Field(default_factory=list, max_length=200_000)  # [ms, bpm]
+    heart_rate: list[list] = Field(default_factory=list, max_length=200_000)  # [ms, bpm, UTC offset s]
+    skin_temp: list[list] = Field(default_factory=list, max_length=200_000)   # [ms, °C, UTC offset s]
+    spo2: list[list] = Field(default_factory=list, max_length=200_000)        # [ms, %, UTC offset s]
     offset_s: int | None = Field(default=None, ge=-14 * 3600, le=14 * 3600)    # the phone's UTC offset, for the heart-rate days
 
 
@@ -892,7 +894,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
-                  "all": ["samsung_hr", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override"]}[scope]
         for t in tables:
             conn[t].delete_many({})

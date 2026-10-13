@@ -60,7 +60,14 @@ METRIC_UNITS: dict[str, str] = {
     "garmin_vo2max_running": "ml/kg/min",
     "garmin_sleep_score": "garmin_score_0_100",
     "samsung_vo2max_running": "ml/kg/min",
-    "samsung_sleep_score": "samsung_score_0_100",  # Samsung's estimate from a run; its own formula, so never mixed with Garmin's
+    "samsung_sleep_score": "samsung_score_0_100",
+    # A night with the Samsung watch (context on Today, in no score)
+    "night_measured_s": "s",
+    "night_hr_avg": "bpm",
+    "night_hr_low": "bpm",
+    "night_skin_temp": "°C",
+    "night_spo2_avg": "%",
+    "night_spo2_min": "%",  # Samsung's estimate from a run; its own formula, so never mixed with Garmin's
 }
 
 # Values Garmin computes itself. Shown under their own names; never fed into our recommendation rules.

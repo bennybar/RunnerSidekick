@@ -475,6 +475,12 @@ class Repository(
                     put("heart_rate", kotlinx.serialization.json.JsonArray(rs)); put("offset_s", kotlinx.serialization.json.JsonPrimitive(offset))
                 })
             }
+            // Overnight skin temperature and blood oxygen, for "Last night" on Today (context, in no score)
+            val recent = maxOf(since, now.minus(java.time.Duration.ofDays(60)))
+            for ((key, rows) in listOf("skin_temp" to (if (ok.skinTemp) sh.skinTemperature(recent, now) else emptyList()),
+                                       "spo2" to (if (ok.spo2) sh.bloodOxygen(recent, now) else emptyList()))) {
+                rows.chunked(20_000).forEach { rs -> send(kotlinx.serialization.json.buildJsonObject { put(key, kotlinx.serialization.json.JsonArray(rs)) }) }
+            }
             settings.setSamsungUploadedAt(now)
             samsungProblem.value = ok.missing.takeIf { it.isNotEmpty() }?.let { "Not allowed in Samsung Health: ${it.joinToString()}" }
         } catch (e: ApiException) {

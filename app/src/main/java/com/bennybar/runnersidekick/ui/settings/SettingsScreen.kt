@@ -153,6 +153,13 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 
     val samsungProblem = repo.samsungProblem
 
+    /** Samsung Health's permission screen again (for what wasn't allowed before), then a refresh that reads it. */
+    fun askSamsung(activity: android.app.Activity?) = launchIo {
+        val sh = repo.samsung ?: return@launchIo
+        if (activity != null) sh.ask(activity)
+        repo.refreshAll()
+    }
+
     /** Makes [watch] the runner's watch from today. The Samsung one first needs Samsung Health to allow reading; the
      *  refresh after the save then sends its data (a year of history the first time). */
     fun chooseWatch(watch: String, activity: android.app.Activity?) =
@@ -429,6 +436,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                         androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().clickable {
                             watchDialog = false
                             if (id != current) vm.chooseWatch(id, activity)
+                            else if (id == "samsung") vm.askSamsung(activity)  // again: Samsung Health's permission screen
                         }.padding(vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                             androidx.compose.material3.RadioButton(selected = id == current, onClick = null)
                             Text(label, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyLarge)

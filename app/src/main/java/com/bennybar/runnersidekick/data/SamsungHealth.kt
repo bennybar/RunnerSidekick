@@ -19,23 +19,28 @@ import java.time.Instant
 
 /** Reads the Galaxy Watch's data from Samsung Health on this phone (Samsung Health Data SDK), shaped for the server's
  *  /v1/samsung upload (backend samsung.py): workouts with their per-second log and GPS route, sleep with its stages, and
- *  all-day heart rate. Read only. Samsung has no cloud API, so this is how the watch's data reaches the server. */
+ *  all-day heart rate, and overnight skin temperature and blood oxygen. Read only. Samsung has no cloud API, so this is how the watch's data reaches the server. */
 class SamsungHealth(context: Context) {
     private val store by lazy { HealthDataService.getStore(context.applicationContext) }
-    private val types = listOf(DataTypes.EXERCISE, DataTypes.EXERCISE_LOCATION, DataTypes.HEART_RATE, DataTypes.SLEEP)
+    private val types = listOf(DataTypes.EXERCISE, DataTypes.EXERCISE_LOCATION, DataTypes.HEART_RATE, DataTypes.SLEEP,
+        DataTypes.SKIN_TEMPERATURE, DataTypes.BLOOD_OXYGEN)
     private val permissions = types.map { Permission.of(it, AccessType.READ) }.toSet()
 
     /** What Samsung Health lets the app read. Each kind works on its own: without routes, runs still come (no map). */
-    data class Allowed(val workouts: Boolean, val routes: Boolean, val heartRate: Boolean, val sleep: Boolean) {
+    data class Allowed(val workouts: Boolean, val routes: Boolean, val heartRate: Boolean, val sleep: Boolean,
+                       val skinTemp: Boolean, val spo2: Boolean) {
         val missing get() = listOfNotNull("workouts".takeIf { !workouts }, "routes".takeIf { !routes },
-            "heart rate".takeIf { !heartRate }, "sleep".takeIf { !sleep })
+            "heart rate".takeIf { !heartRate }, "sleep".takeIf { !sleep }, "skin temperature".takeIf { !skinTemp },
+            "blood oxygen".takeIf { !spo2 })
     }
 
     private fun allowedOf(granted: Set<Permission>) = Allowed(
         workouts = Permission.of(DataTypes.EXERCISE, AccessType.READ) in granted,
         routes = Permission.of(DataTypes.EXERCISE_LOCATION, AccessType.READ) in granted,
         heartRate = Permission.of(DataTypes.HEART_RATE, AccessType.READ) in granted,
-        sleep = Permission.of(DataTypes.SLEEP, AccessType.READ) in granted)
+        sleep = Permission.of(DataTypes.SLEEP, AccessType.READ) in granted,
+        skinTemp = Permission.of(DataTypes.SKIN_TEMPERATURE, AccessType.READ) in granted,
+        spo2 = Permission.of(DataTypes.BLOOD_OXYGEN, AccessType.READ) in granted)
 
     suspend fun allowed(): Allowed = allowedOf(store.getGrantedPermissions(permissions))
 
@@ -116,5 +121,25 @@ class SamsungHealth(context: Context) {
                 val series = p.getValue(DataType.HeartRateType.SERIES_DATA).orEmpty()
                 if (series.isNotEmpty()) series.map { JsonArray(listOf(num(it.startTime.toEpochMilli()), num(it.heartRate), off)) }
                 else listOfNotNull(p.getValue(DataType.HeartRateType.HEART_RATE)?.let { JsonArray(listOf(num(p.startTime.toEpochMilli()), num(it), off)) })
+            }
+
+    /** Skin temperature in [from, to) as [ms, °C, UTC offset s] (the watch measures it during sleep). */
+    suspend fun skinTemperature(from: Instant, to: Instant): List<JsonArray> =
+        read { DataTypes.SKIN_TEMPERATURE.readDataRequestBuilder.setInstantTimeFilter(InstantTimeFilter.of(from, to)).setPageToken(it).build() }
+            .flatMap { p ->
+                val off = num(p.zoneOffset?.totalSeconds)
+                val series = p.getValue(DataType.SkinTemperatureType.SERIES_DATA).orEmpty()
+                if (series.isNotEmpty()) series.map { JsonArray(listOf(num(it.startTime.toEpochMilli()), num(it.skinTemperature), off)) }
+                else listOfNotNull(p.getValue(DataType.SkinTemperatureType.SKIN_TEMPERATURE)?.let { JsonArray(listOf(num(p.startTime.toEpochMilli()), num(it), off)) })
+            }
+
+    /** Blood oxygen in [from, to) as [ms, %, UTC offset s] (overnight when the watch is set to measure it in sleep). */
+    suspend fun bloodOxygen(from: Instant, to: Instant): List<JsonArray> =
+        read { DataTypes.BLOOD_OXYGEN.readDataRequestBuilder.setInstantTimeFilter(InstantTimeFilter.of(from, to)).setPageToken(it).build() }
+            .flatMap { p ->
+                val off = num(p.zoneOffset?.totalSeconds)
+                val series = p.getValue(DataType.BloodOxygenType.SERIES_DATA).orEmpty()
+                if (series.isNotEmpty()) series.map { JsonArray(listOf(num(it.startTime.toEpochMilli()), num(it.oxygenSaturation), off)) }
+                else listOfNotNull(p.getValue(DataType.BloodOxygenType.OXYGEN_SATURATION)?.let { JsonArray(listOf(num(p.startTime.toEpochMilli()), num(it), off)) })
             }
 }

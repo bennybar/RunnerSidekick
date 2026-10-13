@@ -199,3 +199,25 @@ def test_fitness_vo2_follows_the_watch_and_isnt_compared_across_a_switch():
     assert scores.vo2_on(conn, "garmin", ANCHOR, ANCHOR)[0] == 55.4
     from sidekick import progress
     assert progress.vo2_signal(conn, "garmin", ANCHOR)["direction"] is None
+
+
+def test_last_night_measured_and_compared_with_the_nights_before():
+    from sidekick import reports as rp
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    for k in range(7):  # six usual nights, then a warmer one with a higher heart rate
+        d = ANCHOR - timedelta(days=6 - k)
+        last = k == 6
+        start, end = ms(d, 0) - 3_600_000, ms(d, 6)  # 23:00 to 06:00
+        hr = [[t, 58 if last else 50, 3 * 3600] for t in range(start, end, 600_000)]
+        skin = [[t, (34.2 if last else 33.6), 3 * 3600] for t in range(start, end, 1_800_000)]
+        spo2 = [[t, 95, 3 * 3600] for t in range(start, end, 1_800_000)]
+        samsung.ingest(conn, "garmin", {"sleep": [{"uid": f"n{k}", "start": start, "end": end, "offset_s": 3 * 3600,
+                                                   "stages": [[start, end, "LIGHT"]]}],
+                                        "heart_rate": hr, "skin_temp": skin, "spo2": spo2})
+    o = rp.overnight(conn, "garmin", ANCHOR, rp.day_obs(conn, "garmin", ANCHOR.isoformat()))
+    assert o["measured_s"] >= 6.5 * 3600 and o["asleep_s"] == 7 * 3600  # readings every 10 minutes cover the night
+    assert o["sleep_hr"]["low"] == 58 and o["sleep_hr"]["delta"] == 8
+    assert o["skin_temp"]["delta"] == 0.6 and o["spo2"]["usual"] == [95.0, 95.0]
+    first = rp.overnight(conn, "garmin", ANCHOR - timedelta(days=6), rp.day_obs(conn, "garmin", (ANCHOR - timedelta(days=6)).isoformat()))
+    assert first["skin_temp"]["delta"] is None  # no usual yet: the number alone

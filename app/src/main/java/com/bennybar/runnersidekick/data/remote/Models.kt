@@ -207,6 +207,8 @@ data class MorningReport(
     @SerialName("top_finding_ids") val topFindingIds: List<String>,
     val findings: List<Finding>,
     @SerialName("garmin_context") val garminContext: List<GarminContext> = emptyList(),
+    /** Last night with the Samsung watch (context only), or null */
+    val overnight: Overnight? = null,
     val completeness: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
     val checkin: CheckinDto? = null,
     @SerialName("recent_run") val recentRun: RecentRun? = null,
@@ -920,3 +922,22 @@ data class RunAi(
     val detail: String? = null,
     val previous: RunAi? = null,
 )
+
+/** Last night with the Samsung watch, each value against your previous nights (deltas null until there are enough). */
+@Serializable
+data class Overnight(
+    @SerialName("measured_s") val measuredS: Double,
+    @SerialName("asleep_s") val asleepS: Double? = null,
+    @SerialName("sleep_hr") val sleepHr: NightHr? = null,
+    @SerialName("skin_temp") val skinTemp: NightSkin? = null,
+    val spo2: NightSpo2? = null,
+)
+
+@Serializable
+data class NightHr(val avg: Double, val low: Double? = null, val delta: Double? = null, val nights: Int = 0)
+
+@Serializable
+data class NightSkin(val value: Double, val delta: Double? = null, val nights: Int = 0)
+
+@Serializable
+data class NightSpo2(val avg: Double, val min: Double? = null, val usual: List<Double>? = null, val nights: Int = 0)
