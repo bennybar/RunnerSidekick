@@ -238,7 +238,9 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
     // The AI card comes after the header and (when there's one) the decoupling card
     LaunchedEffect(aiScroll.value) {
-        if (aiScroll.value > 0) runList.animateScrollToItem(1 + if (detail?.value?.report?.decoupling?.let { it.decouplingPct != null || it.reasons.isNotEmpty() } == true) 1 else 0)
+        val rr = detail?.value?.report
+        if (aiScroll.value > 0) runList.animateScrollToItem(1 + (if (rr?.verdict != null) 1 else 0) +
+            if (rr?.decoupling?.let { it.decouplingPct != null || it.reasons.isNotEmpty() } == true) 1 else 0)
     }
     val busy by vm.busy.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -296,6 +298,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
             } }
             LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { RunHero(r, units) }
+                r.verdict?.let { v -> item(key = "verdict") { VerdictCard(v) } }
                 // Shown also when it couldn't be measured, saying why (a short run, missing heart rate), instead of nothing
                 if (r.decoupling.decouplingPct != null || r.decoupling.reasons.isNotEmpty()) item { DecouplingCard(r.decoupling) }
                 // Shown at the top once asked for (or already written); the button lives in the top bar
@@ -663,5 +666,30 @@ private fun Bullet(text: String) {
         Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** How the run went against what it was meant to be: a verdict for training runs, the age grade for a race. */
+@Composable
+private fun VerdictCard(v: com.bennybar.runnersidekick.data.remote.RunVerdict) {
+    val cs = MaterialTheme.colorScheme
+    val (bg, fg) = when (v.verdict) {
+        "on_target" -> cs.primaryContainer to cs.onPrimaryContainer
+        "harder", "easier", "shortened" -> cs.tertiaryContainer to cs.onTertiaryContainer
+        else -> cs.surfaceContainer to cs.onSurface
+    }
+    Surface(shape = MaterialTheme.shapes.large, color = bg, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            v.ageGrade?.let { ag ->
+                Text("Age grade %.1f%%".format(ag.pct), style = MaterialTheme.typography.headlineMedium, color = fg)
+                Text(ag.gradeClass.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelLarge, color = fg.copy(alpha = 0.85f))
+            } ?: Text(v.label, style = MaterialTheme.typography.headlineSmall, color = fg)
+            Text(v.say, style = MaterialTheme.typography.bodyMedium, color = fg)
+            Text(listOfNotNull(
+                v.judgedAs?.let { k -> "Judged as ${k.replace('_', ' ')}" + (v.basis?.let { " from $it" } ?: "") },
+                if (v.verdict == "not_enough_data" && v.judgedAs == null) "Set the run type below" else null,
+                v.hrNote, v.note).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.8f))
+        }
     }
 }

@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.10"  # 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.11"  # 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -637,7 +637,11 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         "intent": intent, "classified": intent if intent and intent["source"] == "inferred" else infer_intent(conn, a),
         "narrative": None,
     }
+    from . import verdict
+    body["verdict"] = verdict.build(conn, source, body, a, laps, d)  # how it went against what it was meant to be
+    plan = one(conn.day_plan, {"local_date": a["local_date"]})
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
+              "plan": (plan or {}).get("kind"), "plan_minutes": (plan or {}).get("minutes"),
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
               "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day, "heat": heat}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))

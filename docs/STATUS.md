@@ -332,6 +332,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## How the run went (2026-10-15, v0.58.0)
+- A verdict per run, not a score (`verdict.py`, verdict-1.0, report-2.11): against the runner's intent for the run, else
+  the day's plan; never against a type inferred from the run itself (then "Not enough data"). Easy/recovery/long: at
+  least half below zone 3 and at most 10% in zones 4–5; steady: at most 30% in zones 4–5; tempo/threshold: at least
+  30% in zones 4–5, intervals 20% plus work laps within 5% of each other's pace when work and recovery laps exist;
+  progression: a faster second half, hill-adjusted; a heart-rate cap in the target ("HR <= 150"): at most 10% above;
+  shortened: under 80% of the plan's minutes. Questionable heart rate adds a caveat. Races: the age grade (USATF/Alan
+  Jones) at 5 km, 10 km, half or marathon (within 2%), elapsed time; other distances aren't graded.
+- Shown as a card under the run's header and as "How it went" in the export.
+
 ## AI back on the server, HR quality, export sources, own fitness age (2026-10-15, v0.57.0)
 - AI input on the server's key again: each new run and the latest 3 runs until each has input that worked (a failed try
   waits 6 h), at most 3 per sync, keeping 5 calls of the day in reserve; also after Samsung uploads. No free-text chat.

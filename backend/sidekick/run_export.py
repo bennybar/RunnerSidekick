@@ -229,6 +229,10 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add(f"User intent: **{INTENT_WORDS.get(said['kind'], said['kind'])}**  ")
     elif intent.get("source") == "plan":
         add(f"Planned as: **{INTENT_WORDS.get(intent['kind'], intent['kind'])}** (from the day's plan)  ")
+    vd = r.get("verdict")
+    if vd:
+        add(f"How it went: **{vd['label']}**" + (f" (judged as {vd['judged_as']}, from {vd['basis']})" if vd.get("judged_as") and vd.get("basis") else "")
+            + f" · {vd['say']}" + (f" {vd['hr_note']}" if vd.get("hr_note") else "") + "  ")
     if cl.get("kind"):
         add(f"Data-based classification: **{CLASS_WORDS.get(cl['kind'], cl['kind'])}**"
             + (" (for reference only; the runner's intent comes first)" if said else "") + "  ")

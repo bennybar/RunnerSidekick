@@ -436,6 +436,8 @@ data class PostRunReport(
     val load: Int? = null,
     /** Heart-rate data quality ("good", "questionable", "poor"); a heuristic */
     @SerialName("hr_quality") val hrQuality: HrQuality? = null,
+    /** How the run went against what it was meant to be (a verdict, not a score); a race's age grade */
+    val verdict: RunVerdict? = null,
     @SerialName("garmin_readiness_day") val garminReadinessDay: Point? = null,
     val splits: List<Split> = emptyList(),
     val classification: Classification,
@@ -954,3 +956,13 @@ data class HrQuality(val grade: String, @SerialName("flagged_s") val flaggedS: D
 
 @Serializable
 data class HrStretch(@SerialName("start_s") val startS: Double, @SerialName("end_s") val endS: Double, val reason: String)
+
+@Serializable
+data class RunVerdict(
+    val verdict: String, val label: String, @SerialName("judged_as") val judgedAs: String? = null, val basis: String? = null,
+    val say: String, @SerialName("hr_note") val hrNote: String? = null, @SerialName("age_grade") val ageGrade: AgeGrade? = null,
+    val note: String? = null,
+)
+
+@Serializable
+data class AgeGrade(@SerialName("age_grade_pct") val pct: Double, @SerialName("class") val gradeClass: String)
