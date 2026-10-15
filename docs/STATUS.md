@@ -336,8 +336,8 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - AI input on the server's key again: each new run and the latest 3 runs until each has input that worked (a failed try
   waits 6 h), at most 3 per sync, keeping 5 calls of the day in reserve; also after Samsung uploads. No free-text chat.
   The runner's own key stays optional. Server key: `data/secrets.json` (`openai_api_key`, `server_ai_enabled`).
-- Heart-rate data quality per run (`hr_quality`, running hrq-1.0, report-2.9): a 20 bpm jump within 5 s, or 15 bpm from
-  the median of the surrounding 5 minutes at steady pace (±15%); Good < 2% of running time, Questionable ≤ 8% or any
+- Heart-rate data quality per run (`hr_quality`, hrq-1.1, report-2.10): after the first 6 min, a 20 bpm jump within 5 s, or 15 bpm from
+  the median of the surrounding 5 minutes at a steady hill-adjusted pace (±15%); Good < 2% of running time, Questionable ≤ 8% or any
   stretch ≥ 1 min, else Poor. Readings unchanged; decoupling and the export carry a caveat when not Good.
 - Samsung cadence: one method, time-weighted over moving samples (as the splits); Samsung's own average stays raw.
 - Run export: VO₂ labelled by maker (device value), zone thresholds "Garmin-derived", recovery context by watch, a

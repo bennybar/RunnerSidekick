@@ -473,17 +473,26 @@ HRQ_MERGE_S = 20           # flagged moments closer than this form one stretch
 HRQ_MIN_STRETCH_S = 10     # a stretch shorter than this isn't reported
 HRQ_GOOD, HRQ_QUESTIONABLE = 0.02, 0.08  # share of running time flagged
 HRQ_LONG_S = 60            # one stretch this long makes the run questionable at least
-HRQ_VERSION = "hrq-1.0"
+HRQ_WARMUP_S = 360         # the first 6 minutes of running are left out: heart rate is still climbing from rest
+HRQ_VERSION = "hrq-1.1"    # 1.1: warm-up left out; steady judged on hill-adjusted pace, so a heart rate falling on a climb counts
 
 
 def hr_quality(s: Samples | None) -> dict | None:
     """Heart-rate data quality for a run (a heuristic, not a diagnosis): stretches of running where the heart rate jumps
-    20 bpm within 5 s, or sits 15 bpm away from its own median of the surrounding 5 minutes while the pace stays steady, which a heart
+    20 bpm within 5 s, or sits 15 bpm away from its own median of the surrounding 5 minutes while the hill-adjusted pace
+    stays steady (the first 6 minutes left out: warm-up), which a heart
     doesn't do but a wrist sensor losing contact or locking onto the cadence does. The readings are never changed.
     Good: under 2% of the running time flagged; Questionable: up to 8%, or any one stretch of a minute or more; Poor."""
     if s is None or not s.t:
         return None
-    idx = [i for i in range(len(s.t)) if s.hr[i] is not None and (s.speed[i] or 0) >= MOVING_SPEED]
+    gap = gap_speeds(s)  # hill-adjusted: a climb at an even effort is steady even though the pace drops
+    sp = [g if g is not None else s.speed[i] for i, g in enumerate(gap)]
+    moving, idx = 0.0, []
+    for i in range(len(s.t)):
+        if s.hr[i] is not None and (s.speed[i] or 0) >= MOVING_SPEED:
+            moving += min(s.t[i] - s.t[i - 1], MAX_SAMPLE_GAP) if i else 0.0
+            if moving >= HRQ_WARMUP_S and sp[i]:
+                idx.append(i)
     if len(idx) < 60:
         return None
     flagged: list[tuple[float, str]] = []
@@ -495,13 +504,13 @@ def hr_quality(s: Samples | None) -> dict | None:
         while hi + 1 < len(idx) and s.t[idx[hi + 1]] <= t + HRQ_WINDOW_S:
             hi += 1
         near = idx[lo:hi + 1]
-        ref_hr, ref_sp = median(s.hr[j] for j in near), median(s.speed[j] for j in near)
-        steady = abs(s.speed[i] - ref_sp) <= HRQ_STEADY * ref_sp
+        ref_hr, ref_sp = median(s.hr[j] for j in near), median(sp[j] for j in near)
+        steady = abs(sp[i] - ref_sp) <= HRQ_STEADY * ref_sp
         prev = next((j for j in reversed(idx[max(0, k - 10):k]) if t - s.t[j] <= HRQ_JUMP_S), None)
         if prev is not None and abs(s.hr[i] - s.hr[prev]) >= HRQ_JUMP:
             flagged.append((t, "heart rate jumped %+d bpm within %d s" % (round(s.hr[i] - s.hr[prev]), round(t - s.t[prev]))))
         elif steady and abs(s.hr[i] - ref_hr) >= HRQ_DEVIATION:
-            flagged.append((t, "heart rate %s its usual for this pace by %d bpm while the pace held"
+            flagged.append((t, "heart rate %s its usual for this effort by %d bpm while the (hill-adjusted) pace held"
                             % ("above" if s.hr[i] > ref_hr else "below", round(abs(s.hr[i] - ref_hr)))))
     stretches: list[dict] = []
     for t, why in flagged:
@@ -516,5 +525,6 @@ def hr_quality(s: Samples | None) -> dict | None:
     grade = ("poor" if share > HRQ_QUESTIONABLE else
              "questionable" if share > HRQ_GOOD or any(x["end_s"] - x["start_s"] >= HRQ_LONG_S for x in stretches) else "good")
     return {"grade": grade, "flagged_s": round(bad), "share": round(share, 3), "stretches": stretches,
-            "method": "Heuristic: a 20 bpm jump within 5 s, or 15 bpm from the median of the surrounding 5 minutes at steady pace (±15%). "
+            "method": "Heuristic: a 20 bpm jump within 5 s, or 15 bpm from the median of the surrounding 5 minutes at a steady "
+                      "hill-adjusted pace (±15%), after the first 6 minutes. "
                       "Readings are kept as recorded.", "algorithm_version": HRQ_VERSION}
