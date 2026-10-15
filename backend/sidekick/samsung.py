@@ -34,7 +34,7 @@ WORN_GAP_S = 15 * 60         # time between two readings counts as worn up to 15
 NAP_MAX_S = 3 * 3600
 NIGHT_MIN_READINGS = 3       # a night's skin temperature or blood oxygen needs at least 3 readings inside it
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
-CONVERSION = 3  # raised when the way a run is converted changes, so runs sent again are converted again
+CONVERSION = 4  # raised when the way a run is converted changes, so runs sent again are converted again
 
 
 # ---------------------------------------------------------------- which watch counts for a day
@@ -180,6 +180,8 @@ def activity(a: dict) -> Activity:
             run += _haversine(p[1:3], q[1:3])
             along.append(run)
         shape = shape_from_track(along, [p[1] for p in route], [p[2] for p in route])
+    cw = [(dt[i], by_s[s][2]) for i, s in enumerate(secs) if (by_s[s][1] or 0) >= 0.5 and by_s[s][2] and dt[i]]
+    cadence = round(sum(w * c for w, c in cw) / sum(w for w, _ in cw), 1) if cw else None
     summary = {k: v for k, v in a.items() if k not in ("log", "route")}
     if route:  # where the run started, for its weather (rounded to ~1 km when looked up); the track itself isn't kept
         summary.update(startLatitude=route[0][1], startLongitude=route[0][2])
@@ -191,7 +193,9 @@ def activity(a: dict) -> Activity:
         # Without a log (a workout entered by hand, say), the session's own duration stands in for moving time
         moving_s=float(moving) if moving else _num(a.get("duration_s")), timer_s=_num(a.get("duration_s")),
         avg_hr=_num(a.get("avg_hr")), max_hr=_num(a.get("max_hr")), elevation_gain_m=_num(a.get("climb_m")),
-        elevation_loss_m=_num(a.get("descent_m")), avg_cadence_spm=_num(a.get("avg_cadence")),
+        # Cadence the same way as the splits: time-weighted over moving samples that have one (Samsung's own average also
+        # counts slow moments, so it reads lower); Samsung's figure stays in the raw summary
+        elevation_loss_m=_num(a.get("descent_m")), avg_cadence_spm=cadence if cadence else _num(a.get("avg_cadence")),
         device_id=a.get("device") or None, manufacturer="Samsung", laps=laps, samples=samples, shape=shape,
         raw=[RawPayload("activity_summary", sid, summary)])
 

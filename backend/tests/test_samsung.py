@@ -221,3 +221,30 @@ def test_last_night_measured_and_compared_with_the_nights_before():
     assert o["skin_temp"]["delta"] == 0.6 and o["spo2"]["usual"] == [95.0, 95.0]
     first = rp.overnight(conn, "garmin", ANCHOR - timedelta(days=6), rp.day_obs(conn, "garmin", (ANCHOR - timedelta(days=6)).isoformat()))
     assert first["skin_temp"]["delta"] is None  # no usual yet: the number alone
+
+
+def test_hr_quality_flags_a_dropout_but_not_a_warm_up_or_a_climb():
+    from sidekick.analytics.running import hr_quality
+    from sidekick.connectors.base import Samples
+    n = 2400
+    t, sp, d = [float(i) for i in range(n)], [3.0] * n, [3.0 * i for i in range(n)]
+    mk = lambda hr, speed=sp: Samples(t, hr, speed, d, [0] * n, [165] * n)  # noqa: E731
+    assert hr_quality(mk([min(160.0, 110 + i * 0.08) for i in range(n)]))["grade"] == "good"
+    drop = [128.0 if 1440 <= i < 1520 else 150.0 for i in range(n)]  # 80 s of lost contact at a steady pace
+    q = hr_quality(mk(drop))
+    assert q["grade"] == "questionable" and q["stretches"][0]["start_s"] == 1440 and "jumped -22 bpm" in q["stretches"][0]["reason"]
+    climb_sp = [2.2 if 1200 <= i < 1500 else 3.0 for i in range(n)]
+    assert hr_quality(mk([160.0 if 1200 <= i < 1500 else 150.0 for i in range(n)], climb_sp))["grade"] == "good"
+
+
+def test_samsung_run_export_names_its_sources():
+    from sidekick import run_export
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    samsung.ingest(conn, "garmin", {"activities": [{**run(ANCHOR, "e", seconds=1500), "vo2max": 55.4}]})
+    from sidekick import reports as rp
+    rp.build_post_run(conn, "garmin", "samsung-e", False)
+    md = run_export.markdown(conn, "garmin", "samsung-e", fetch=lambda *a, **k: None)[1]
+    assert "VO₂ max (Samsung estimate, device value): **55.4**" in md and "Garmin estimate" not in md
+    assert "HR data quality: **Good**" in md and "VO₂ source: **Samsung (device estimate)**" in md
+    assert "Running dynamics source: **Not accessible via the current Samsung integration**" in md

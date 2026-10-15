@@ -108,8 +108,8 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
     fa, v = items.get("fitness_age"), items.get("vo2max")
     if fa and fa["age"] - fa["fitness_age"] >= 2:
         out.append({"id": "compare", "tone": "positive", "kind": "fitness", "title": f"Fitness age {fa['fitness_age']:.1f}",
-                    "text": f"{fa['age'] - fa['fitness_age']:.1f} years younger than your age (Garmin).", "target": {"type": "compare"},
-                    "source": "Garmin"})
+                    "text": f"{fa['age'] - fa['fitness_age']:.1f} years younger than your age ({fa['source']}).", "target": {"type": "compare"},
+                    "source": fa["source"]})
     elif v and v.get("percentile") is not None and v["percentile"] >= 75:
         out.append({"id": "compare", "tone": "positive", "kind": "fitness", "title": f"VO₂ max: {v['rating']} for your age",
                     "text": v["headline"], "target": {"type": "compare"}, "source": v.get("source")})

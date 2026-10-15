@@ -125,26 +125,26 @@ def test_retry_reports_pending_not_the_old_failure(tmp_path):
     gate.set()
 
 
-def test_auto_only_for_new_runs_once_and_within_budget(conn):
+def test_auto_for_new_runs_and_the_latest_three_until_they_have_it(conn):
     from datetime import datetime, timedelta, timezone
-    sids = [a["source_id"] for a in rp.activities(conn, "fixture", "2026-01-01", ANCHOR.isoformat())]
+    acts = sorted(rp.activities(conn, "fixture", "2026-01-01", ANCHOR.isoformat()), key=lambda a: a["start_utc"], reverse=True)
+    sids = [a["source_id"] for a in acts]
     for s in sids:
         rp.build_post_run(conn, "fixture", s, True)
-    newest = max(rp.activities(conn, "fixture", "2026-01-01", ANCHOR.isoformat()), key=lambda a: a["start_utc"])
-    start = datetime.fromisoformat(newest["start_utc"].replace("Z", "+00:00"))
-    # A first sync brings in weeks of history: only the run from the last 36 hours qualifies
-    soon = run_ai.auto_candidates(conn, "fixture", sids, 25, now=start + timedelta(hours=3))
-    assert soon == [newest["source_id"]]
-    assert run_ai.auto_candidates(conn, "fixture", sids, 25, now=start + timedelta(hours=40)) == []
+    latest3 = [a["source_id"] for a in acts if a["sport"] != "other"][:3]
+    start = datetime.fromisoformat(acts[0]["start_utc"].replace("Z", "+00:00"))
+    # A first sync brings in weeks of history: only the latest 3 runs, newest first; days later still the same 3
+    assert run_ai.auto_candidates(conn, "fixture", sids, 25, now=start + timedelta(hours=3)) == latest3
+    assert run_ai.auto_candidates(conn, "fixture", [], 25, now=start + timedelta(days=5)) == latest3
     # The day's budget keeps a reserve for things asked for by hand
     assert run_ai.auto_candidates(conn, "fixture", sids, run_ai.AUTO_BUDGET_RESERVE, now=start + timedelta(hours=3)) == []
     p = Fake(good)
-    real_now = datetime.now(timezone.utc)
-    if real_now - start > timedelta(hours=run_ai.AUTO_WINDOW_H):  # auto() uses the real clock: move the run into the window
-        conn.activity.update_one({"source_id": newest["source_id"]},
-                                 {"$set": {"start_utc": (real_now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}})
-    wrote = run_ai.auto(conn, "fixture", sids, ANCHOR, "m", "k", 25, provider=p)
-    assert wrote == [newest["source_id"]] and p.calls == 1
-    assert run_ai.latest(conn, newest["source_id"])["trigger"] == "auto"
-    # Never twice for the same run, whatever the earlier outcome
-    assert run_ai.auto(conn, "fixture", sids, ANCHOR, "m", "k", 25, provider=p) == [] and p.calls == 1
+    assert run_ai.auto(conn, "fixture", sids, ANCHOR, "m", "k", 25, provider=p) == latest3 and p.calls == 3
+    assert run_ai.latest(conn, latest3[0])["trigger"] == "auto"
+    # Done once it worked
+    assert run_ai.auto(conn, "fixture", sids, ANCHOR, "m", "k", 25, provider=p) == [] and p.calls == 3
+    # A failed try waits 6 hours before the next
+    conn.run_ai.update_many({"source_id": latest3[0]}, {"$set": {"status": "failed"}})
+    now = datetime.now(timezone.utc)
+    assert run_ai.auto_candidates(conn, "fixture", [], 25, now=now) == []
+    assert run_ai.auto_candidates(conn, "fixture", [], 25, now=now + timedelta(hours=7)) == [latest3[0]]

@@ -452,7 +452,11 @@ private fun RunHero(r: PostRunReport, units: Units) {
                     }
                 }
             }
-            Text("Pace uses moving time (stops excluded). Elapsed includes stops.", style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
+            Text("Pace uses moving time (stops excluded). Elapsed includes stops." + (r.hrQuality?.takeIf { it.grade != "good" }?.let { q ->
+                " Heart rate looked ${q.grade} in ${q.stretches.size} ${if (q.stretches.size == 1) "stretch" else "stretches"} (" +
+                    q.stretches.take(3).joinToString { "${Format.duration(it.startS)}–${Format.duration(it.endS)}" } +
+                    "), so read heart-rate numbers loosely."
+            } ?: ""), style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
         }
     }
 }
@@ -488,7 +492,8 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
             Text(if (!dc.eligible) "Indicative here: " + (if (dc.reasons.any { it.startsWith("run is not steady") }) "the pace wasn't steady"
                 else dc.reasons.firstOrNull() ?: "not a steady run") + "."
                 else "Under 5% means heart rate kept pace with the effort. Lower is better" +
-                    (if (dc.powerDecouplingPct != null) "; on hills, power:HR is the better read." else "."),
+                    (if (dc.powerDecouplingPct != null) "; on hills, power:HR is the better read." else ".") +
+                    (dc.hrCaveat?.let { " $it" } ?: ""),
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
@@ -636,7 +641,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                 v.status == "pending" -> Text("Reading this run…", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 v.status == "disabled" -> Text("Turn on the AI coach in Settings to get input on your runs.",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                v.status == "not_configured" -> Text("Add your own OpenAI key in Settings to get AI input on your runs.",
+                v.status == "not_configured" -> Text("AI input isn't set up on the server yet (or add your own OpenAI key in Settings).",
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 else -> {
                     Text(when (v.status) {

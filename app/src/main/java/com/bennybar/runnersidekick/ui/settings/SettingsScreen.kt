@@ -322,6 +322,17 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
+                        row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
+                                "Runner Sidekick's: the age your watch's VO₂ max is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
+                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
+                            trailing = {
+                                androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("garmin" to "Garmin", "sidekick" to "Ours").forEach { (k, l) ->
+                                        androidx.compose.material3.FilterChip(r.fitnessAgeSource == k, enabled = !busy,
+                                            onClick = { if (r.fitnessAgeSource != k) vm.saveRemote(r.copy(fitnessAgeSource = k)) }, label = { Text(l) })
+                                    }
+                                }
+                            })
                     }
                 }
             }
@@ -362,7 +373,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             },
                             trailing = { Switch(checked = r.aiEnabled, enabled = !busy && (r.aiAvailable || ownKey || r.aiEnabled),
                                 onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it)) }) })
-                        row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone · runs gpt-6.1-sol" else "Needed for the AI coach and AI input",
+                        row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone · runs gpt-6.1-sol" else "Optional: the server's key is used otherwise",
                             icon = Icons.Outlined.Key,
                             iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("key") })
                         row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
@@ -417,9 +428,9 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
         "window" -> r?.let { WindowSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "window") } }
         "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); close() }
         "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = close) {
-            Text("New runs get AI input automatically after a sync: only runs from the last 36 hours, at most 2 per sync, never for older " +
-                "history, and never using the last 5 AI calls of the day. Older runs: tap Get AI input. This uses the server's key; with only " +
-                "your own key, input is written when you ask.", style = MaterialTheme.typography.bodyMedium)
+            Text("Runs get AI input automatically on the server: each new run, and your latest 3 runs whenever one has none yet (a failed " +
+                "try is tried again after 6 hours). At most 3 per sync, never using the last 5 AI calls of the day. Older runs: tap Get AI " +
+                "input. There's no free-text chat with the AI.", style = MaterialTheme.typography.bodyMedium)
             Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. Numbers in " +
                 "summaries are filled in from the report, not written by the AI. If its output doesn't pass checks, nothing is shown.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

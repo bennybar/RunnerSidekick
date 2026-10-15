@@ -459,3 +459,62 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
         s, d = max(hilly, key=lambda x: x[0].pace_s_per_km - x[1]["gap_pace_s_per_km"])
         out.append(f"{unit.capitalize()} #{s.idx + 1} was uphill: {fmt_pace(s.pace_s_per_km)} actual, about {fmt_pace(d['gap_pace_s_per_km'])} on the flat.")
     return out
+
+
+# ---------------------------------------------------------------- heart-rate data quality
+
+HRQ_WINDOW_S = 150         # the reference: the median heart rate within 2.5 minutes either side (wide, so a dropout
+                           # of a minute or two can't become its own reference)
+HRQ_STEADY = 0.15          # pace counts as steady within 15% of its own median over the same window
+HRQ_DEVIATION = 15         # bpm away from that reference while pace is steady
+HRQ_JUMP = 20              # bpm changed within HRQ_JUMP_S seconds
+HRQ_JUMP_S = 5
+HRQ_MERGE_S = 20           # flagged moments closer than this form one stretch
+HRQ_MIN_STRETCH_S = 10     # a stretch shorter than this isn't reported
+HRQ_GOOD, HRQ_QUESTIONABLE = 0.02, 0.08  # share of running time flagged
+HRQ_LONG_S = 60            # one stretch this long makes the run questionable at least
+HRQ_VERSION = "hrq-1.0"
+
+
+def hr_quality(s: Samples | None) -> dict | None:
+    """Heart-rate data quality for a run (a heuristic, not a diagnosis): stretches of running where the heart rate jumps
+    20 bpm within 5 s, or sits 15 bpm away from its own median of the surrounding 5 minutes while the pace stays steady, which a heart
+    doesn't do but a wrist sensor losing contact or locking onto the cadence does. The readings are never changed.
+    Good: under 2% of the running time flagged; Questionable: up to 8%, or any one stretch of a minute or more; Poor."""
+    if s is None or not s.t:
+        return None
+    idx = [i for i in range(len(s.t)) if s.hr[i] is not None and (s.speed[i] or 0) >= MOVING_SPEED]
+    if len(idx) < 60:
+        return None
+    flagged: list[tuple[float, str]] = []
+    lo = hi = 0
+    for k, i in enumerate(idx):
+        t = s.t[i]
+        while s.t[idx[lo]] < t - HRQ_WINDOW_S:
+            lo += 1
+        while hi + 1 < len(idx) and s.t[idx[hi + 1]] <= t + HRQ_WINDOW_S:
+            hi += 1
+        near = idx[lo:hi + 1]
+        ref_hr, ref_sp = median(s.hr[j] for j in near), median(s.speed[j] for j in near)
+        steady = abs(s.speed[i] - ref_sp) <= HRQ_STEADY * ref_sp
+        prev = next((j for j in reversed(idx[max(0, k - 10):k]) if t - s.t[j] <= HRQ_JUMP_S), None)
+        if prev is not None and abs(s.hr[i] - s.hr[prev]) >= HRQ_JUMP:
+            flagged.append((t, "heart rate jumped %+d bpm within %d s" % (round(s.hr[i] - s.hr[prev]), round(t - s.t[prev]))))
+        elif steady and abs(s.hr[i] - ref_hr) >= HRQ_DEVIATION:
+            flagged.append((t, "heart rate %s its usual for this pace by %d bpm while the pace held"
+                            % ("above" if s.hr[i] > ref_hr else "below", round(abs(s.hr[i] - ref_hr)))))
+    stretches: list[dict] = []
+    for t, why in flagged:
+        if stretches and t - stretches[-1]["end_s"] <= HRQ_MERGE_S:
+            stretches[-1]["end_s"] = t
+        else:
+            stretches.append({"start_s": t, "end_s": t, "reason": why})
+    stretches = [x for x in stretches if x["end_s"] - x["start_s"] >= HRQ_MIN_STRETCH_S]
+    running = sum(min(s.t[b] - s.t[a], MAX_SAMPLE_GAP) for a, b in zip(idx, idx[1:]))
+    bad = sum(x["end_s"] - x["start_s"] for x in stretches)
+    share = bad / running if running else 0.0
+    grade = ("poor" if share > HRQ_QUESTIONABLE else
+             "questionable" if share > HRQ_GOOD or any(x["end_s"] - x["start_s"] >= HRQ_LONG_S for x in stretches) else "good")
+    return {"grade": grade, "flagged_s": round(bad), "share": round(share, 3), "stretches": stretches,
+            "method": "Heuristic: a 20 bpm jump within 5 s, or 15 bpm from the median of the surrounding 5 minutes at steady pace (±15%). "
+                      "Readings are kept as recorded.", "algorithm_version": HRQ_VERSION}

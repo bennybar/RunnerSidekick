@@ -24,8 +24,10 @@ log = logging.getLogger(__name__)
 PROMPT_VERSION = "run-ai-1.2"
 MAX_POINTS = 3
 # Written automatically after a sync, only for new runs: never for history pulled in by a first sync or a backfill
-AUTO_WINDOW_H = 36        # the run started within the last 36 hours
-AUTO_MAX_PER_SYNC = 2     # at most two runs per sync
+AUTO_WINDOW_H = 36        # a new run: started within the last 36 hours
+AUTO_LATEST = 3           # ...and the latest 3 runs always, until each has AI input
+AUTO_MAX_PER_SYNC = 3     # at most three runs per sync
+AUTO_RETRY_H = 6          # a run whose last try failed is tried again after 6 hours
 AUTO_BUDGET_RESERVE = 5   # leaves 5 of the day's AI calls for things you ask for yourself
 
 POINT = {"type": "object", "additionalProperties": False, "required": ["text", "evidence_ids"],
@@ -228,26 +230,36 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
 
 
 def auto_candidates(conn, source: str, sids: list[str], budget: int, now: datetime | None = None) -> list[str]:
-    """Runs to write AI input for right after a sync: started within the last 36 hours, analysed, never written
-    before (whatever the earlier outcome), newest first, at most two, and only while the day's budget keeps a reserve."""
+    """Runs to write AI input for, with the server's key: the new runs of a sync (started within the last 36 hours) and
+    the latest 3 runs, while they have none that worked. A run whose last try failed waits 6 hours before another. Newest
+    first, at most three, and only while the day's budget keeps a reserve for what the runner asks for."""
     from .narrative import calls_today
     now = now or datetime.now(timezone.utc)
     room = min(AUTO_MAX_PER_SYNC, budget - AUTO_BUDGET_RESERVE - calls_today(conn))
+    latest_runs = [a["source_id"] for a in conn.activity.find({"source": source, "sport": {"$ne": "other"}}, {"source_id": 1},
+                                                              sort=[("start_utc", -1)], limit=AUTO_LATEST)]
+    retry_before = (now - timedelta(hours=AUTO_RETRY_H)).strftime("%Y-%m-%dT%H:%M:%SZ")
     runs = []
-    for sid in set(sids):
+    for sid in set(sids) | set(latest_runs):
         a = rp.activity_by_source_id(conn, source, sid)
-        if not a or not a.get("start_utc"):
+        if not a or not a.get("start_utc") or rp.latest_body(conn, "post_run", {"subject_key": sid}) is None:
             continue
         start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00"))
-        if now - start <= timedelta(hours=AUTO_WINDOW_H) and one(conn.run_ai, {"source_id": sid}) is None \
-                and rp.latest_body(conn, "post_run", {"subject_key": sid}) is not None:
-            runs.append((start, sid))
+        if sid not in latest_runs and now - start > timedelta(hours=AUTO_WINDOW_H):
+            continue
+        if one(conn.run_ai, {"source_id": sid, "status": "ok"}) is not None:
+            continue
+        last = one(conn.run_ai, {"source_id": sid}, sort=[("id", -1)])
+        if last is not None and last["created_at"] > retry_before:
+            continue
+        runs.append((start, sid))
     return [sid for _, sid in sorted(runs, reverse=True)][:max(room, 0)]
 
 
 def auto(conn, source: str, sids: list[str], today: date, model: str, api_key: str, budget: int, provider=None,
          on_start=None, on_done=None) -> list[str]:
-    """Writes AI input for the new runs of a sync (see auto_candidates), one after another, with the server's key.
+    """Writes AI input for the new runs of a sync and the latest runs without it (see auto_candidates), one after another,
+    with the server's key.
     Never raises; returns the runs it wrote for."""
     done = []
     for sid in auto_candidates(conn, source, sids, budget):

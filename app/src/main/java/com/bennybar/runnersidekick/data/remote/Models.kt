@@ -393,6 +393,8 @@ data class Half(@SerialName("mean_speed_mps") val meanSpeedMps: Double, @SerialN
 @Serializable
 data class Decoupling(
     val eligible: Boolean,
+    /** Set when heart rate looked unreliable in parts of the run */
+    @SerialName("hr_caveat") val hrCaveat: String? = null,
     val reasons: List<String> = emptyList(),
     @SerialName("decoupling_pct") val decouplingPct: Double? = null,
     /** Power:HR decoupling on the same halves, when the watch records running power */
@@ -432,6 +434,8 @@ data class PostRunReport(
     @SerialName("garmin_vo2max_day") val garminVo2maxDay: Point? = null,
     /** The app's own training load for the run (Edwards, from heart-rate zones) */
     val load: Int? = null,
+    /** Heart-rate data quality ("good", "questionable", "poor"); a heuristic */
+    @SerialName("hr_quality") val hrQuality: HrQuality? = null,
     @SerialName("garmin_readiness_day") val garminReadinessDay: Point? = null,
     val splits: List<Split> = emptyList(),
     val classification: Classification,
@@ -619,6 +623,8 @@ data class SettingsDto(
     @SerialName("hr_max_at") val hrMaxAt: String? = null,
     /** The runner's watch from today: "garmin" or "samsung"; the server keeps each switch with its date */
     val watch: String? = null,
+    /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the watch's VO2 max) */
+    @SerialName("fitness_age_source") val fitnessAgeSource: String = "garmin",
 )
 
 @Serializable
@@ -941,3 +947,10 @@ data class NightSkin(val value: Double, val delta: Double? = null, val nights: I
 
 @Serializable
 data class NightSpo2(val avg: Double, val min: Double? = null, val usual: List<Double>? = null, val nights: Int = 0)
+
+/** Heart-rate data quality for a run: stretches where the heart rate jumped or left its usual for a steady pace. */
+@Serializable
+data class HrQuality(val grade: String, @SerialName("flagged_s") val flaggedS: Double = 0.0, val stretches: List<HrStretch> = emptyList())
+
+@Serializable
+data class HrStretch(@SerialName("start_s") val startS: Double, @SerialName("end_s") val endS: Double, val reason: String)

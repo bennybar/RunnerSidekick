@@ -121,6 +121,7 @@ class SettingsIn(BaseModel):
     hr_max: int | None = Field(default=None, ge=120, le=230)             # your own maximum heart rate, when you know it
     week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
     watch: Literal["garmin", "samsung"] | None = None   # the runner's watch from today; switches are kept with their dates
+    fitness_age_source: Literal["garmin", "sidekick"] | None = None  # whose fitness age to show
 
 
 class SamsungUploadIn(BaseModel):
@@ -737,10 +738,11 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     run_ai_inflight: set[tuple] = set()
 
     def auto_run_ai(conn, sids: list[str]) -> None:
-        """New runs from the last 36 hours get AI input right after a sync, in the background, with the server's key."""
+        """After a sync or a Samsung upload: AI input for its new runs and the latest 3 runs without it, in the background,
+        with the server's key (run_ai.auto_candidates)."""
         from . import run_ai
         ai = ai_config(conn)
-        if not sids or not ai.enabled or not (ai.api_key or run_ai_provider):
+        if not ai.enabled or not (ai.api_key or run_ai_provider):
             return
         name = conn.name
 
@@ -851,7 +853,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 # Answers that change over time, each with the day it was given
                 **{k: rp.get_setting(conn, k, None) for k in DATED_SETTINGS}, **{k + "_at": rp.get_setting(conn, k + "_at", None) for k in DATED_SETTINGS},
                 "week_start_effective": WEEKDAYS[rp.first_weekday(conn)],
-                "watch": samsung.watch_on(conn, today(conn).isoformat()), "watch_history": samsung.watch_history(conn)}
+                "watch": samsung.watch_on(conn, today(conn).isoformat()), "watch_history": samsung.watch_history(conn),
+                "fitness_age_source": rp.get_setting(conn, "fitness_age_source", "garmin")}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):

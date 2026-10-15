@@ -75,7 +75,7 @@ def zone_table(conn, a: dict) -> list[str]:
     for k in range(5, -1, -1):
         if zt[k] or k > 0:
             rows.append(f"| {names[k]} | {clock(zt[k])} | {100 * zt[k] / total:.0f}% |")
-    return rows + ["", f"Zones from Garmin ({zones.get('method') or 'heart-rate zones'}, max HR {zones.get('max_hr', '–')}); "
+    return rows + ["", f"Zone thresholds: Garmin-derived ({zones.get('method') or 'heart-rate zones'}, max HR {zones.get('max_hr', '–')}); "
                        "a training guide, not a physiological measurement."]
 
 
@@ -134,7 +134,7 @@ def minute_table(conn, a: dict) -> list[str]:
 
 
 def recovery_context(conn, source: str, a: dict, s) -> list[tuple[str, str]]:
-    """Garmin's readings from the morning of the run, only those that exist."""
+    """The watch's readings from the morning of the run, only those that exist (Garmin's or Samsung's, as recorded)."""
     day = a["local_date"]
     rows = {r["metric"]: r for r in conn.daily_observation.find({"source": source, "local_date": day, "state": "measured"},
                                                                 {"_id": 0, "metric": 1, "value": 1, "label": 1})}
@@ -171,7 +171,7 @@ def similar_details(conn, source: str, comp: dict) -> list[dict]:
         if act is None:
             continue
         dc = rp.run_analysis(conn, act)["decoupling"]
-        out.append({**c, "power": (act.get("garmin_metrics") or {}).get("avgPower"), "cadence": act.get("avg_cadence_spm"),
+        out.append({**c, "maker": (act.get("manufacturer") or "garmin").lower(), "power": (act.get("garmin_metrics") or {}).get("avgPower"), "cadence": act.get("avg_cadence_spm"),
                     "drift": dc.get("decoupling_pct") if dc.get("eligible") else None})
     return out
 
@@ -218,8 +218,12 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     add(f"Pace (moving): **{pace(r.get('pace_moving_s_per_km'))}**  ")
     add(f"Heart rate: **{num(a.get('avg_hr'), unit=' bpm')}** average · **{num(a.get('max_hr'), unit=' bpm')}** max  ")
     add(f"Elevation: **+{num(a.get('elevation_gain_m'), unit=' m')}** / −{num(a.get('elevation_loss_m'), unit=' m')}  ")
-    if r.get("garmin_vo2max_day"):
-        add(f"VO₂ max (Garmin estimate): **{r['garmin_vo2max_day']['value']:.1f}**  ")
+    samsung = a.get("manufacturer") == "Samsung"
+    if r.get("garmin_vo2max_day"):  # the watch's own estimate: Samsung's on a Samsung run (run report picks it)
+        add(f"VO₂ max ({'Samsung' if samsung else 'Garmin'} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
+    hrq = r.get("hr_quality")
+    if hrq:
+        add(f"HR data quality: **{hrq['grade'].capitalize()}**" + (f" ({clock(hrq['flagged_s'])} flagged)" if hrq["flagged_s"] else "") + "  ")
     add("")
     if said:
         add(f"User intent: **{INTENT_WORDS.get(said['kind'], said['kind'])}**  ")
@@ -337,6 +341,18 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("Not calculated: " + "; ".join(dc.get("reasons") or ["not enough heart-rate data"]) + ".")
     add("")
 
+    if dc.get("hr_caveat"):
+        add(dc["hr_caveat"] + " Average heart rate, the zones and anything read from heart rate share this caveat.")
+        add("")
+    if hrq and hrq["stretches"]:
+        add("## Heart-rate data quality")
+        add(f"Grade: **{hrq['grade'].capitalize()}** · {hrq['method']} A heuristic, not a diagnosis.  ")
+        add("")
+        add("| From | To | Why |")
+        add("|---:|---:|---|")
+        L.extend(f"| {clock(x['start_s'])} | {clock(x['end_s'])} | {x['reason']} |" for x in hrq["stretches"])
+        add("")
+
     # 9. Running dynamics: Garmin's averages, with the halves from the samples
     dyn = (s.dyn or {}) if s is not None else {}
     rows = []
@@ -366,7 +382,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     rc = recovery_context(conn, source, a, s)
     if rc:
         add("## Recovery context")
-        add("Garmin's readings for the day of the run; context, not a diagnosis.  ")
+        add("Samsung watch readings for the day of the run (resting HR from a Samsung watch is Runner Sidekick's estimate); "
+            "context, not a diagnosis.  " if samsung else "Garmin's readings for the day of the run; context, not a diagnosis.  ")
         L.extend(f"{k}: **{v}**  " for k, v in rc)
         add("")
 
@@ -388,6 +405,12 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add(f"## Similar runs ({comp['n']})")
         cr = comp.get("criteria") or {}
         lo, hi = cr.get("distance_ratio") or [0.8, 1.2]
+        mine = (a.get("manufacturer") or "garmin").lower()
+        others = sorted({x["maker"] for x in sims if x["maker"] != mine})
+        if others:
+            add(f"Cross-device: {sum(x['maker'] != mine for x in sims)} of these runs were recorded by another watch "
+                f"({', '.join(o.capitalize() for o in others)}). Heart rate, cadence, power and decoupling have limited "
+                "comparability across devices.  ")
         add(f"Criteria: same sport, distance {lo:.0%}–{hi:.0%} of this run, climbing within ±{cr.get('gain_per_km_tolerance', 8):.0f} m/km, "
             "steady effort, earlier runs in the last 120 days.")
         add("")
@@ -576,14 +599,18 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
 
     # 20. Data provenance
     add("## Data provenance")
-    samsung = a.get("manufacturer") == "Samsung"
-    prov = [("Activity source", "Samsung Health (Galaxy Watch recording)" if samsung else "Garmin Connect (watch recording)"),
-            ("Heart rate, pace, cadence, elevation", "Galaxy Watch samples" if samsung else "Garmin watch samples"),
-            ("Power and running dynamics", "Garmin" if g.get("avgPower") or dyn else None),
-            ("VO₂ max", "Samsung" if samsung else "Garmin"),
-            ("Training effect, training load", None if samsung else "Garmin"),
-            ("HR zones", "Your Garmin profile"),
-            ("Recovery context", "Garmin daily data" if rc else None),
+    prov = [("Activity device", ("Samsung Galaxy Watch" if samsung else (a.get("manufacturer") or "Garmin").capitalize())
+                                + (f" ({a['device_id']})" if a.get("device_id") else "")),
+            ("Activity source", "Samsung Health (Galaxy Watch recording)" if samsung else "Garmin Connect (watch recording)"),
+            ("HR source", "Galaxy Watch optical sensor (wrist)" if samsung else "Garmin watch (wrist, or a paired strap)"),
+            ("Pace, cadence, elevation", "Galaxy Watch samples (elevation from GPS)" if samsung else "Garmin watch samples"),
+            ("Running dynamics source", "Not accessible via the current Samsung integration" if samsung else ("Garmin" if dyn else None)),
+            ("Power", "Garmin" if g.get("avgPower") else None),
+            ("VO₂ source", "Samsung (device estimate)" if samsung else "Garmin (device estimate)"),
+            ("Training effect, training load", "Runner Sidekick training load (no Training Effect from Samsung)" if samsung else "Garmin"),
+            ("HR-zone threshold source", "Garmin-derived (your Garmin profile)"),
+            ("Recovery context source", ("Samsung watch daily data and Runner Sidekick's resting HR estimate" if samsung
+                                         else "Garmin daily data") if rc else None),
             ("Weather", f"{wx['source']} (external estimate)" if wx else None),
             ("Athlete context", "Entered by the runner" if said else None),
             ("Flat-equivalent pace, decoupling, checks, classification, similar runs, trend, next focus", "Runner Sidekick calculation"),

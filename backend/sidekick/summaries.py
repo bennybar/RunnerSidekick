@@ -65,7 +65,7 @@ def compare_bundle(cmp: dict) -> ch.Bundle:
                 b.fact("vo2_typical_age", "age at which this VO2 max is typical", f"{i['typical_age']}", i["typical_age"])
         elif i["id"] == "fitness_age" and i["status"] == "ok":
             b.item(iid, "comparison", **base)
-            b.fact("fitness_age", "Garmin fitness age", f"{i['fitness_age']:.1f}", i["fitness_age"])
+            b.fact("fitness_age", f"{i.get('source', 'Garmin')} fitness age", f"{i['fitness_age']:.1f}", i["fitness_age"])
             if i.get("achievable") is not None:
                 b.fact("achievable_age", "fitness age Garmin says is achievable", f"{i['achievable']:.1f}", i["achievable"])
         elif i["id"] == "resting_hr" and i["status"] == "ok":

@@ -135,6 +135,51 @@ def fitness_age_item(age: int, g: dict, vo2: dict) -> dict:
                       "vo2_age": vo2.get("typical_age")}}
 
 
+FITNESS_AGE_RANGE = (20, 90)  # our fitness age isn't extended past these
+
+
+def sidekick_fitness_age(sex: str, value: float) -> tuple[float, str]:
+    """Runner Sidekick's fitness age: the age at which this VO2 max is typical for your sex (the midpoint of the 40th and
+    60th percentiles in the Cooper Institute ratings), interpolated between age-group midpoints and, past the table,
+    continued along the decline of its two nearest groups. Kept within 20–90: 'at_limit' when it reached one."""
+    mids = [(lo + hi + 1) / 2 for lo, hi in nm.VO2_BANDS]
+    typical = [(p[0] + p[1]) / 2 for p in nm.VO2[sex]]  # falls with age
+    if value >= typical[0]:
+        i, j = 0, 1
+    elif value <= typical[-1]:
+        i, j = len(mids) - 2, len(mids) - 1
+    else:
+        i = next(k for k in range(len(mids) - 1) if typical[k + 1] <= value <= typical[k])
+        j = i + 1
+    age = mids[i] + (typical[i] - value) / (typical[i] - typical[j]) * (mids[j] - mids[i])
+    lo, hi = FITNESS_AGE_RANGE
+    return min(max(age, lo), hi), "at_limit" if not lo < age < hi else "within"
+
+
+def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
+    """The fitness age item from Runner Sidekick's own calculation (chosen in Settings instead of Garmin's)."""
+    base = {"id": "fitness_age", "title": "Fitness age", "source": "Runner Sidekick"}
+    v = vo2.get("value") if vo2.get("status") == "ok" else None
+    if v is None:
+        return {**base, "status": "unavailable", "headline": "Needs a VO₂ max from your watch",
+                "detail": "Runner Sidekick's fitness age comes from your watch's VO₂ max."}
+    f, where = sidekick_fitness_age(sex, v)
+    diff = age - f
+    shown = (f"{FITNESS_AGE_RANGE[0]} or younger" if f <= FITNESS_AGE_RANGE[0] else f"{FITNESS_AGE_RANGE[1]} or older") \
+        if where == "at_limit" else f"{f:.1f}"
+    head = (f"{abs(diff):.1f} years younger than your age" if diff >= 0.5 else
+            f"{abs(diff):.1f} years older than your age" if diff <= -0.5 else "Close to your actual age")
+    return {**base, "status": "ok", "fitness_age": round(f, 1), "age": age, "at_limit": where == "at_limit",
+            "headline": head if where == "within" else f"{shown}, against your age of {age}",
+            "detail": f"Your VO₂ max of {v:.1f} ({maker}'s estimate) is typical for a {SEX_WORD[sex][0]} of {shown}.",
+            "method": "Runner Sidekick: the age at which your VO₂ max is typical for your sex (between the 40th and 60th "
+                      "percentiles of the Cooper Institute ratings), interpolated between age groups; past the table, the "
+                      "decline of its nearest two groups continued, within 20–90. Same idea as the HUNT study's fitness age.",
+            "caveats": ["Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
+                        f"{maker}'s VO₂ max is a watch estimate from pace and heart rate, not a lab test."],
+            "chart": {"type": "ages", "age": age, "fitness_age": round(f, 1), "achievable": None, "vo2_age": vo2.get("typical_age")}}
+
+
 # ---------------------------------------------------------------- resting heart rate
 
 def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
@@ -283,6 +328,9 @@ def build(conn, source: str, today: date) -> dict:
     now = vo2_on(conn, source, today, today)
     g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None}
     vo2 = vo2_item(p["sex"], p["age"], g)
-    out["items"] = [vo2, fitness_age_item(p["age"], g, vo2), rhr_item(conn, source, p["sex"], p["age"], today),
+    from .scores import vo2_maker
+    fa = (own_fitness_age_item(p["sex"], p["age"], vo2, vo2_maker(conn, today))
+          if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick" else fitness_age_item(p["age"], g, vo2))
+    out["items"] = [vo2, fa, rhr_item(conn, source, p["sex"], p["age"], today),
                     age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]
     return out

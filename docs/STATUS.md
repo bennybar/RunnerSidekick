@@ -332,6 +332,21 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## AI back on the server, HR quality, export sources, own fitness age (2026-10-15, v0.57.0)
+- AI input on the server's key again: each new run and the latest 3 runs until each has input that worked (a failed try
+  waits 6 h), at most 3 per sync, keeping 5 calls of the day in reserve; also after Samsung uploads. No free-text chat.
+  The runner's own key stays optional. Server key: `data/secrets.json` (`openai_api_key`, `server_ai_enabled`).
+- Heart-rate data quality per run (`hr_quality`, running hrq-1.0, report-2.9): a 20 bpm jump within 5 s, or 15 bpm from
+  the median of the surrounding 5 minutes at steady pace (±15%); Good < 2% of running time, Questionable ≤ 8% or any
+  stretch ≥ 1 min, else Poor. Readings unchanged; decoupling and the export carry a caveat when not Good.
+- Samsung cadence: one method, time-weighted over moving samples (as the splits); Samsung's own average stays raw.
+- Run export: VO₂ labelled by maker (device value), zone thresholds "Garmin-derived", recovery context by watch, a
+  heart-rate quality section, provenance (device, HR source, running dynamics, VO₂, zone and recovery sources), and a
+  cross-device note when similar runs came from another watch.
+- Fitness age: Settings › About you › Fitness age, Garmin's or Runner Sidekick's (`fitness_age_source`): the age at
+  which the current watch's VO₂ max is typical for your sex (Cooper, midpoint of the 40th–60th percentiles),
+  interpolated, extended along the nearest groups' decline and kept within 20–90.
+
 ## Last night (2026-10-13, v0.56.0)
 - The app also reads the Samsung watch's skin temperature and blood oxygen (each its own permission; picking Samsung
   again in Your watch asks for what wasn't allowed) and uploads them with heart rate (`samsung_skin`, `samsung_spo2`).
