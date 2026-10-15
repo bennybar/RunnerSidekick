@@ -81,12 +81,12 @@ def test_hrv_range_restarts_after_a_watch_change():
     assert any(p["new_watch"] for p in h["chart"]["points"])
 
 
-def test_sidekick_fitness_age_follows_the_table_and_stops_at_its_limits():
+def test_sidekick_fitness_age_stays_within_the_table_in_whole_years():
     from sidekick import compare
     t = [(p[0] + p[1]) / 2 for p in compare.nm.VO2["male"]]
     mids = [(lo + hi + 1) / 2 for lo, hi in compare.nm.VO2_BANDS]
-    assert compare.sidekick_fitness_age("male", t[2]) == (mids[2], "within")  # exactly typical for a group: its midpoint
-    a, where = compare.sidekick_fitness_age("male", (t[1] + t[2]) / 2)
-    assert where == "within" and abs(a - (mids[1] + mids[2]) / 2) < 0.01
-    assert compare.sidekick_fitness_age("male", 90.0) == (20, "at_limit")
-    assert compare.sidekick_fitness_age("male", 5.0) == (90, "at_limit")
+    assert compare.sidekick_fitness_age("male", t[2]) == (round(mids[2]), "within")
+    assert compare.sidekick_fitness_age("male", 90.0) == (None, "above")
+    assert compare.sidekick_fitness_age("male", 5.0) == (None, "below")
+    it = compare.own_fitness_age_item("male", 46, {"status": "ok", "value": 90.0}, "Samsung")
+    assert it["bound"] == "above" and it["fitness_age"] is None and "twenties" not in it["headline"] and "20–29" in it["headline"]

@@ -135,49 +135,49 @@ def fitness_age_item(age: int, g: dict, vo2: dict) -> dict:
                       "vo2_age": vo2.get("typical_age")}}
 
 
-FITNESS_AGE_RANGE = (20, 90)  # our fitness age isn't extended past these
-
-
-def sidekick_fitness_age(sex: str, value: float) -> tuple[float, str]:
-    """Runner Sidekick's fitness age: the age at which this VO2 max is typical for your sex (the midpoint of the 40th and
-    60th percentiles in the Cooper Institute ratings), interpolated between age-group midpoints and, past the table,
-    continued along the decline of its two nearest groups. Kept within 20–90: 'at_limit' when it reached one."""
-    mids = [(lo + hi + 1) / 2 for lo, hi in nm.VO2_BANDS]
-    typical = [(p[0] + p[1]) / 2 for p in nm.VO2[sex]]  # falls with age
-    if value >= typical[0]:
-        i, j = 0, 1
-    elif value <= typical[-1]:
-        i, j = len(mids) - 2, len(mids) - 1
-    else:
-        i = next(k for k in range(len(mids) - 1) if typical[k + 1] <= value <= typical[k])
-        j = i + 1
-    age = mids[i] + (typical[i] - value) / (typical[i] - typical[j]) * (mids[j] - mids[i])
-    lo, hi = FITNESS_AGE_RANGE
-    return min(max(age, lo), hi), "at_limit" if not lo < age < hi else "within"
+def sidekick_fitness_age(sex: str, value: float) -> tuple[int | None, str]:
+    """Runner Sidekick's VO2-based fitness age: the age at which this VO2 max is typical for your sex, where typical is the
+    midpoint of the 40th and 60th percentile values of each Cooper Institute age group (not a published median),
+    interpolated between group midpoints and rounded to whole years. Only within the table: 'above' (higher than typical
+    for the youngest group) or 'below' (lower than typical for the oldest) with no age, rather than an extrapolated one."""
+    age, where = vo2_typical_age(sex, value)
+    if age is None:
+        return None, "above" if where == "younger" else "below"
+    return round(age), "within"
 
 
 def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
     """The fitness age item from Runner Sidekick's own calculation (chosen in Settings instead of Garmin's)."""
-    base = {"id": "fitness_age", "title": "Fitness age", "source": "Runner Sidekick"}
+    base = {"id": "fitness_age", "title": "VO₂-based fitness age", "source": "Runner Sidekick"}
     v = vo2.get("value") if vo2.get("status") == "ok" else None
     if v is None:
         return {**base, "status": "unavailable", "headline": "Needs a VO₂ max from your watch",
                 "detail": "Runner Sidekick's fitness age comes from your watch's VO₂ max."}
     f, where = sidekick_fitness_age(sex, v)
-    diff = age - f
-    shown = (f"{FITNESS_AGE_RANGE[0]} or younger" if f <= FITNESS_AGE_RANGE[0] else f"{FITNESS_AGE_RANGE[1]} or older") \
-        if where == "at_limit" else f"{f:.1f}"
-    head = (f"{abs(diff):.1f} years younger than your age" if diff >= 0.5 else
-            f"{abs(diff):.1f} years older than your age" if diff <= -0.5 else "Close to your actual age")
-    return {**base, "status": "ok", "fitness_age": round(f, 1), "age": age, "at_limit": where == "at_limit",
-            "headline": head if where == "within" else f"{shown}, against your age of {age}",
-            "detail": f"Your VO₂ max of {v:.1f} ({maker}'s estimate) is typical for a {SEX_WORD[sex][0]} of {shown}.",
-            "method": "Runner Sidekick: the age at which your VO₂ max is typical for your sex (between the 40th and 60th "
-                      "percentiles of the Cooper Institute ratings), interpolated between age groups; past the table, the "
-                      "decline of its nearest two groups continued, within 20–90. Same idea as the HUNT study's fitness age.",
-            "caveats": ["Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
+    lo, hi = nm.VO2_BANDS[0], nm.VO2_BANDS[-1]
+    who = SEX_WORD[sex][1]
+    if where == "above":
+        head = f"Above the typical VO₂ max for {who} aged {lo[0]}–{lo[1]}"
+        shown = None
+    elif where == "below":
+        head = f"Below the typical VO₂ max for {who} aged {hi[0]}–{hi[1]}"
+        shown = None
+    else:
+        diff = age - f
+        shown = f"around {f}"
+        head = (f"Around {f}: about {abs(diff)} years younger than your age" if diff >= 2 else
+                f"Around {f}: about {abs(diff)} years older than your age" if diff <= -2 else f"Around {f}: close to your actual age")
+    return {**base, "status": "ok", "fitness_age": f, "age": age, "bound": None if where == "within" else where,
+            "label": shown or head, "headline": head,
+            "detail": f"Your VO₂ max of {v:.1f} ({maker}'s estimate) " + (f"is typical for {who} {shown}." if shown else
+                      f"is {'above' if where == 'above' else 'below'} what the reference table covers for {who}, so no age is given."),
+            "method": "Runner Sidekick: the age at which your VO₂ max is typical for your sex in the Cooper Institute ratings, "
+                      "where typical is the midpoint of each age group's 40th and 60th percentile values (not a published "
+                      "median), interpolated between age groups and rounded. Only within the table's age groups.",
+            "caveats": ["Approximate: one point of VO₂ max can move it by several years.",
+                        "Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
                         f"{maker}'s VO₂ max is a watch estimate from pace and heart rate, not a lab test."],
-            "chart": {"type": "ages", "age": age, "fitness_age": round(f, 1), "achievable": None, "vo2_age": vo2.get("typical_age")}}
+            "chart": {"type": "ages", "age": age, "fitness_age": f, "achievable": None, "vo2_age": vo2.get("typical_age")}}
 
 
 # ---------------------------------------------------------------- resting heart rate

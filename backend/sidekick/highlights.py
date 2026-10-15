@@ -106,10 +106,16 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
     # One standout comparison with people of your age and sex
     items = {i["id"]: i for i in (comparison or {}).get("items", []) if i.get("status") == "ok"}
     fa, v = items.get("fitness_age"), items.get("vo2max")
-    if fa and fa["age"] - fa["fitness_age"] >= 2:
-        out.append({"id": "compare", "tone": "positive", "kind": "fitness", "title": f"Fitness age {fa['fitness_age']:.1f}",
-                    "text": f"{fa['age'] - fa['fitness_age']:.1f} years younger than your age ({fa['source']}).", "target": {"type": "compare"},
-                    "source": fa["source"]})
+    if fa and fa.get("bound") == "above":  # ours, past the table: no age, so none is shown
+        out.append({"id": "compare", "tone": "positive", "kind": "fitness", "title": "VO₂-based fitness age",
+                    "text": f"{fa['headline']} ({fa['source']}).", "target": {"type": "compare"}, "source": fa["source"]})
+    elif fa and fa.get("fitness_age") is not None and fa["age"] - fa["fitness_age"] >= 2:
+        whole = fa["source"] == "Runner Sidekick"  # ours is approximate: whole years, "around"
+        out.append({"id": "compare", "tone": "positive", "kind": "fitness",
+                    "title": f"Fitness age around {fa['fitness_age']}" if whole else f"Fitness age {fa['fitness_age']:.1f}",
+                    "text": (f"About {fa['age'] - fa['fitness_age']} years younger than your age" if whole else
+                             f"{fa['age'] - fa['fitness_age']:.1f} years younger than your age") + f" ({fa['source']}).",
+                    "target": {"type": "compare"}, "source": fa["source"]})
     elif v and v.get("percentile") is not None and v["percentile"] >= 75:
         out.append({"id": "compare", "tone": "positive", "kind": "fitness", "title": f"VO₂ max: {v['rating']} for your age",
                     "text": v["headline"], "target": {"type": "compare"}, "source": v.get("source")})

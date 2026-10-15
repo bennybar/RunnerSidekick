@@ -343,9 +343,11 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 - Run export: VO₂ labelled by maker (device value), zone thresholds "Garmin-derived", recovery context by watch, a
   heart-rate quality section, provenance (device, HR source, running dynamics, VO₂, zone and recovery sources), and a
   cross-device note when similar runs came from another watch.
-- Fitness age: Settings › About you › Fitness age, Garmin's or Runner Sidekick's (`fitness_age_source`): the age at
-  which the current watch's VO₂ max is typical for your sex (Cooper, midpoint of the 40th–60th percentiles),
-  interpolated, extended along the nearest groups' decline and kept within 20–90.
+- Fitness age: Settings › About you › Fitness age, Garmin's or Runner Sidekick's (`fitness_age_source`). Ours is the
+  "VO₂-based fitness age": the age at which the current watch's VO₂ max is typical for your sex (Cooper; typical = the
+  midpoint of each group's 40th and 60th percentile values, not a published median), interpolated between group
+  midpoints, in whole years ("around 45"). Only within the table (20–29 to 70–79): past it, "above the typical VO₂ max
+  for men aged 20–29" with no age, a bound kept through the highlight and the AI facts.
 
 ## Last night (2026-10-13, v0.56.0)
 - The app also reads the Samsung watch's skin temperature and blood oxygen (each its own permission; picking Samsung
