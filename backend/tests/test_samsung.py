@@ -285,3 +285,28 @@ def test_the_fit_endpoint_refuses_what_isnt_a_run(tmp_path):
     assert r.status_code == 200 and r.json()["changed_runs"][0].startswith("fit-")
     bad = client.post("/v1/fit", json={"name": "photo.jpg", "data": base64.b64encode(b"not a fit file").decode()}, headers=h)
     assert bad.status_code == 422 and "photo.jpg" in bad.json()["detail"]
+
+
+def test_a_deleted_run_stays_deleted_and_test_recordings_are_never_runs(tmp_path):
+    import base64
+    import fitgen
+    c = Config(data_dir=tmp_path, source="fixture", timezone="Asia/Jerusalem", backfill_days=40, refetch_days=3,
+               raw_retention_days=120, request_spacing_s=0)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    client = TestClient(create_app(c, connector=FixtureConnector(ANCHOR)))
+    client.put("/v1/settings", json={"watch": "samsung"}, headers=h)
+    today = date.fromisoformat(client.get("/v1/status", headers=h).json()["today"])
+    start = datetime.fromtimestamp(ms(today, 7) / 1000, timezone.utc)
+    short = fitgen.run(start, seconds=25, rest_from=None)  # a 25-second test recording
+    assert client.post("/v1/fit", json={"name": "t.fit", "data": base64.b64encode(short).decode()}, headers=h).json()["changed_runs"] == []
+    assert client.post("/v1/samsung", json={"activities": [run(today, "tiny", seconds=25)]}, headers=h).json()["changed_runs"] == []
+    good = fitgen.run(start)
+    sid = client.post("/v1/fit", json={"name": "r.fit", "data": base64.b64encode(good).decode()}, headers=h).json()["changed_runs"][0]
+    assert any(a["source_id"] == sid for a in client.get("/v1/activities", headers=h).json())
+    assert client.delete(f"/v1/activities/{sid}", headers=h).json() == {"deleted": sid}
+    assert not any(a["source_id"] == sid for a in client.get("/v1/activities", headers=h).json())
+    conn = connect(user_db_name(1, "fixture"))
+    conn.activity.delete_many({"source_id": sid})  # even with the old copy gone, sending it again doesn't bring it back
+    client.post("/v1/fit", json={"name": "r.fit", "data": base64.b64encode(good + b"").decode()}, headers=h)
+    assert not any(a["source_id"] == sid for a in client.get("/v1/activities", headers=h).json())
+    assert client.delete(f"/v1/activities/{sid}", headers=h).status_code == 404

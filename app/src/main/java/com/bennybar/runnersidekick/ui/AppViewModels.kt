@@ -223,6 +223,11 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     val routes = repo.routes.state(null)
     fun loadRoutes() = launchIo { repo.refreshRoutes() }
     fun notThisRoute() = launchIo { repo.differentRoute(id) }
+    fun deleteRun(onDone: () -> Unit) = viewModelScope.launch {
+        var ok = false
+        runIo { repo.deleteRun(id); ok = true }
+        if (ok) onDone()
+    }
     val ai = repo.runAi(id).state(null)
     init { refresh() }
     fun refresh() = launchIo { repo.refreshActivity(id); runCatching { repo.refreshRunAi(id) } }

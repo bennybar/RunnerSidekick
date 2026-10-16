@@ -16,7 +16,7 @@ from pymongo.database import Database
 
 from .connectors.base import Activity, Lap, RawPayload, Samples, valid_hr
 from .routes import shape_from_track
-from .samsung import SAME_RUN_S, SAMSUNG, _iso, watch_on
+from .samsung import MIN_RUN_M, MIN_RUN_S, SAME_RUN_S, SAMSUNG, _iso, watch_on
 from .store import save_activity
 
 FIT_CONVERSION = 1          # raised when the conversion changes, so files sent again are converted again
@@ -124,6 +124,8 @@ def parse(data: bytes) -> tuple[Activity, dict]:
 def ingest(conn: Database, stream: str, data: bytes) -> tuple[set[str], list[str]]:
     """Store one FIT file's run. Returns the dates and runs (in the analysis stream) that changed."""
     act, _ = parse(data)
+    if (act.elapsed_s or 0) < MIN_RUN_S or (act.distance_m or 0) < MIN_RUN_M:  # a test recording: not a run
+        return set(), []
     h = hashlib.sha256(bytes([FIT_CONVERSION]) + data).hexdigest()
     mine = watch_on(conn, act.local_date) == SAMSUNG
     source = stream if mine else SAMSUNG

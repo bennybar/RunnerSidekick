@@ -27,6 +27,7 @@ SAMSUNG = "samsung"          # the source Samsung data is kept under when it's n
 GARMIN_ASIDE = "garmin_aside"  # a Garmin run set aside because the Samsung watch recorded it too, on a Samsung day
 WATCHES = ("garmin", "samsung")
 SAME_RUN_S = 300             # two runs starting within 5 minutes of each other are the same run on two watches
+MIN_RUN_S, MIN_RUN_M = 120, 200  # shorter than 2 minutes or 200 m isn't a run (a test recording, a mis-tap): not imported
 RHR_WINDOW_S = 30 * 60       # resting heart rate: the lowest 30-minute average of the day, as Garmin defines it
 RHR_MIN_WORN_S = 4 * 3600    # ...on a day the watch measured for at least 4 hours
 RHR_NIGHT_WORN_S = 3600      # ...an hour of it between midnight and 6 am: worn overnight, so the lowest is a resting value
@@ -312,6 +313,8 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
     changed_runs: list[str] = []
     for a in body.get("activities") or []:
         act = activity(a)
+        if (act.elapsed_s or 0) < MIN_RUN_S or (act.sport != "other" and (act.distance_m or 0) < MIN_RUN_M):
+            continue
         mine = watch_on(conn, act.local_date) == SAMSUNG and not fit_twin(conn, stream, act.local_date, act.start_utc)
         source = stream if mine else SAMSUNG  # with a GTII (FIT) copy of the same run, that one counts; this one is set aside
         if mine:

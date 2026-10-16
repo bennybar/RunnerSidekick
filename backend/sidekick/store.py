@@ -58,7 +58,14 @@ def activity_hash(conn: Database, source: str, source_id: str) -> str | None:
     return r["content_hash"] if r else None
 
 
-def save_activity(conn: Database, source: str, a: Activity, chash: str) -> int:
+def is_deleted(conn: Database, source_id: str) -> bool:
+    """The runner deleted this run: it never comes back, whoever sends it again (Garmin, Samsung Health, GTII)."""
+    return conn.deleted_run.find_one({"source_id": source_id}, {"_id": 1}) is not None
+
+
+def save_activity(conn: Database, source: str, a: Activity, chash: str) -> int | None:
+    if is_deleted(conn, a.source_id):
+        return None
     now = utc_now()
     save_raw(conn, source, a.raw)
     key = {"source": source, "source_id": a.source_id}

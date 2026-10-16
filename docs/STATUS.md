@@ -332,6 +332,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Delete a run; test recordings skipped (2026-10-16, v0.60.0)
+- Run screen › ⋮ › Delete run (confirmed): `DELETE /v1/activities/{sid}` moves the run to source `deleted` and records
+  it in `deleted_run`; `save_activity` and Garmin's sync skip deleted runs, so no sync or upload (Garmin, Samsung Health,
+  GTII) brings one back. Reports for its day are rebuilt.
+- Samsung Health and GTII runs under 2 minutes or 200 m aren't imported (test recordings, mis-taps).
+
 ## GTII runs, step length, own race predictions (2026-10-16, v0.59.0)
 - Runs recorded with GTII (Gear Tracker II) on the Galaxy Watch: Settings › GTII runs picks GTII's FIT export folder
   once (a persisted document tree); every refresh (and the background job, and Sync) sends FIT files not sent before

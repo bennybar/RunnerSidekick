@@ -92,6 +92,13 @@ class Repository(
         observe("routes") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(it) }
     suspend fun refreshRoutes() = put("routes", api.getRaw("/v1/routes"))
     /** "Different route": this run leaves the route it was grouped with, for good. */
+    /** Deletes a run on the server (kept aside there, never imported again), then refreshes what lists it. */
+    suspend fun deleteRun(sid: String) {
+        api.delete("/v1/activities/$sid", emptyMap())
+        put("activities", api.getRaw("/v1/activities"))
+        runCatching { refreshAll() }
+    }
+
     suspend fun differentRoute(sid: String) {
         api.post("/v1/activities/$sid/different-route")
         refreshRoutes()

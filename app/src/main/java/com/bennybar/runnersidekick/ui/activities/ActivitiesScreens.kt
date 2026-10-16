@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.ui.activities
 
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Route
 
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -253,6 +255,15 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     LaunchedEffect(notice) { notice?.let { snackbar.showSnackbar(it); vm.clearNotice() } }
     val context = androidx.compose.ui.platform.LocalContext.current
     val r = detail?.value?.report
+    var runMenu by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    if (confirmDelete) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete this run?") },
+        text = { Text("It leaves your runs, records, trends and reports, and won't come back with the next sync or upload. " +
+            "Use it for test recordings and mistakes.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false; vm.deleteRun(onBack) }) { Text("Delete") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
     Scaffold(
         topBar = {
             TopAppBar(
@@ -265,6 +276,14 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         val start = java.time.Instant.parse(r.activity.startUtc).atOffset(java.time.ZoneOffset.ofTotalSeconds(r.activity.utcOffsetS ?: 0))
                         vm.export(context, start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss")) + "-running.md")
                     }) { Icon(Icons.Outlined.Download, "Export run to Downloads") }
+                    if (r != null && r.synthetic != true) androidx.compose.foundation.layout.Box {
+                        IconButton(onClick = { runMenu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                        androidx.compose.material3.DropdownMenu(runMenu, onDismissRequest = { runMenu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("Delete run") },
+                                leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) },
+                                onClick = { runMenu = false; confirmDelete = true })
+                        }
+                    }
                     // AI input sits next to the title: one tap asks for it, then the list scrolls to the card at the top
                     if (r != null && aiOn) {
                         // Any finished AI input for this run counts (also one kept from before the run's data was refreshed)

@@ -23,7 +23,7 @@ from pymongo.database import Database
 
 from .db import get_setting, next_id, one, set_setting, utc_now
 from .samsung import SAMSUNG, watch_on
-from .store import activity_hash, purge_raw, save_activity, save_day
+from .store import activity_hash, is_deleted, purge_raw, save_activity, save_day
 
 REFETCH_EVERY_H = 6  # recent activities (within refetch_days) are re-read at most this often, for late samples/laps
 
@@ -299,6 +299,8 @@ def _sync_activities(conn, connector, today: date, target: str, refetch_days: in
     todo = []
     for s in summaries:
         if watch_on(conn, s["start"][:10]) == SAMSUNG:  # a run on a Samsung day (start date in UTC: close enough)
+            continue
+        if is_deleted(conn, s["source_id"]):  # deleted by the runner: not downloaded again
             continue
         if activity_hash(conn, source, s["source_id"]) == s["content_hash"]:
             # Samples and laps can arrive or be corrected after the summary; re-read recent runs now and then

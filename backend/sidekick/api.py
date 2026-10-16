@@ -753,6 +753,21 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         from . import routes
         return {"routes": routes.all_routes(conn, cfg.source), "basis": routes.BASIS, "algorithm_version": routes.ROUTES_VERSION}
 
+    @api.delete("/v1/activities/{sid}")
+    def delete_run(sid: str, conn=Depends(db)):
+        """The runner deletes a run: it leaves runs, records, trends and reports, and is never imported again (Garmin's
+        sync, Samsung Health and GTII all check). Its data is set aside on the server, not destroyed."""
+        a = one(conn.activity, {"source": cfg.source, "source_id": sid})
+        if a is None:
+            raise HTTPException(404, "No such run")
+        conn.deleted_run.update_one({"source_id": sid}, {"$set": {"source_id": sid, "local_date": a["local_date"], "deleted_at": utc_now()}},
+                                    upsert=True)
+        conn.activity.delete_one({"source": "deleted", "source_id": sid})
+        conn.activity.update_one({"source": cfg.source, "source_id": sid}, {"$set": {"source": "deleted"}})
+        with report_lock(conn):
+            rp.regenerate(conn, cfg.source, synthetic, {a["local_date"]}, [], today(conn))
+        return {"deleted": sid}
+
     @api.post("/v1/activities/{sid}/different-route")
     def mark_different_route(sid: str, conn=Depends(db)):
         """The runner says this run isn't the route it was grouped with: it stays out of it from now on."""
@@ -923,7 +938,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         """raw: source payloads. reports: generated reports. all: everything incl. normalised records, check-ins and settings.
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
-                  "all": ["samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["deleted_run", "samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override"]}[scope]
         for t in tables:
             conn[t].delete_many({})
