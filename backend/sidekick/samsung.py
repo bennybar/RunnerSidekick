@@ -69,8 +69,12 @@ def reconcile(conn: Database, stream: str) -> set[str]:
     changed: set[str] = set()
     is_samsung = lambda d: watch_on(conn, d) == SAMSUNG  # noqa: E731
     for coll, date_key in ((conn.activity, "local_date"), (conn.sleep_session, "wake_date")):
-        for r in coll.find({"source": {"$in": [stream, SAMSUNG]}, "source_id": {"$regex": "^samsung-"}}, {"source": 1, "source_id": 1, date_key: 1}):
+        for r in coll.find({"source": {"$in": [stream, SAMSUNG]}, "source_id": {"$regex": "^(samsung|fit)-"}},
+                           {"source": 1, "source_id": 1, date_key: 1, "start_utc": 1}):
             want = stream if is_samsung(r[date_key]) else SAMSUNG
+            if want == stream and r["source_id"].startswith("samsung-") and r.get("start_utc") \
+                    and fit_twin(conn, stream, r[date_key], r["start_utc"]):
+                want = SAMSUNG  # its GTII (FIT) copy counts
             if r["source"] != want:
                 coll.delete_one({"source": want, "source_id": r["source_id"]})
                 coll.update_one({"_id": r["_id"]}, {"$set": {"source": want}})
@@ -90,6 +94,13 @@ def reconcile(conn: Database, stream: str) -> set[str]:
 
 
 # ---------------------------------------------------------------- converting what the phone sends
+
+def fit_twin(conn: Database, stream: str, local_date: str, start_utc: str) -> bool:
+    """A run recorded with GTII (a FIT file) starting within 5 minutes, in the analysis stream."""
+    t0 = datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+    return any(abs((datetime.fromisoformat(r["start_utc"].replace("Z", "+00:00")) - t0).total_seconds()) <= SAME_RUN_S
+               for r in conn.activity.find({"source": stream, "local_date": local_date, "source_id": {"$regex": "^fit-"}}, {"start_utc": 1}))
+
 
 def _utc(ms: float) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
@@ -301,8 +312,8 @@ def ingest(conn: Database, stream: str, body: dict) -> tuple[set[str], list[str]
     changed_runs: list[str] = []
     for a in body.get("activities") or []:
         act = activity(a)
-        mine = watch_on(conn, act.local_date) == SAMSUNG
-        source = stream if mine else SAMSUNG
+        mine = watch_on(conn, act.local_date) == SAMSUNG and not fit_twin(conn, stream, act.local_date, act.start_utc)
+        source = stream if mine else SAMSUNG  # with a GTII (FIT) copy of the same run, that one counts; this one is set aside
         if mine:
             # The same run from the Garmin watch, on a Samsung day: shown once, as the Samsung watch recorded it
             t0 = datetime.fromisoformat(act.start_utc.replace("Z", "+00:00"))

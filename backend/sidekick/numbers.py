@@ -138,12 +138,68 @@ def form(conn, source: str, today: date) -> dict:
 
 # ---------------------------------------------------------------- race predictions over time (Garmin's)
 
-def predictions(conn, today: date) -> dict:
-    base = {"id": "predictions", "title": "Race predictions over time", "lower_is_better": True,
+PRED_WINDOW_DAYS = 90       # a prediction comes from your best effort of the 90 days before it
+PRED_HISTORY_DAYS = 182     # ...shown weekly over the last six months
+PRED_FROM = {"5k": 5000.0, "10k": 10000.0, "half": 21097.5}  # efforts it can come from (1 km is too short for VDOT)
+PRED_TO = {"5k": 5000.0, "10k": 10000.0, "half": 21097.5, "marathon": 42195.0}
+
+
+def time_for(vd: float, metres: float) -> float:
+    """The time (s) at which Daniels' VDOT for `metres` equals vd (VDOT falls as the time grows)."""
+    from .cardio import vdot
+    lo, hi = metres / 7.0, metres / 1.0  # between 7 m/s and 1 m/s
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if vdot(metres, mid) > vd else (lo, mid)
+    return (lo + hi) / 2
+
+
+def own_predictions(conn, source: str, today: date) -> dict:
+    """Runner Sidekick's race predictions: Daniels' VDOT from your best 5 km, 10 km or half-marathon effort within a run
+    in the 90 days before each date, turned back into times for each distance. Training efforts rather than races, so
+    they tend to read a little slow; the marathon also assumes the endurance for it."""
+    from .cardio import vdot
+    base = {"id": "predictions", "title": "Race predictions over time", "lower_is_better": True, "source": "Runner Sidekick",
+            "basis": "Runner Sidekick: Daniels' VDOT from your best 5 km, 10 km or half-marathon effort within a run in the 90 "
+                     "days before each date, turned into times for each distance. From training efforts, not races, so it "
+                     "tends to read a little slow; the marathon also assumes you have the endurance for it."}
+    start = today - timedelta(days=PRED_HISTORY_DAYS + PRED_WINDOW_DAYS)
+    efforts = []  # (date, vdot, what it came from)
+    for a in rp.activities(conn, source, start.isoformat(), today.isoformat()):
+        for k, e in rp.efforts_for(conn, a).items():
+            if k in PRED_FROM and e.get("elapsed_s"):
+                efforts.append((a["local_date"], vdot(PRED_FROM[k], e["elapsed_s"]), k))
+    series = []
+    d = today - timedelta(days=PRED_HISTORY_DAYS)
+    while d <= today:
+        lo = (d - timedelta(days=PRED_WINDOW_DAYS)).isoformat()
+        best = max((e for e in efforts if lo < e[0] <= d.isoformat()), key=lambda e: e[1], default=None)
+        if best:
+            t5 = time_for(best[1], PRED_TO["5k"])
+            series.append({"date": d.isoformat(), "v": round(t5), "label": hms(t5), "vdot": round(best[1], 1)})
+        d += timedelta(days=7)
+    now = [e for e in efforts if e[0] > (today - timedelta(days=PRED_WINDOW_DAYS)).isoformat()]
+    if not now:
+        return {**base, "status": "unavailable", "headline": "Needs a run with a 5 km or longer effort in the last 90 days", "detail": ""}
+    best = max(now, key=lambda e: e[1])
+    times = {k: time_for(best[1], m) for k, m in PRED_TO.items()}
+    ch = change_since(series, 56, today) if len(series) >= 2 else None
+    trend = (f"5K {abs(ch[0]):.0f} s {'faster' if ch[0] < 0 else 'slower'} than on {day(ch[1])}" if ch and abs(ch[0]) >= 5
+             else "about the same as two months ago" if ch else "")
+    return {**base, "status": "ok", "value": f"5K {hms(times['5k'])}", "headline": trend,
+            "detail": f"Now: 10K {hms(times['10k'])}, half {hms(times['half'])}, marathon {hms(times['marathon'])}. "
+                      f"From your {rp.EFFORT_LABELS[best[2]]} effort on {day(best[0])} (VDOT {best[1]:.1f}).",
+            "series": series}
+
+
+def predictions(conn, source: str, today: date) -> dict:
+    """Garmin's race predictions while Garmin is the watch and it has them; Runner Sidekick's own otherwise."""
+    from .samsung import SAMSUNG, watch_on
+    base = {"id": "predictions", "title": "Race predictions over time", "lower_is_better": True, "source": "Garmin",
             "basis": "Garmin's predicted race times, day by day. Garmin's estimate from your VO₂ max and training, not a result."}
     rows = [r for r in get_setting(conn, "garmin_predictions", None) or [] if r.get("5k")]
-    if len(rows) < 2:
-        return {**base, "status": "unavailable", "headline": "Not from Garmin yet", "detail": ""}
+    if len(rows) < 2 or watch_on(conn, today.isoformat()) == SAMSUNG:
+        return own_predictions(conn, source, today)
     series = [{"date": r["date"], "v": r["5k"], "label": hms(r["5k"])} for r in rows]
     last = rows[-1]
     ch = change_since(series, 56, today)
@@ -366,6 +422,6 @@ def endurance(conn, source: str, today: date) -> dict:
 
 
 def build(conn, source: str, today: date) -> dict:
-    return {"items": [threshold(conn, today), reference_pace(conn, source, today), form(conn, source, today), predictions(conn, today),
+    return {"items": [threshold(conn, today), reference_pace(conn, source, today), form(conn, source, today), predictions(conn, source, today),
                       endurance(conn, source, today), recovery(conn, source, today), climbing(conn, source, today)],
             "algorithm_version": NUMBERS_VERSION}

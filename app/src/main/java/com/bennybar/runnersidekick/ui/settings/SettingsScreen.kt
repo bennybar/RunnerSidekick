@@ -152,6 +152,16 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
     fun saveRemote(s: SettingsDto, sheet: String? = null) = saveFrom(sheet, "Saved") { remote.value = repo.saveRemoteSettings(s) }
 
     val samsungProblem = repo.samsungProblem
+    val fitFolder = repo.settings.fitFolder.state(null)
+    val fitProblem = repo.fitProblem
+
+    /** GTII's export folder: kept readable, then its runs are sent at once and on every refresh. */
+    fun setFitFolder(uri: Uri) = launchIo {
+        repo.fitFolder?.keep(uri)
+        repo.settings.setFitFolder(uri.toString())
+        message.value = "GTII's folder set; its runs are sent with every refresh"
+        repo.refreshAll()
+    }
 
     /** Samsung Health's permission screen again (for what wasn't allowed before), then a refresh that reads it. */
     fun askSamsung(activity: android.app.Activity?) = launchIo {
@@ -227,6 +237,9 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val samsungProblem by vm.samsungProblem.collectAsStateWithLifecycle()
+    val fitFolder by vm.fitFolder.collectAsStateWithLifecycle()
+    val fitProblem by vm.fitProblem.collectAsStateWithLifecycle()
+    val pickFitFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(vm::setFitFolder) }
     var watchDialog by remember { mutableStateOf(false) }
     val activity = androidx.activity.compose.LocalActivity.current
 
@@ -263,6 +276,10 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                         "samsung" -> "Samsung Galaxy Watch · this phone sends its data" + (samsungProblem?.let { "\n$it" } ?: "")
                         else -> "Garmin"
                     }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided, onClick = { watchDialog = true })
+                    if (s?.watch == "samsung") row("GTII runs", supporting = (fitFolder?.let { u ->
+                            "Folder: " + (Uri.parse(u).lastPathSegment?.substringAfterLast(':')?.ifBlank { null } ?: "picked") + " · sent with every refresh"
+                        } ?: "Runs recorded with GTII: pick the folder GTII exports FIT files to") + (fitProblem?.let { "\n$it" } ?: ""),
+                        icon = Icons.Outlined.FileDownload, iconShape = MaterialShapes.Cookie9Sided, onClick = { pickFitFolder.launch(null) })
                     row("Garmin", supporting = when {
                         s?.synthetic == true -> "Demo data source"
                         s?.watch == "samsung" && s.garminLinked -> "Paused while your watch is the Samsung one. Your Garmin history stays."

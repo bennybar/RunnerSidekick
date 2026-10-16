@@ -332,6 +332,20 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## GTII runs, step length, own race predictions (2026-10-16, v0.59.0)
+- Runs recorded with GTII (Gear Tracker II) on the Galaxy Watch: Settings › GTII runs picks GTII's FIT export folder
+  once (a persisted document tree); every refresh (and the background job, and Sync) sends FIT files not sent before
+  (`POST /v1/fit`, base64). Server `fit.py` (fitdecode 0.10.0): per-second record (HR, speed, distance, altitude, GPS,
+  cadence, power, and ground contact / vertical oscillation / step length when a sensor gives them), laps with their
+  intensity, session, local offset; FIT running cadence in strides doubled to steps unless it already reads as steps.
+  A GTII run counts as the Samsung watch's (no device ID, so no device era); with a Samsung Health copy of the same run
+  (start within 5 min) the FIT copy counts and the other is set aside, also when it arrives later and on re-filing.
+- Step length on each run (report-2.12): distance while moving ÷ steps (cadence × time), in the cadence check and export.
+- Race predictions of our own when Garmin isn't the watch (or has none): Daniels' VDOT from the best 5 km, 10 km or
+  half effort within a run in the 90 days before each date, weekly over six months, solved back into 5K/10K/half/marathon.
+- Samsung's advanced running metrics (Myotest: contact/flight time, vertical, stiffness, regularity, asymmetry) aren't
+  in the Samsung Health Data SDK; contact + flight time sums to step time, but the split can't be had without the IMU.
+
 ## How the run went (2026-10-15, v0.58.0)
 - A verdict per run, not a score (`verdict.py`, verdict-1.0, report-2.11): against the runner's intent for the run, else
   the day's plan; never against a type inferred from the run itself (then "Not enough data"). Easy/recovery/long: at

@@ -58,3 +58,14 @@ def test_the_export_says_how_it_went():
     intend(conn, a, "easy", target="HR <= 100")
     md = run_export.markdown(conn, "fixture", a["source_id"], fetch=lambda *x, **k: None)[1]
     assert "How it went: **Harder than planned** (judged as easy, from your intent for the run)" in md
+
+
+def test_own_race_predictions_from_recent_efforts():
+    from sidekick import numbers
+    conn, a = setup()
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])  # no Garmin predictions: ours
+    p = numbers.predictions(conn, "fixture", ANCHOR)
+    assert p["source"] == "Runner Sidekick" and p["status"] == "ok" and p["value"] == "5K 23:51"
+    assert "marathon 3:47:18" in p["detail"] and "VDOT 40.5" in p["detail"] and len(p["series"]) >= 2
+    # Daniels' table: VDOT 40 is 24:08 for 5 km and 50:03 for 10 km
+    assert abs(numbers.time_for(40.0, 5000) - 1448) < 5 and abs(numbers.time_for(40.0, 10000) - 3003) < 5

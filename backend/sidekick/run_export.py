@@ -218,6 +218,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     add(f"Pace (moving): **{pace(r.get('pace_moving_s_per_km'))}**  ")
     add(f"Heart rate: **{num(a.get('avg_hr'), unit=' bpm')}** average · **{num(a.get('max_hr'), unit=' bpm')}** max  ")
     add(f"Elevation: **+{num(a.get('elevation_gain_m'), unit=' m')}** / −{num(a.get('elevation_loss_m'), unit=' m')}  ")
+    if r.get("step_length_m"):
+        add(f"Cadence: **{num(a.get('avg_cadence_spm'))} spm** · step length **{r['step_length_m']:.2f} m** (distance ÷ steps)  ")
     samsung = a.get("manufacturer") == "Samsung"
     if r.get("garmin_vo2max_day"):  # the watch's own estimate: Samsung's on a Samsung run (run report picks it)
         add(f"VO₂ max ({'Samsung' if samsung else 'Garmin'} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
@@ -603,12 +605,17 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
 
     # 20. Data provenance
     add("## Data provenance")
+    gtii = sid.startswith("fit-")
     prov = [("Activity device", ("Samsung Galaxy Watch" if samsung else (a.get("manufacturer") or "Garmin").capitalize())
                                 + (f" ({a['device_id']})" if a.get("device_id") else "")),
-            ("Activity source", "Samsung Health (Galaxy Watch recording)" if samsung else "Garmin Connect (watch recording)"),
-            ("HR source", "Galaxy Watch optical sensor (wrist)" if samsung else "Garmin watch (wrist, or a paired strap)"),
-            ("Pace, cadence, elevation", "Galaxy Watch samples (elevation from GPS)" if samsung else "Garmin watch samples"),
-            ("Running dynamics source", "Not accessible via the current Samsung integration" if samsung else ("Garmin" if dyn else None)),
+            ("Activity source", "GTII on the Galaxy Watch (FIT file)" if gtii else "Samsung Health (Galaxy Watch recording)" if samsung
+             else "Garmin Connect (watch recording)"),
+            ("HR source", "Galaxy Watch optical sensor, or a strap paired in GTII" if gtii else "Galaxy Watch optical sensor (wrist)" if samsung
+             else "Garmin watch (wrist, or a paired strap)"),
+            ("Pace, cadence, elevation", "GTII samples from the Galaxy Watch" if gtii else "Galaxy Watch samples (elevation from GPS)" if samsung
+             else "Garmin watch samples"),
+            ("Running dynamics source", ("A sensor paired in GTII" if dyn else None) if gtii else
+             "Not accessible via the current Samsung integration" if samsung else ("Garmin" if dyn else None)),
             ("Power", "Garmin" if g.get("avgPower") else None),
             ("VO₂ source", "Samsung (device estimate)" if samsung else "Garmin (device estimate)"),
             ("Training effect, training load", "Runner Sidekick training load (no Training Effect from Samsung)" if samsung else "Garmin"),

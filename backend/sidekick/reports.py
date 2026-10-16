@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.11"  # 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.12"  # 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -629,6 +629,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
         # The app's own training load for the run (Edwards: minutes per heart-rate zone × 1–5), what load and readiness use
         "load": round(run_load(conn, a, zones["floors"] if zones else None)),
         "classification": an["classification"], "decoupling": dc, "hr_quality": hrq,
+        "step_length_m": rn.step_length(samples_for(conn, a["id"])),
         "comparable": comp, "calendar_week": rn.workload(week_acts, week_begin.isoformat(), a["local_date"]),
         "findings": sorted(findings, key=lambda f: f["priority"]), "effort": effort,
         "next_focus": next_focus(an, dc, comp, splits, details, intent, zones["floors"][2] if zones else None, a.get("avg_hr"), heat),

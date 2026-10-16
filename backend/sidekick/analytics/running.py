@@ -528,3 +528,18 @@ def hr_quality(s: Samples | None) -> dict | None:
             "method": "Heuristic: a 20 bpm jump within 5 s, or 15 bpm from the median of the surrounding 5 minutes at a steady "
                       "hill-adjusted pace (±15%), after the first 6 minutes. "
                       "Readings are kept as recorded.", "algorithm_version": HRQ_VERSION}
+
+
+def step_length(s: Samples | None) -> float | None:
+    """Average step length (m): the distance covered while running over the steps taken (cadence × time), from samples
+    with both a speed and a cadence. Derived from the recording, not a separate measurement."""
+    if s is None:
+        return None
+    dist = steps = 0.0
+    for i in range(1, len(s.t)):
+        dt = s.t[i] - s.t[i - 1]
+        sp, cad = s.speed[i], s.cad[i]
+        if 0 < dt <= MAX_SAMPLE_GAP and sp is not None and sp >= MOVING_SPEED and cad:
+            dist += sp * dt
+            steps += cad / 60 * dt
+    return round(dist / steps, 2) if steps >= 100 else None

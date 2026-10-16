@@ -134,6 +134,12 @@ class SamsungUploadIn(BaseModel):
     offset_s: int | None = Field(default=None, ge=-14 * 3600, le=14 * 3600)    # the phone's UTC offset, for the heart-rate days
 
 
+class FitIn(BaseModel):
+    """One FIT file (a run recorded with GTII), base64-encoded, with its file name for messages."""
+    name: str = Field(max_length=200)
+    data: str = Field(max_length=12_000_000)
+
+
 def downsample(s: Samples, max_points: int = MAX_CHART_POINTS) -> dict:
     """Time-bucket means for charting. A bucket with no valid value stays null; gaps are preserved."""
     if not s.t:
@@ -411,6 +417,26 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             if dates or runs:
                 rp.regenerate(conn, cfg.source, synthetic, dates, runs, today(conn))
         set_connection(conn, samsung.SAMSUNG, state="connected", detail=None, last_success_at=utc_now())
+        auto_run_ai(conn, runs)
+        return {"changed_dates": sorted(dates), "changed_runs": runs}
+
+    @api.post("/v1/fit")
+    def fit_upload(body: FitIn, conn=Depends(db)):
+        """A run recorded with GTII on the Galaxy Watch, from its FIT file; stored and reported like a Samsung run."""
+        import base64
+        from . import fit
+        try:
+            data = base64.b64decode(body.data, validate=True)
+            with report_lock(conn):
+                dates, runs = fit.ingest(conn, cfg.source, data)
+                if runs and not synthetic:
+                    from . import weather
+                    runs = list(dict.fromkeys(runs + weather.for_new_runs(conn, cfg.source, runs)))
+                if dates or runs:
+                    rp.regenerate(conn, cfg.source, synthetic, dates, runs, today(conn))
+        except Exception as e:  # a file that isn't a run (or isn't FIT) is refused, never half-stored
+            log.warning("FIT %s refused: %s", body.name, e)
+            raise HTTPException(422, f"{body.name} couldn't be read as a run")
         auto_run_ai(conn, runs)
         return {"changed_dates": sorted(dates), "changed_runs": runs}
 

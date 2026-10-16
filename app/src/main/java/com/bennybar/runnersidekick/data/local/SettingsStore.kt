@@ -65,6 +65,8 @@ class SettingsStore(private val context: Context) {
     private val kAppearance = stringPreferencesKey("appearance")
     private val kGarminSkipped = booleanPreferencesKey("garmin_prompt_skipped")
     private val kSamsungAt = longPreferencesKey("samsung_uploaded_at")  // when this phone last sent the Samsung watch's data
+    private val kFitFolder = stringPreferencesKey("fit_folder")         // GTII's export folder (a document tree this app may read)
+    private val kFitSent = stringSetPreferencesKey("fit_sent")          // FIT files already sent, as "name|size"
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -122,11 +124,16 @@ class SettingsStore(private val context: Context) {
 
     /** Signing out also forgets the runner's own OpenAI key, so a later account never inherits it. */
     suspend fun clearToken() = context.dataStore.edit {
-        it.remove(kToken); it.remove(kAccount); it.remove(kAiKey); it.remove(kGarminSkipped); it.remove(kSamsungAt)
+        it.remove(kToken); it.remove(kAccount); it.remove(kAiKey); it.remove(kGarminSkipped); it.remove(kSamsungAt); it.remove(kFitSent)
     }
 
     suspend fun samsungUploadedAt(): java.time.Instant? = context.dataStore.data.first()[kSamsungAt]?.let { java.time.Instant.ofEpochMilli(it) }
     suspend fun setSamsungUploadedAt(at: java.time.Instant) = context.dataStore.edit { it[kSamsungAt] = at.toEpochMilli() }
+
+    val fitFolder: Flow<String?> = context.dataStore.data.map { it[kFitFolder] }
+    suspend fun setFitFolder(uri: String?) = context.dataStore.edit { if (uri == null) it.remove(kFitFolder) else it[kFitFolder] = uri }
+    suspend fun fitSent(): Set<String> = context.dataStore.data.first()[kFitSent] ?: emptySet()
+    suspend fun addFitSent(key: String) = context.dataStore.edit { it[kFitSent] = (it[kFitSent] ?: emptySet()) + key }
 
     suspend fun setGarminPromptSkipped(on: Boolean) = context.dataStore.edit { it[kGarminSkipped] = on }
 

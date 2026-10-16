@@ -54,6 +54,7 @@ class Repository(
     private val api: ApiClient,
     val settings: SettingsStore,
     val samsung: SamsungHealth? = null,
+    val fitFolder: FitFolder? = null,
 ) {
     private val json = api.json
     // encodeDefaults: without it, a value equal to its default (ai_enabled = false, a cleared goal = null) is left out of
@@ -381,6 +382,7 @@ class Repository(
             "Checking the connection" to {
                 val s = refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
                 runCatching { uploadSamsung(s) }  // the Samsung watch's new data first, so what loads next includes it
+                importFit()  // and runs recorded with GTII
                 db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
             },
             "Loading today" to {
@@ -492,6 +494,42 @@ class Repository(
         }
     }
 
+    /** Why the last import from GTII's folder had trouble (shown in Settings), or null. */
+    val fitProblem = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** Sends the FIT files in GTII's export folder that haven't been sent yet (runs recorded with GTII on the watch). A
+     *  file the server can't read as a run is noted and not sent again. */
+    private suspend fun importFit() {
+        val folder = fitFolder ?: return
+        val tree = settings.fitFolder.first()?.let { android.net.Uri.parse(it) } ?: return
+        try {
+            val sent = settings.fitSent()
+            val files = kotlinx.coroutines.withContext(Dispatchers.IO) { folder.list(tree) }
+            var refused = 0
+            for (f in files.sortedBy { it.name }) {
+                val key = "${f.name}|${f.size}"
+                if (key in sent) continue
+                val data = kotlinx.coroutines.withContext(Dispatchers.IO) { folder.read(f) }
+                val body = kotlinx.serialization.json.buildJsonObject {
+                    put("name", kotlinx.serialization.json.JsonPrimitive(f.name))
+                    put("data", kotlinx.serialization.json.JsonPrimitive(android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)))
+                }
+                try {
+                    api.postJson("/v1/fit", body.toString())
+                } catch (e: ApiException.Http) {
+                    if (e.code != 422) throw e
+                    refused++
+                }
+                settings.addFitSent(key)
+            }
+            fitProblem.value = if (refused > 0) "$refused file${if (refused > 1) "s" else ""} in the folder weren't runs and were skipped" else null
+        } catch (e: ApiException) {
+            fitProblem.value = e.message
+        } catch (e: Exception) {  // the folder was moved or its access withdrawn
+            fitProblem.value = "Couldn't read GTII's folder: ${e.message}. Pick it again in Settings."
+        }
+    }
+
     /** Syncs with Garmin now and says how many new runs arrived. */
     suspend fun syncRunsNow(pause: suspend (Int) -> Unit): Int {
         val before = activities.first()?.value.orEmpty().map { it.sourceId }.toSet()
@@ -502,6 +540,7 @@ class Repository(
     /** The background worker's small refresh: what the notifications read, nothing else. */
     suspend fun backgroundRefresh() {
         runCatching { uploadSamsung(refreshStatus()) }  // Samsung Health may not answer in the background; the next open catches up
+        importFit()
         pushPendingCheckins()
         put("today", api.getRaw("/v1/today"))
         put("activities", api.getRaw("/v1/activities"))
@@ -515,6 +554,7 @@ class Repository(
             if (refreshStatus().watch == "samsung") {  // nothing to sync on the server: this phone sends the watch's data
                 _progress.value = Progress(0f, "Reading your Samsung watch")
                 uploadSamsung(refreshStatus())
+                importFit()
                 refreshAll(0.5f, 1f)
                 return
             }

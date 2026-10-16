@@ -248,3 +248,40 @@ def test_samsung_run_export_names_its_sources():
     assert "VO₂ max (Samsung estimate, device value): **55.4**" in md and "Garmin estimate" not in md
     assert "HR data quality: **Good**" in md and "VO₂ source: **Samsung (device estimate)**" in md
     assert "Running dynamics source: **Not accessible via the current Samsung integration**" in md
+
+
+def test_a_gtii_fit_run_becomes_a_samsung_run_with_laps_and_wins_over_its_samsung_health_copy():
+    import fitgen
+    from sidekick import fit
+    start = datetime.fromtimestamp(ms(ANCHOR, 7) / 1000, timezone.utc)
+    act, summary = fit.parse(fitgen.run(start))
+    assert act.sport == "running" and act.local_date == ANCHOR.isoformat() and act.utc_offset_s == 3 * 3600
+    assert act.manufacturer == "Samsung" and act.device_id is None and abs(act.distance_m - 1440) < 1
+    assert act.samples.cad[10] == 164 and act.samples.hr[10] == 145 and abs(act.samples.speed[10] - 3.0) < 0.01
+    assert [l.intensity for l in act.laps] == ["ACTIVE", "REST"] and act.shape and summary["recorder"] == "FIT"
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    samsung.ingest(conn, "garmin", {"activities": [run(ANCHOR, "twin")]})  # Samsung Health's copy first
+    dates, runs = fit.ingest(conn, "garmin", fitgen.run(start))
+    assert runs == [act.source_id]
+    assert {r["source_id"]: r["source"] for r in conn.activity.find({})} == {"samsung-twin": "samsung", act.source_id: "garmin"}
+    samsung.ingest(conn, "garmin", {"activities": [{**run(ANCHOR, "twin"), "title": "again"}]})  # sent again: stays aside
+    assert conn.activity.find_one({"source_id": "samsung-twin"})["source"] == "samsung"
+    assert samsung.reconcile(conn, "garmin") == set()  # re-filing leaves it aside too
+    assert fit.ingest(conn, "garmin", fitgen.run(start)) == (set(), [])  # the same file again changes nothing
+
+
+def test_the_fit_endpoint_refuses_what_isnt_a_run(tmp_path):
+    import base64
+    import fitgen
+    c = Config(data_dir=tmp_path, source="fixture", timezone="Asia/Jerusalem", backfill_days=40, refetch_days=3,
+               raw_retention_days=120, request_spacing_s=0)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    client = TestClient(create_app(c, connector=FixtureConnector(ANCHOR)))
+    client.put("/v1/settings", json={"watch": "samsung"}, headers=h)
+    today = date.fromisoformat(client.get("/v1/status", headers=h).json()["today"])
+    good = fitgen.run(datetime.fromtimestamp(ms(today, 7) / 1000, timezone.utc))
+    r = client.post("/v1/fit", json={"name": "run.fit", "data": base64.b64encode(good).decode()}, headers=h)
+    assert r.status_code == 200 and r.json()["changed_runs"][0].startswith("fit-")
+    bad = client.post("/v1/fit", json={"name": "photo.jpg", "data": base64.b64encode(b"not a fit file").decode()}, headers=h)
+    assert bad.status_code == 422 and "photo.jpg" in bad.json()["detail"]

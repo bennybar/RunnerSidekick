@@ -82,7 +82,9 @@ def build(conn, source: str, report: dict) -> list[dict]:
         avg, spread = round(mean(cad)), max(cad) - min(cad)
         steady = spread <= 6
         v = "good" if steady and avg >= 165 else "ok"
-        out.append(check("cadence", "Cadence", f"{'Steady' if steady else 'Varied'} at {avg} steps/min", v))
+        step = report.get("step_length_m")
+        out.append(check("cadence", "Cadence", f"{'Steady' if steady else 'Varied'} at {avg} steps/min"
+                         + (f" · {step:.2f} m per step" if step else ""), v))
 
     # Aerobic decoupling (heart-rate drift) on steady runs
     dc = report.get("decoupling") or {}
