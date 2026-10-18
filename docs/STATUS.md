@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Weather in the export (2026-10-18, server only)
+- Open-Meteo lookups (WX_VERSION 2) add wind direction and gusts, and the conditions at the run's start and finish,
+  interpolated between the hourly values (wind direction the short way round). The summary stays the hour nearest the
+  middle. Estimates kept from before are looked up again on export (the old one stays if that fails).
+- Heat stress, from the hottest of start, middle and finish: dew point 13 °C or feels-like 20 °C Warm, 18/27 Hot (the
+  existing hot bar), 24/32 High heat stress; running context, not a medical assessment.
+- The run export's Conditions section has a start/finish table, wind direction and gusts and heat stress; the AI
+  context line has wind and heat stress, marked as an Open-Meteo estimate. No app screen changes.
+
 ## Delete a run; test recordings skipped (2026-10-16, v0.60.0)
 - Run screen › ⋮ › Delete run (confirmed): `DELETE /v1/activities/{sid}` moves the run to source `deleted` and records
   it in `deleted_run`; `save_activity` and Garmin's sync skip deleted runs, so no sync or upload (Garmin, Samsung Health,

@@ -108,3 +108,28 @@ def test_halves_and_dynamics_round_trip():
     h = run_export.halves(s, s.dyn["gct"])
     assert round(h[0]) == 260 and round(h[1]) == 270
     assert run_export.halves(s, [None] * len(t)) is None
+
+
+def test_weather_start_finish_wind_and_heat_stress():
+    conn, sid = synced()
+    a = rp.activity_by_source_id(conn, "fixture", sid)
+    conn.raw_payload.insert_one({"source": "fixture", "kind": "activity_summary", "source_key": sid,
+                                 "payload": {"startLatitude": 31.785141, "startLongitude": 34.762619}})
+    start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00"))
+    h0 = start.replace(minute=0, second=0, microsecond=0)
+    hours = [h0 + timedelta(hours=k) for k in range(4)]
+
+    def fake(url, params, timeout):
+        return Resp({"hourly": {"time": [h.strftime("%Y-%m-%dT%H:00") for h in hours], "temperature_2m": [20, 22, 24, 26],
+                                "relative_humidity_2m": [80, 75, 70, 65], "dew_point_2m": [16, 18.5, 19, 19],
+                                "apparent_temperature": [21, 23, 25, 27], "wind_speed_10m": [10, 12, 14, 16],
+                                "wind_gusts_10m": [20, 24, 28, 32], "wind_direction_10m": [350, 10, 30, 50]}})
+    w = weather.for_run(conn, a, fake)
+    f = (start - h0).total_seconds() / 3600
+    assert w["v"] == weather.WX_VERSION and abs(w["start"]["temperature_2m"] - (20 + 2 * f)) < 0.11
+    assert w["start"]["wind_direction_10m"] in range(350, 361) or w["start"]["wind_direction_10m"] <= 10  # across north
+    assert weather.compass(350) == "N" and weather.compass(225) == "SW"
+    assert weather.heat_stress(w) == "Hot"  # dew point 18.5 °C at the hour after the start: humid enough to count as hot
+    _, md = run_export.markdown(conn, "fixture", sid, fetch=no_net)
+    assert "Heat stress: **Hot**" in md and "| Start (" in md and "| Wind from |" in md and "gusts" in md
+    assert "interpolated" in md and "not recorded by the watch" in md

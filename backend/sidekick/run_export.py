@@ -12,6 +12,7 @@ import httpx
 
 from . import reports as rp
 from . import run_checks
+from . import weather
 from .db import one
 
 SCHEMA = "Runner Sidekick LLM Export v2"
@@ -176,6 +177,12 @@ def similar_details(conn, source: str, comp: dict) -> list[dict]:
     return out
 
 
+def wind_extra(w: dict) -> str:
+    """ " from the NW (315°), gusts 30 km/h" when the estimate has them."""
+    out = f" from the {weather.compass(w['wind_direction_10m'])} ({w['wind_direction_10m']:.0f}°)" if w.get("wind_direction_10m") is not None else ""
+    return out + (f", gusts {w['wind_gusts_10m']:.0f} km/h" if w.get("wind_gusts_10m") is not None else "")
+
+
 def med(xs: list) -> float | None:
     xs = [x for x in xs if x is not None]
     return median(xs) if xs else None
@@ -197,7 +204,6 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     cl = r.get("classified") or {}
     s = rp.samples_for(conn, a["id"])
     dc = r.get("decoupling") or {}
-    from . import weather
     wx = weather.for_run(conn, a, fetch)
     name = a.get("name") if a.get("name") and a["name"].strip().lower() not in ("running", "run") else None
     km = (a["distance_m"] or 0) / 1000
@@ -270,12 +276,28 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("## Conditions")
         add(f"Temperature: **{wx['temperature_2m']:.0f}°C**  ")
         for key, label, unit in (("relative_humidity_2m", "Humidity", "%"), ("dew_point_2m", "Dew point", "°C"),
-                                 ("wind_speed_10m", "Wind", " km/h"), ("apparent_temperature", "Feels like", "°C")):
+                                 ("apparent_temperature", "Feels like", "°C"), ("wind_speed_10m", "Wind", " km/h")):
             if wx.get(key) is not None:
-                add(f"{label}: **{wx[key]:.0f}{unit}**  ")
-        add(f"Weather source: **{wx['source']}**, an estimate for the start area (to about 1 km) at "
-            f"{datetime.fromisoformat(wx['hour_utc'].replace('Z', '+00:00')).astimezone(timezone(off)).strftime('%H:%M')}; "
-            "not recorded by the watch.")
+                add(f"{label}: **{wx[key]:.0f}{unit}**" + (wind_extra(wx) if key == "wind_speed_10m" else "") + "  ")
+        add(f"Heat stress: **{weather.heat_stress(wx)}** ({weather.STRESS_BASIS}; running context, not a medical assessment)  ")
+        local = lambda iso: datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone(off)).strftime("%H:%M")  # noqa: E731
+        st, en = wx.get("start") or {}, wx.get("end") or {}
+        if st.get("temperature_2m") is not None and en.get("temperature_2m") is not None:
+            add("")
+            add(f"| | Start ({local(st['at_utc'])}) | Finish ({local(en['at_utc'])}) |")
+            add("|---|---:|---:|")
+            for key, label, unit in (("temperature_2m", "Temperature", "°C"), ("apparent_temperature", "Feels like", "°C"),
+                                     ("relative_humidity_2m", "Humidity", "%"), ("dew_point_2m", "Dew point", "°C"),
+                                     ("wind_speed_10m", "Wind", " km/h"), ("wind_gusts_10m", "Gusts", " km/h")):
+                if st.get(key) is not None or en.get(key) is not None:
+                    add(f"| {label} | {num(st.get(key), '{:.0f}', unit)} | {num(en.get(key), '{:.0f}', unit)} |")
+            if st.get("wind_direction_10m") is not None or en.get("wind_direction_10m") is not None:
+                d = lambda x: f"{weather.compass(x['wind_direction_10m'])} ({x['wind_direction_10m']:.0f}°)" if x.get("wind_direction_10m") is not None else "–"  # noqa: E731
+                add(f"| Wind from | {d(st)} | {d(en)} |")
+            add("")
+            add("Start and finish: Open-Meteo's hourly values interpolated to those times.  ")
+        add(f"Weather source: **{wx['source']}**, an estimate for the start area (to about 1 km); the summary is the hour "
+            f"nearest the middle of the run ({local(wx['hour_utc'])}); not recorded by the watch.")
         add("")
 
     # 6. Heart-rate zones
@@ -531,7 +553,10 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     if said.get("health") and said["health"] != "normal":
         ctx.append(f"Health status reported by the runner: {word('health', said['health']).lower()}.")
     if wx:
-        ctx.append(f"Weather estimate: {wx['temperature_2m']:.0f}°C" + (f", dew point {wx['dew_point_2m']:.0f}°C" if wx.get("dew_point_2m") is not None else "") + ".")
+        ctx.append(f"Weather estimate (Open-Meteo, not the watch): {wx['temperature_2m']:.0f}°C"
+                   + (f", dew point {wx['dew_point_2m']:.0f}°C" if wx.get("dew_point_2m") is not None else "")
+                   + (f", wind {wx['wind_speed_10m']:.0f} km/h" + wind_extra(wx) if wx.get("wind_speed_10m") is not None else "")
+                   + f"; heat stress: {weather.heat_stress(wx).lower()}.")
     ctx += [f"{k} (that day): {v}." for k, v in rc]
     if wk:
         ctx.append(f"Week of the run: {wk.get('runs', 0)} run{'' if wk.get('runs') == 1 else 's'}, {(wk.get('distance_m') or 0) / 1000:.1f} km.")
