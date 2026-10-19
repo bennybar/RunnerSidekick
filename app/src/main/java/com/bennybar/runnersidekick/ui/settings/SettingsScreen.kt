@@ -339,6 +339,17 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
+                        row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
+                                "Your watch's estimate" else "Runner Sidekick's, from your steady runs (needs 3 in 60 days)",
+                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
+                            trailing = {
+                                androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("sidekick" to "Ours", "watch" to "Watch").forEach { (k, l) ->
+                                        androidx.compose.material3.FilterChip(r.vo2Source == k, enabled = !busy,
+                                            onClick = { if (r.vo2Source != k) vm.saveRemote(r.copy(vo2Source = k)) }, label = { Text(l) })
+                                    }
+                                }
+                            })
                         row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
                                 "Runner Sidekick's: the age your watch's VO₂ max is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,

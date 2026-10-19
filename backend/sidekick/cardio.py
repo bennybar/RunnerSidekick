@@ -121,8 +121,10 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False) -> tuple[dict | None,
     ht = wx.heat(wx.stored(conn, a["source_id"]))
     if ht is None:
         return None, "weather unknown"
-    if ht["hot"] and not allow_hot:
-        return None, "hot and humid"
+    # Only runs unusually hot for you are left out (humid, and 3 °C or more above your usual dew point), as in trends: an
+    # absolute bar would drop most runs in a humid climate. A warm run reads a little low (heat raises heart rate).
+    if ht["hot"] and not allow_hot and a["source_id"] in wx.unusually_hot(conn):
+        return None, "unusually hot and humid for you"
     if a.get("elevation_gain_m") is None or a.get("elevation_loss_m") is None or not a.get("distance_m"):
         return None, "elevation not recorded"  # unknown isn't flat
     km = a["distance_m"] / 1000
@@ -188,7 +190,7 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     if share > HRR_RANGE[1]:
         return None, "too hard for a reliable reading"
     vo2 = 3.5 + 0.2 * v * 60
-    return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1),
+    return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1), "hot": st["hot"],
             "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
 
 
@@ -214,26 +216,41 @@ def vdot(metres: float, seconds: float) -> float:
     return cost / share
 
 
-def build(conn, source: str, today: date) -> dict:
-    out = {"algorithm_version": CARDIO_VERSION, "experimental": True}
-    hm = hr_max(conn, source, today)
-    out["hr_max"] = hm
-    rhr = rp.series(conn, source, "resting_hr", today.isoformat())
+def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dict[str, int]]:
+    """The per-run estimates of the 60 days up to d, oldest first, and how many runs were left out for each reason."""
+    rhr = rp.series(conn, source, "resting_hr", d.isoformat())
 
-    def rest_before(d: str):
-        vals = [v for k, v in rhr.items() if (date.fromisoformat(d) - timedelta(days=28)).isoformat() <= k <= d]
+    def rest_before(day: str):
+        vals = [v for k, v in rhr.items() if (date.fromisoformat(day) - timedelta(days=28)).isoformat() <= k <= day]
         return median(vals) if len(vals) >= 7 else None
-
-    # 1. From your runs
-    since = (today - timedelta(days=RECENT_DAYS)).isoformat()
-    runs = rp.activities(conn, source, since, today.isoformat())
     used, left = [], {}
-    for a in runs:
+    for a in rp.activities(conn, source, (d - timedelta(days=RECENT_DAYS)).isoformat(), d.isoformat()):
         e, why = run_estimate(conn, a, rest_before(a["local_date"]), hm["value"])
         if e:
             used.append(e)
         else:
             left[why] = left.get(why, 0) + 1
+    return used, left
+
+
+def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
+    """Runner Sidekick's VO2 max as of d (the median of the last 8 qualifying runs of the 60 days before, from 3), with the
+    day of the newest of them; None until there are 3. What the scores use when the runner chose ours in Settings."""
+    hm = hr_max(conn, source, d)
+    if not hm.get("value"):
+        return None
+    recent = run_estimates(conn, source, d, hm)[0][-RECENT_RUNS:]
+    if len(recent) < 3:
+        return None
+    return round(median(e["value"] for e in recent), 1), date.fromisoformat(recent[-1]["date"])
+
+
+def build(conn, source: str, today: date) -> dict:
+    out = {"algorithm_version": CARDIO_VERSION, "experimental": True}
+    hm = hr_max(conn, source, today)
+    out["hr_max"] = hm
+    # 1. From your runs
+    used, left = run_estimates(conn, source, today, hm)
     recent = used[-RECENT_RUNS:]
     runs_part = {"id": "runs", "title": "From your runs", "runs_used": len(used), "left_out": left,
                  "points": used, "caveat": "An experimental combination of published equations (ACSM running equation, Swain's heart-rate reserve). "
@@ -247,7 +264,9 @@ def build(conn, source: str, today: date) -> dict:
                          sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
                                      f"about {round(median(lower))}.",
                          headline=f"from your last {len(recent)} qualifying runs",
-                         detail=f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
+                         detail=(f"{sum(e['hot'] for e in recent)} of these runs were warm and humid: heat raises heart rate, "
+                                 "which lowers the estimate a little. " if any(e["hot"] for e in recent) else "") +
+                                f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
                                 f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: your watch's overnight value (the "
                                 f"published relationship used seated resting measurements).")
     else:
@@ -302,8 +321,8 @@ def build(conn, source: str, today: date) -> dict:
                                         "headline": "Needs a run of 5 km or longer", "detail": ""})
 
     # 4. Garmin
-    from .scores import vo2_on
-    found = vo2_on(conn, source, today, today)  # the newest reading, from the daily series or Garmin's snapshot, and not stale
+    from .scores import watch_vo2
+    found = watch_vo2(conn, source, today, today)  # this place is the watch's own estimate, whatever the scores use  # the newest reading, from the daily series or Garmin's snapshot, and not stale
     gv = (found[0], found[1].isoformat()) if found else None
     out["garmin"] = ({"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "date": gv[1],
                       "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}

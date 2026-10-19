@@ -190,6 +190,7 @@ def test_switching_back_after_an_import_files_the_data_again():
 def test_fitness_vo2_follows_the_watch_and_isnt_compared_across_a_switch():
     from sidekick import scores
     conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "vo2_source", "watch")  # the watch's VO2 max (Settings › VO2 max for scores)
     conn.daily_observation.insert_one({"source": "garmin", "local_date": "2026-09-01", "metric": "garmin_vo2max_running",
                                        "value": 46.3, "state": "measured"})
     set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-09-20"}])
@@ -310,3 +311,13 @@ def test_a_deleted_run_stays_deleted_and_test_recordings_are_never_runs(tmp_path
     client.post("/v1/fit", json={"name": "r.fit", "data": base64.b64encode(good + b"").decode()}, headers=h)
     assert not any(a["source_id"] == sid for a in client.get("/v1/activities", headers=h).json())
     assert client.delete(f"/v1/activities/{sid}", headers=h).status_code == 404
+
+
+def test_climb_and_descent_from_altitude_when_samsung_leaves_them_out():
+    r = run(ANCHOR, seconds=1200)
+    r.pop("climb_m")
+    for i, p in enumerate(r["route"]):  # up 20 m, then back down
+        p[3] = 20 + (i if i < 600 else 1200 - i) * 20 / 600
+    a = samsung.activity(r)
+    assert abs(a.elevation_gain_m - 20) < 1 and abs(a.elevation_loss_m - 20) < 1
+    assert samsung.activity({**run(ANCHOR), "climb_m": 6, "descent_m": 5}).elevation_loss_m == 5  # Samsung's own, when given

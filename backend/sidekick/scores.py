@@ -90,17 +90,30 @@ def clock(sec: float) -> str:
 
 
 def vo2_maker(conn, d: date) -> str:
-    """Whose VO2 max estimate counts on d: the watch the runner had then ("Garmin" or "Samsung")."""
+    """Whose VO2 max counts on d: Runner Sidekick's own (from your runs) unless the runner chose the watch's in Settings,
+    and then the watch the runner had that day ("Garmin" or "Samsung")."""
+    if rp.get_setting(conn, "vo2_source", "sidekick") == "sidekick":
+        return "Runner Sidekick"
     from .samsung import SAMSUNG, watch_on
     return "Samsung" if watch_on(conn, d.isoformat()) == SAMSUNG else "Garmin"
 
 
 def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
+    """The VO2 max the scores use as of d, and the day it was measured: Runner Sidekick's own from your runs, or the
+    watch's when the runner chose that in Settings (see vo2_maker)."""
+    if vo2_maker(conn, d) == "Runner Sidekick":
+        from .cardio import own_vo2
+        return own_vo2(conn, source, d)
+    return watch_vo2(conn, source, d, today)
+
+
+def watch_vo2(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
     """The watch's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today)
     Garmin's current value with its own date. Samsung's on a Samsung day, Garmin's otherwise: the two use different
     formulas, so they're never mixed. Nothing older than VO2_MAX_AGE_DAYS."""
+    from .samsung import SAMSUNG, watch_on
     oldest = (d - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()
-    samsung = vo2_maker(conn, d) == "Samsung"
+    samsung = watch_on(conn, d.isoformat()) == SAMSUNG
     metric = "samsung_vo2max_running" if samsung else "garmin_vo2max_running"
     found = [(k, v) for k, v in rp.series(conn, source, metric, d.isoformat()).items() if k >= oldest]
     snap = {} if samsung else (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}

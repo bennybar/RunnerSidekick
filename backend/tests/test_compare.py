@@ -17,6 +17,8 @@ ANCHOR = date(2026, 9, 30)
 def synced():
     conn = connect(user_db_name(1, "fixture"))
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    from sidekick.db import set_setting
+    set_setting(conn, "vo2_source", "watch")  # these tests are about the watch's VO2 max (Settings › VO2 max for scores)
     return conn
 
 

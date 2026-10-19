@@ -122,6 +122,7 @@ class SettingsIn(BaseModel):
     week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
     watch: Literal["garmin", "samsung"] | None = None   # the runner's watch from today; switches are kept with their dates
     fitness_age_source: Literal["garmin", "sidekick"] | None = None  # whose fitness age to show
+    vo2_source: Literal["watch", "sidekick"] | None = None  # the VO2 max the scores use: Runner Sidekick's own (default) or the watch's
 
 
 class SamsungUploadIn(BaseModel):
@@ -895,7 +896,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 **{k: rp.get_setting(conn, k, None) for k in DATED_SETTINGS}, **{k + "_at": rp.get_setting(conn, k + "_at", None) for k in DATED_SETTINGS},
                 "week_start_effective": WEEKDAYS[rp.first_weekday(conn)],
                 "watch": samsung.watch_on(conn, today(conn).isoformat()), "watch_history": samsung.watch_history(conn),
-                "fitness_age_source": rp.get_setting(conn, "fitness_age_source", "garmin")}
+                "fitness_age_source": rp.get_setting(conn, "fitness_age_source", "garmin"),
+                "vo2_source": rp.get_setting(conn, "vo2_source", "sidekick")}
 
     @api.put("/v1/settings")
     def put_settings(body: SettingsIn, conn=Depends(db)):

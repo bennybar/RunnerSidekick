@@ -11,6 +11,8 @@ ANCHOR = date(2026, 9, 30)
 def synced():
     conn = connect(user_db_name(1, "fixture"))
     run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 60, 3, max_backfill_days=90)
+    from sidekick.db import set_setting
+    set_setting(conn, "vo2_source", "watch")  # these tests are about the watch's VO2 max (Settings › VO2 max for scores)
     return conn
 
 
@@ -172,3 +174,18 @@ def test_weight_source_and_body_fat_are_kept():
     assert [(o.metric, o.value, o.method) for o in scale] == [("weight", 78.0, "garmin_scale"), ("body_fat_pct", 17.5, "garmin_scale")]
     typed = normalise_weight("2026-10-01", {"dateWeightList": [{"weight": 78000.0, "bodyFat": None, "sourceType": "USER_SETTING"}]})
     assert typed[0].method == "garmin_entered" and typed[1].value is None
+
+
+def test_scores_use_our_own_vo2_by_default_and_never_the_watchs_then(monkeypatch):
+    from sidekick.db import set_setting
+    conn = synced()
+    set_setting(conn, "vo2_source", "sidekick")  # the default
+    assert scores.vo2_maker(conn, ANCHOR) == "Runner Sidekick"
+    assert scores.watch_vo2(conn, "fixture", ANCHOR, ANCHOR) is not None  # the watch's is still there (Cardio shows it)
+    # The fixture's runs have no weather, so none qualify yet: no VO2 part rather than the watch's
+    assert scores.vo2_on(conn, "fixture", ANCHOR, ANCHOR) is None
+    v = next(p for p in scores.build(conn, "fixture", ANCHOR)["fitness"]["components"] if p["id"] == "vo2max")
+    assert v["points"] is None and "Runner Sidekick" in v["say"]
+    monkeypatch.setattr("sidekick.cardio.own_vo2", lambda conn, source, d: (48.0, ANCHOR))
+    v = next(p for p in scores.build(conn, "fixture", ANCHOR)["fitness"]["components"] if p["id"] == "vo2max")
+    assert v["vo2"] == 48.0 and v["say"].startswith("48.0")

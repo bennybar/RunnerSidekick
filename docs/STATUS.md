@@ -332,6 +332,16 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## VO₂ max for scores: ours by default (2026-10-19, v0.61.0)
+- Settings › About you › VO₂ max for scores: Ours (default) or Watch (`vo2_source`). With ours, the fitness score,
+  VO₂ progress, Compare and the VO₂-based fitness age use Runner Sidekick's estimate from your runs (`cardio.own_vo2`:
+  the median of the last 8 qualifying runs of 60 days, from 3), and show "not enough runs yet" rather than the watch's
+  when there are fewer. The Cardio page's watch entry always shows the watch's (`scores.watch_vo2`).
+- Qualifying runs: only those unusually hot for the runner are left out (humid and 3 °C above the usual dew point, as in
+  trends), not every humid run; warm runs used are counted on the page (they read a little low).
+- Samsung runs without a total descent (and GTII files without totals) get climb and descent from their altitude
+  samples, read every 10 s (CONVERSION 5); the stored Samsung runs were filled in once from their samples.
+
 ## Weather in the export (2026-10-18, server only)
 - Open-Meteo lookups (WX_VERSION 2) add wind direction and gusts, and the conditions at the run's start and finish,
   interpolated between the hourly values (wind direction the short way round). The summary stays the hour nearest the

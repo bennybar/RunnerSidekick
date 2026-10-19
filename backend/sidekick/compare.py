@@ -66,10 +66,13 @@ def vo2_typical_age(sex: str, value: float) -> tuple[float | None, str]:
 
 def vo2_item(sex: str, age: int, g: dict) -> dict:
     v = (g.get("vo2max") or {}).get("value")
+    who = g.get("vo2_maker") or "Garmin"
     base = {"id": "vo2max", "title": "VO₂ max", "source": nm.VO2_SOURCE}
     if v is None:
-        return {**base, "status": "unavailable", "headline": "No VO₂ max from Garmin yet",
-                "detail": "Garmin estimates VO₂ max from outdoor runs with heart rate."}
+        return {**base, "status": "unavailable", "headline": f"No VO₂ max from {who} yet",
+                "detail": "Runner Sidekick's needs 3 steady, flat runs with good heart rate in the last 60 days (Settings › VO₂ max "
+                          "for scores can use the watch's instead)." if who == "Runner Sidekick" else
+                          f"{who} estimates VO₂ max from outdoor runs with heart rate."}
     i, outside = nm.band_index(nm.VO2_BANDS, age)
     lo, hi = nm.VO2_BANDS[i]
     pts = nm.VO2[sex][i]
@@ -92,11 +95,11 @@ def vo2_item(sex: str, age: int, g: dict) -> dict:
     return {**base, "status": "ok", "value": v, "unit": "mL/kg/min", "rating": rating, "percentile": round(pct) if pct is not None else None,
             "position": where, "group": grp, "typical_age": round(t_age) if t_age is not None else None,
             "headline": f"{rating} for {grp}",
-            "detail": f"Your VO₂ max of {v:.1f} (Garmin) is {pos}. It is {typical}.",
-            "method": "Garmin's VO₂ max placed among the Cooper Institute ratings for your sex and age group; the position between "
+            "detail": f"Your VO₂ max of {v:.1f} ({who}) is {pos}. It is {typical}.",
+            "method": f"{who}'s VO₂ max placed among the Cooper Institute ratings for your sex and age group; the position between "
                       "published percentiles is interpolated. 'Typical' is the midpoint of the 40th and 60th percentiles.",
             "caveats": nearest_note(outside, age, lo, hi) + [
-                "Garmin's VO₂ max is a watch estimate from pace and heart rate, not a lab test.",
+                f"{who}'s VO₂ max is an estimate from pace and heart rate, not a lab test.",
                 "The reference comes from people tested at the Cooper Institute clinic, not the general population."],
             "chart": {"type": "bands", "unit": "mL/kg/min", "bands": bands, "value": v, "higher_is_better": True}}
 
@@ -176,7 +179,7 @@ def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
                       "median), interpolated between age groups and rounded. Only within the table's age groups.",
             "caveats": ["Approximate: one point of VO₂ max can move it by several years.",
                         "Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
-                        f"{maker}'s VO₂ max is a watch estimate from pace and heart rate, not a lab test."],
+                        f"{maker}'s VO₂ max is an estimate from pace and heart rate, not a lab test."],
             "chart": {"type": "ages", "age": age, "fitness_age": f, "achievable": None, "vo2_age": vo2.get("typical_age")}}
 
 
@@ -326,7 +329,8 @@ def build(conn, source: str, today: date) -> dict:
     # The same VO2 max as the Fitness score: the newest dated reading, nothing older than the score allows
     from .scores import vo2_on
     now = vo2_on(conn, source, today, today)
-    g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None}
+    from .scores import vo2_maker
+    g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None, "vo2_maker": vo2_maker(conn, today)}
     vo2 = vo2_item(p["sex"], p["age"], g)
     from .scores import vo2_maker
     fa = (own_fitness_age_item(p["sex"], p["age"], vo2, vo2_maker(conn, today))

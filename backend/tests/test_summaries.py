@@ -44,6 +44,8 @@ def conn():
 
 
 def test_compare_and_trends_bundles_carry_facts_and_caveats(conn):
+    from sidekick.db import set_setting
+    set_setting(conn, "vo2_source", "watch")  # the fixture's runs don't qualify for our own VO2 max: the watch's carries the fact
     b = sm.compare_bundle(compare.build(conn, "fixture", ANCHOR))
     assert "vo2max" in b.facts and "resting_hr" in b.facts and b.items["compare:resting_hr"]["caveats"]
     t = sm.trends_bundle(build_trends(conn, "fixture", ANCHOR, 28, True))

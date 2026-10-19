@@ -16,7 +16,7 @@ from pymongo.database import Database
 
 from .connectors.base import Activity, Lap, RawPayload, Samples, valid_hr
 from .routes import shape_from_track
-from .samsung import MIN_RUN_M, MIN_RUN_S, SAME_RUN_S, SAMSUNG, _iso, watch_on
+from .samsung import MIN_RUN_M, MIN_RUN_S, SAME_RUN_S, SAMSUNG, _iso, climb, watch_on
 from .store import save_activity
 
 FIT_CONVERSION = 1          # raised when the conversion changes, so files sent again are converted again
@@ -104,6 +104,7 @@ def parse(data: bytes) -> tuple[Activity, dict]:
     sub = str(session.get("sub_sport") or "")
     kind = SPORTS.get((sport, sub)) or SPORTS.get((sport, None)) or "other"
     sid = f"fit-{int(start.timestamp())}"
+    gained = climb(t, elev) if t else None  # when the file has no totals
     sc = _v(session.get("avg_running_cadence")) or _v(session.get("avg_cadence"))
     first = next(((a, b) for a, b in zip(lat, lon) if a is not None and b is not None), None)
     summary = {"recorder": device.get("product_name") or "FIT", "records": len(recs), "laps": len(laps), "rr_intervals": len(rr),
@@ -114,7 +115,8 @@ def parse(data: bytes) -> tuple[Activity, dict]:
         local_date=(start + timedelta(seconds=offset or 0)).date().isoformat(), distance_m=_v(session.get("total_distance")),
         elapsed_s=_v(session.get("total_elapsed_time")), moving_s=float(moving) or _v(session.get("total_timer_time")),
         timer_s=_v(session.get("total_timer_time")), avg_hr=_v(session.get("avg_heart_rate")), max_hr=_v(session.get("max_heart_rate")),
-        elevation_gain_m=_v(session.get("total_ascent")), elevation_loss_m=_v(session.get("total_descent")),
+        elevation_gain_m=_v(session.get("total_ascent")) or (gained or (None, None))[0],
+        elevation_loss_m=_v(session.get("total_descent")) or (gained or (None, None))[1],
         avg_cadence_spm=(sc if cad_steps else 2 * sc) if sc else None,
         device_id=None, manufacturer="Samsung",  # recorded on the Galaxy Watch; no device ID, so it never starts a device era
         laps=out_laps, samples=samples, shape=shape, raw=[RawPayload("activity_summary", sid, summary)])

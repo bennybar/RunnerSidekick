@@ -627,6 +627,8 @@ data class SettingsDto(
     val watch: String? = null,
     /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the watch's VO2 max) */
     @SerialName("fitness_age_source") val fitnessAgeSource: String = "garmin",
+    /** The VO2 max the fitness score, fitness age and Compare use: "sidekick" (ours, from your runs) or "watch" */
+    @SerialName("vo2_source") val vo2Source: String = "sidekick",
 )
 
 @Serializable

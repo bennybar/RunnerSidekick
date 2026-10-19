@@ -35,7 +35,7 @@ WORN_GAP_S = 15 * 60         # time between two readings counts as worn up to 15
 NAP_MAX_S = 3 * 3600
 NIGHT_MIN_READINGS = 3       # a night's skin temperature or blood oxygen needs at least 3 readings inside it
 SPORTS = {"RUNNING": "running", "TRACK_RUNNING": "running", "TREADMILL": "treadmill_running"}
-CONVERSION = 4  # raised when the way a run is converted changes, so runs sent again are converted again
+CONVERSION = 5  # raised when the way a run is converted changes, so runs sent again are converted again
 
 
 # ---------------------------------------------------------------- which watch counts for a day
@@ -95,6 +95,21 @@ def reconcile(conn: Database, stream: str) -> set[str]:
 
 
 # ---------------------------------------------------------------- converting what the phone sends
+
+def climb(t: list[float], elev: list[float | None]) -> tuple[float, float] | None:
+    """Total climb and descent (m) from altitude samples, read every 10 s (GPS altitude jitters second to second); None
+    without enough altitude. For runs whose source doesn't give them (Samsung Health leaves out the descent)."""
+    pts, last = [], None
+    for ti, e in zip(t, elev):
+        if e is not None and (last is None or ti - last >= 10):
+            pts.append(e)
+            last = ti
+    if len(pts) < 10:
+        return None
+    up = sum(max(0.0, b - a) for a, b in zip(pts, pts[1:]))
+    down = sum(max(0.0, a - b) for a, b in zip(pts, pts[1:]))
+    return round(up, 1), round(down, 1)
+
 
 def fit_twin(conn: Database, stream: str, local_date: str, start_utc: str) -> bool:
     """A run recorded with GTII (a FIT file) starting within 5 minutes, in the analysis stream."""
@@ -198,16 +213,18 @@ def activity(a: dict) -> Activity:
     if route:  # where the run started, for its weather (rounded to ~1 km when looked up); the track itself isn't kept
         summary.update(startLatitude=route[0][1], startLongitude=route[0][2])
     sid = f"samsung-{a['uid']}"
+    gained = climb(samples.t, samples.elev) if samples else None  # for when Samsung leaves the totals out
     return Activity(
         source_id=sid, sport=SPORTS.get(str(a.get("type") or "").upper(), "other"), name=a.get("title") or None,
         start_utc=_iso(start), utc_offset_s=offset, local_date=_local_date(start_ms, offset),
         distance_m=total, elapsed_s=(a["end"] - start_ms) / 1000 if a.get("end") else _num(a.get("duration_s")),
         # Without a log (a workout entered by hand, say), the session's own duration stands in for moving time
         moving_s=float(moving) if moving else _num(a.get("duration_s")), timer_s=_num(a.get("duration_s")),
-        avg_hr=_num(a.get("avg_hr")), max_hr=_num(a.get("max_hr")), elevation_gain_m=_num(a.get("climb_m")),
+        avg_hr=_num(a.get("avg_hr")), max_hr=_num(a.get("max_hr")),
+        elevation_gain_m=_num(a.get("climb_m")) if _num(a.get("climb_m")) is not None else (gained or (None, None))[0],
         # Cadence the same way as the splits: time-weighted over moving samples that have one (Samsung's own average also
         # counts slow moments, so it reads lower); Samsung's figure stays in the raw summary
-        elevation_loss_m=_num(a.get("descent_m")), avg_cadence_spm=cadence if cadence else _num(a.get("avg_cadence")),
+        elevation_loss_m=_num(a.get("descent_m")) if _num(a.get("descent_m")) is not None else (gained or (None, None))[1], avg_cadence_spm=cadence if cadence else _num(a.get("avg_cadence")),
         device_id=a.get("device") or None, manufacturer="Samsung", laps=laps, samples=samples, shape=shape,
         raw=[RawPayload("activity_summary", sid, summary)])
 
