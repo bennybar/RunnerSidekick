@@ -29,7 +29,7 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.6"  # 0.6: HUNT with the model's activity coding and a seated pulse, the median for comparison only, medians at full precision; 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
+CARDIO_VERSION = "cardio-0.7"  # 0.7: bands and percentiles from unrounded values, sensitivity from unrounded readings; 0.6: HUNT with the model's activity coding and a seated pulse, the median for comparison only, medians at full precision; 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
@@ -55,7 +55,7 @@ HUNT_FREQUENCY = [("never", "Never", 0.0), ("lt_weekly", "Less than once a week"
                   ("2_3_weekly", "2–3 times a week", 2.0), ("almost_daily", "Almost every day", 3.0)]
 HUNT_INTENSITY = [("easy", "No sweating or heavy breathing", 0.0), ("sweat", "Sweating and heavy breathing", 5.0),
                   ("exhaustion", "Push myself to exhaustion", 10.0)]
-HUNT_DURATION = [("lt15", "Less than 15 minutes", 1.0), ("15_30", "15–30 minutes", 1.0), ("30_60", "30–60 minutes", 1.5),
+HUNT_DURATION = [("lt15", "Less than 15 minutes", 1.0), ("15_30", "15 to under 30 minutes", 1.0), ("30_60", "30–60 minutes", 1.5),
                  ("gt60", "More than 60 minutes", 1.5)]
 
 
@@ -84,7 +84,7 @@ def hunt_part(conn, source: str, sex: str | None, age: int | None, today: date) 
     v = b0 - b_age * age - b_waist * waist - b_rhr * r + b_pa * pa
     if not seated:
         caveat += (" Adapted: the study used a seated resting pulse; your watch's overnight value reads lower, so this "
-                   f"estimate reads higher (each 10 bpm adds about {10 * b_rhr:.1f}). Add a seated pulse below for the formula as published.")
+                   f"estimate reads higher (each 10 bpm adds about {10 * b_rhr:.1f}). Add a seated pulse below, measured as the study did.")
     return {**base, "status": "ok", "value": round(v), "value_exact": v, "pa_index": pa, "rhr_basis": "seated" if seated else "overnight",
             "headline": "from your answers and seated pulse" if seated else "adapted: with your watch's overnight resting heart rate",
             "caveat": caveat,
@@ -273,7 +273,7 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1),
             "exact": 3.5 + (vo2 - 3.5) / share, "hot": st["hot"],
             "hill_adjusted": st["hill_adjusted"],
-            "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
+            "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": hr, "hr_rest": hr_rest, "vo2": vo2}, None  # hr and cost unrounded: the sensitivity recalculates from them
 
 
 def _after_warmup(w) -> list[bool]:
@@ -478,7 +478,8 @@ def build(conn, source: str, today: date) -> dict:
             v = out[k].get("value")
             if v is None:
                 continue
-            it = cp.vo2_item(p["sex"], p["age"], {"vo2max": {"value": float(v)}})
+            # Placed by the unrounded value (46.45 is in the band from 46.4; rounded to 46 it wouldn't be), shown rounded
+            it = cp.vo2_item(p["sex"], p["age"], {"vo2max": {"value": float(out[k].get("value_exact", v))}})
             if it.get("status") != "ok":
                 continue
             pos = ("below the 40th percentile" if it["position"] == "below" else "above the 95th percentile" if it["position"] == "above"

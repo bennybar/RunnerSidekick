@@ -997,3 +997,10 @@ After the round-4 review:
   comparison only (cardio-0.6). Medians use unrounded per-run values.
 - Gradients ease in from 0.5% to 1.5% instead of a hard cut at 1% (0.99% → 0, 1.01% → +3.5% speed before;
   running-1.12). ±1 m flat noise still about +0.03%; a 50 m rise over 300 m reads +1.55% against +1.88% exact.
+
+## Round-5 corrections (2026-10-19, v0.68.0)
+- Each VO₂ estimate is placed in its band and percentile by its unrounded value (46.45 had read as 46, below the
+  Excellent band's 46.4); the ±5 bpm sensitivity recalculates from unrounded heart rate and cost (cardio-0.7).
+- HUNT wording: "15 to under 30 minutes" (30 belongs to 30–60 only); a seated pulse is "measured as the study did",
+  not "the formula as published" (the activity coding is still from a secondary report).
+- Cardio page: the median of the estimates is a collapsed technical detail under the evidence.

@@ -67,16 +67,22 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Cardio fitness", style = MaterialTheme.typography.headlineSmall)
             Text(c.basis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
+            // Technical detail, collapsed: the estimates side by side already show how far apart they are
             c.combined?.let { m ->
+                var open by remember { mutableStateOf(false) }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Median of the estimates", style = MaterialTheme.typography.titleMedium)
-                    Text(fmt(m.value), style = MaterialTheme.typography.headlineMedium, color = cs.primary)
-                    Text(m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" }, style = MaterialTheme.typography.bodyMedium)
-                    Text("For comparison: scores and fitness age use the VO₂ max chosen in Settings." + (if (m.inputs.size > 1) " The estimates range " +
-                        "${fmt(m.spread[0])}–${fmt(m.spread[1])}." else ""), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    TextButton(onClick = { open = !open }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                        Text(if (open) "Hide the median of the estimates" else "Median of the estimates (technical detail)")
+                    }
+                    if (open) {
+                        Text("${fmt(m.value)} from " + m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" },
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text("Not used by any score or by fitness age, which use the VO₂ max chosen in Settings. HUNT counts only with a " +
+                            "seated pulse.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
                 }
             }
-            listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
             if (c.notes.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("How they relate", style = MaterialTheme.typography.titleMedium)
                 c.notes.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }

@@ -1001,6 +1001,19 @@ def test_hunt_estimate_and_the_median_kept_as_a_comparison(tmp_path):
     assert cl.put("/v1/settings", headers=hd, json={"hunt_intensity": "hard"}).status_code == 422
 
 
+def test_cardio_places_each_estimate_by_its_unrounded_value():
+    from sidekick import cardio, compare
+    conn = synced()
+    out, pr = cardio.build(conn, "fixture", ANCHOR), compare.profile(conn, ANCHOR)
+    placed = [k for k in ("runs", "garmin", "hunt", "questionnaire") if out[k].get("comparison") and out[k].get("value_exact") is not None]
+    assert placed
+    for k in placed:
+        it = compare.vo2_item(pr["sex"], pr["age"], {"vo2max": {"value": out[k]["value_exact"]}})
+        assert out[k]["comparison"]["percentile"] == it["percentile"]
+    # The Fitness band starts at 46.4 for men 40–49: 46.45 is in it, 46 (its rounded value) isn't
+    assert compare.vo2_item("male", 43, {"vo2max": {"value": 46.45}})["rating"] != compare.vo2_item("male", 43, {"vo2max": {"value": 46.0}})["rating"]
+
+
 def test_gradients_ease_in_without_a_jump_and_a_short_steep_climb_mostly_counts():
     from statistics import mean
     from sidekick.analytics import running as rn
