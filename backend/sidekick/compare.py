@@ -248,14 +248,16 @@ def hrv_item(conn, source: str, today: date) -> dict:
         return {**base, "status": "unavailable", "headline": "No overnight HRV this week", "chart": chart,
                 "detail": "No nights with HRV in the last 7 days."}
     v = round(median(week))
+    last = max(d for d in in_era if d >= (today - timedelta(days=6)).isoformat())
+    nights = f"{len(week)} night{'s' if len(week) != 1 else ''}, latest {last}"  # what "this week" rests on
     if not b.sufficient:
         n = len([d for d in in_era if d >= (today - timedelta(days=bl.WINDOW_DAYS)).isoformat()])
-        return {**base, "status": "ok", "value": v, "unit": "ms", "headline": f"This week: {v} ms · still learning your range",
+        return {**base, "status": "ok", "value": v, "unit": "ms", "headline": f"This week: {v} ms ({nights}) · still learning your range",
                 "detail": f"Your usual range needs {bl.MIN_VALID} nights on this watch in the last {bl.WINDOW_DAYS} days; {n} so far.",
                 "caveats": ["HRV readings from different watches aren't compared."] if era else [], "chart": chart}
     where = "below" if v < b.q1 else "above" if v > b.q3 else "within"
     return {**base, "status": "ok", "value": v, "unit": "ms",
-            "headline": f"This week: {v} ms, {where} your usual range",
+            "headline": f"This week: {v} ms ({nights}), {where} your usual range",
             "detail": f"Median of {len(week)} night{'s' if len(week) != 1 else ''} this week, against your usual {round(b.q1)}–{round(b.q3)} ms "
                       f"(middle half of the last {bl.WINDOW_DAYS} days on this watch). Higher or lower than usual is a change worth "
                       "noticing alongside sleep and training, not a verdict on its own.",
