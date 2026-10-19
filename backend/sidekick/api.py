@@ -141,6 +141,11 @@ class SamsungUploadIn(BaseModel):
     offset_s: int | None = Field(default=None, ge=-14 * 3600, le=14 * 3600)    # the phone's UTC offset, for the heart-rate days
 
 
+class Vo2HoldIn(BaseModel):
+    """Leave a run out of Runner Sidekick's VO2 max (true) or take it back in (false)."""
+    held_out: bool
+
+
 class FitIn(BaseModel):
     """One FIT file (a run recorded with GTII), base64-encoded, with its file name for messages."""
     name: str = Field(max_length=200)
@@ -759,9 +764,6 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def get_routes(conn=Depends(db)):
         from . import routes
         return {"routes": routes.all_routes(conn, cfg.source), "basis": routes.BASIS, "algorithm_version": routes.ROUTES_VERSION}
-
-    class Vo2HoldIn(BaseModel):
-        held_out: bool
 
     @api.put("/v1/activities/{sid}/vo2-hold")
     def vo2_hold(sid: str, body: Vo2HoldIn, conn=Depends(db)):

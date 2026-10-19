@@ -415,3 +415,18 @@ def test_gps_altitude_noise_on_flat_ground_adds_no_climb_but_a_real_hill_still_c
     assert abs(uplift) < 0.005  # before smoothing: +1.7%
     hill = [20 + 0.03 * 2.9 * min(max(i - 600, 0), 600) - 0.03 * 2.9 * min(max(i - 1200, 0), 600) for i in range(n)]
     assert mean(gap_speeds(Samples(t, [150] * n, sp, d, hill, [165] * n))) / 2.9 - 1 > 0.01  # 3% up and down: still harder
+
+
+def test_holding_a_run_out_through_the_api(tmp_path):
+    c = Config(data_dir=tmp_path, source="fixture", timezone="Asia/Jerusalem", backfill_days=40, refetch_days=3,
+               raw_retention_days=120, request_spacing_s=0)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    client = TestClient(create_app(c, connector=FixtureConnector(ANCHOR)))
+    client.put("/v1/settings", json={"watch": "samsung"}, headers=h)
+    today = date.fromisoformat(client.get("/v1/status", headers=h).json()["today"])
+    sid = client.post("/v1/samsung", json={"activities": [run(today, "hold")]}, headers=h).json()["changed_runs"][0]
+    r = client.put(f"/v1/activities/{sid}/vo2-hold", json={"held_out": True}, headers=h)
+    assert r.status_code == 200 and r.json() == {"held_out": True}
+    assert client.get(f"/v1/activities/{sid}", headers=h).json()["report"]["vo2_ours"]["held_out"] is True
+    assert client.put(f"/v1/activities/{sid}/vo2-hold", json={"held_out": False}, headers=h).json() == {"held_out": False}
+    assert client.put("/v1/activities/nope/vo2-hold", json={"held_out": True}, headers=h).status_code == 404
