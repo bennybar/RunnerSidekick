@@ -10,7 +10,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.10"  # 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.11"  # 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -242,7 +242,11 @@ def as_dict(x) -> dict:
 
 # ---------------------------------------------------------------- grade-adjusted pace (Minetti et al. 2002)
 
-GRADE_WINDOW_M = 50.0   # grade measured over ~50 m of distance to smooth GPS/barometer noise
+GRADE_WINDOW_M = 100.0  # grade measured over ~100 m of distance, from altitude smoothed over 30 s: GPS altitude jitters by
+                        # a metre or two, and uphill costs more than downhill gives back, so unsmoothed noise reads as a climb
+                        # (measured: ±1 m noise on flat ground added 1.7% to the hill-adjusted pace; now about 0)
+ELEV_SMOOTH_S = 15.0    # ±15 s moving average of altitude
+FLAT_GRADE = 0.01       # gradients under 1% count as flat
 GRADE_CLAMP = 0.30      # outside ±30% the energy-cost model isn't reliable; clamp
 # Downhill, Minetti's energy cost falls to ~60% of flat at −10%, far more credit than runners get: heart-rate-based
 # grade adjustment (Strava's, 2017) bottoms out near 85% of flat. So a descent counts as at most 15% easier than flat.
@@ -258,17 +262,35 @@ def minetti_cost(i: float) -> float:
 
 
 def grades(s: Samples) -> list[float | None]:
-    """Per-sample gradient from distance and elevation over a ~50 m window; None where either is missing."""
+    """Per-sample gradient from distance and altitude (smoothed over ±15 s) over a ~100 m window, gradients under 1% as
+    flat; None where either is missing."""
+    # Symmetric around each sample (narrower near the start and end), so a steady climb isn't bent at the edges
+    elev: list[float | None] = []
+    lo = 0
+    for i in range(len(s.t)):
+        if s.elev[i] is None:
+            elev.append(None)
+            continue
+        r = min(ELEV_SMOOTH_S, s.t[i] - s.t[0], s.t[-1] - s.t[i])
+        while s.t[lo] < s.t[i] - r:
+            lo += 1
+        vals = []
+        k = lo
+        while k < len(s.t) and s.t[k] <= s.t[i] + r:
+            if s.elev[k] is not None and s.t[k] >= s.t[i] - r:
+                vals.append(s.elev[k])
+            k += 1
+        elev.append(sum(vals) / len(vals))
     out: list[float | None] = [None] * len(s.t)
     j = 0
     for i in range(len(s.t)):
-        if s.dist[i] is None or s.elev[i] is None:
+        if s.dist[i] is None or elev[i] is None:
             continue
-        while j < i and (s.dist[j] is None or s.elev[j] is None or s.dist[i] - s.dist[j] > GRADE_WINDOW_M):
+        while j < i and (s.dist[j] is None or elev[j] is None or s.dist[i] - s.dist[j] > GRADE_WINDOW_M):
             j += 1
-        if s.dist[j] is not None and s.elev[j] is not None and s.dist[i] - s.dist[j] >= GRADE_WINDOW_M * 0.6:
-            g = (s.elev[i] - s.elev[j]) / (s.dist[i] - s.dist[j])
-            out[i] = max(-GRADE_CLAMP, min(GRADE_CLAMP, g))
+        if s.dist[j] is not None and elev[j] is not None and s.dist[i] - s.dist[j] >= GRADE_WINDOW_M * 0.6:
+            g = (elev[i] - elev[j]) / (s.dist[i] - s.dist[j])
+            out[i] = 0.0 if abs(g) < FLAT_GRADE else max(-GRADE_CLAMP, min(GRADE_CLAMP, g))
     return out
 
 

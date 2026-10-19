@@ -247,7 +247,7 @@ def test_samsung_run_export_names_its_sources():
     rp.build_post_run(conn, "garmin", "samsung-e", False)
     md = run_export.markdown(conn, "garmin", "samsung-e", fetch=lambda *a, **k: None)[1]
     assert "VO₂ max (Samsung estimate, device value): **55.4**" in md and "Garmin estimate" not in md
-    assert "HR data quality: **Good**" in md and "VO₂ source: **Samsung (device estimate)**" in md
+    assert "Heart-rate recording quality: **Good**" in md and "VO₂ source: **Samsung (device estimate)**" in md
     assert "Running dynamics source: **Not accessible via the current Samsung integration**" in md
 
 
@@ -370,4 +370,48 @@ def test_a_hilly_run_gets_a_hill_adjusted_vo2_up_to_20_m_per_km():
         return conn.activity.find_one({"source_id": sid})
     est = cardio.estimate_for_run(conn, "garmin", hilly("h15", 15))
     assert est["value"] is not None and est["hill_adjusted"] is True
-    assert cardio.estimate_for_run(conn, "garmin", hilly("h30", 30)) == {"value": None, "why": "too hilly (over 20 m of climb per km)"}
+    too = cardio.estimate_for_run(conn, "garmin", hilly("h30", 30))
+    assert too["value"] is None and too["why"] == "too hilly (over 20 m of climb per km)"
+
+
+def test_a_run_held_out_leaves_our_vo2_but_keeps_its_own_value():
+    from sidekick import cardio
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    set_setting(conn, "hr_max", 188)
+    for k in range(12):
+        conn.daily_observation.insert_one({"source": "garmin", "local_date": (ANCHOR - timedelta(days=k)).isoformat(), "metric": "resting_hr",
+                                           "value": 50.0, "state": "measured", "method": "samsung_lowest_30min_hr"})
+    for i, hr in enumerate((150, 151, 152, 120)):  # the last one: heart rate that looks wrong
+        r = run(ANCHOR - timedelta(days=i), f"v{i}", seconds=2100, speed=2.8)
+        for e in r["log"]:
+            if e[1] is not None:
+                e[1] = hr
+        samsung.ingest(conn, "garmin", {"activities": [r]})
+        conn.run_weather.insert_one({"source_id": f"samsung-v{i}", "weather": {"temperature_2m": 18, "dew_point_2m": 10}, "checked_at": "z"})
+    hm = cardio.hr_max(conn, "garmin", ANCHOR)
+    with_all = cardio.own_vo2(conn, "garmin", ANCHOR)[0]
+    set_setting(conn, "vo2_held_out", ["samsung-v3"])
+    without = cardio.own_vo2(conn, "garmin", ANCHOR)[0]
+    used, left = cardio.run_estimates(conn, "garmin", ANCHOR, hm)
+    assert len(used) == 3 and left == {"held out by you": 1} and without < with_all
+    own = cardio.estimate_for_run(conn, "garmin", conn.activity.find_one({"source_id": "samsung-v3"}))
+    assert own["held_out"] is True and own["value"] is not None  # its own estimate still shows on the run
+
+
+def test_gps_altitude_noise_on_flat_ground_adds_no_climb_but_a_real_hill_still_counts():
+    import random
+    from statistics import mean
+    from sidekick.analytics.running import gap_speeds
+    from sidekick.connectors.base import Samples
+    n = 2400
+    t, sp, d = [float(i) for i in range(n)], [2.9] * n, [2.9 * i for i in range(n)]
+    random.seed(1)
+    wander, noisy = 0.0, []
+    for _ in range(n):  # dead-flat ground, GPS altitude: slow wander and ±1 m jitter
+        wander += random.gauss(0, 0.05)
+        noisy.append(20 + wander + random.gauss(0, 1.0))
+    uplift = mean(gap_speeds(Samples(t, [150] * n, sp, d, noisy, [165] * n))) / 2.9 - 1
+    assert abs(uplift) < 0.005  # before smoothing: +1.7%
+    hill = [20 + 0.03 * 2.9 * min(max(i - 600, 0), 600) - 0.03 * 2.9 * min(max(i - 1200, 0), 600) for i in range(n)]
+    assert mean(gap_speeds(Samples(t, [150] * n, sp, d, hill, [165] * n))) / 2.9 - 1 > 0.01  # 3% up and down: still harder

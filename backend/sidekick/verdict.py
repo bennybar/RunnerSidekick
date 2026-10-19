@@ -133,4 +133,4 @@ def above_share(conn, act: dict, cap: int) -> float | None:
 
 def hr_caveat(report: dict) -> str | None:
     q = report.get("hr_quality") or {}
-    return f"Heart rate looked {q['grade']} in parts, so this verdict is less certain." if q.get("grade") in ("questionable", "poor") else None
+    return f"The heart-rate recording looked {q['grade']} in parts, so this verdict is less certain." if q.get("grade") in ("questionable", "poor") else None

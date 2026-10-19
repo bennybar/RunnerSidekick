@@ -99,6 +99,13 @@ class Repository(
         runCatching { refreshAll() }
     }
 
+    /** Leaves a run out of Runner Sidekick's VO2 max, or takes it back in. */
+    suspend fun holdOutVo2(sid: String, held: Boolean) {
+        api.putRaw("/v1/activities/$sid/vo2-hold", """{"held_out":$held}""")
+        refreshActivity(sid)
+        runCatching { refreshCardio() }
+    }
+
     suspend fun differentRoute(sid: String) {
         api.post("/v1/activities/$sid/different-route")
         refreshRoutes()

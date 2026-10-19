@@ -980,4 +980,6 @@ data class RunVerdict(
 data class AgeGrade(@SerialName("age_grade_pct") val pct: Double, @SerialName("class") val gradeClass: String)
 
 @Serializable
-data class RunVo2(val value: Double? = null, val why: String? = null, @SerialName("hill_adjusted") val hillAdjusted: Boolean = false)
+data class RunVo2(val value: Double? = null, val why: String? = null, @SerialName("hill_adjusted") val hillAdjusted: Boolean = false,
+                  /** The runner left this run out of Runner Sidekick's VO2 max */
+                  @SerialName("held_out") val heldOut: Boolean = false)

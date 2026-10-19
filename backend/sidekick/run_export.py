@@ -236,7 +236,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             else f"VO₂ max (Runner Sidekick, from this run): not calculated ({ours.get('why')})  ")
     hrq = r.get("hr_quality")
     if hrq:
-        add(f"HR data quality: **{hrq['grade'].capitalize()}**" + (f" ({clock(hrq['flagged_s'])} flagged)" if hrq["flagged_s"] else "") + "  ")
+        add(f"Heart-rate recording quality: **{hrq['grade'].capitalize()}**" + (f" ({clock(hrq['flagged_s'])} flagged)" if hrq["flagged_s"] else "") + "  ")
     add("")
     if said:
         add(f"User intent: **{INTENT_WORDS.get(said['kind'], said['kind'])}**  ")
@@ -378,8 +378,9 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add(dc["hr_caveat"] + " Average heart rate, the zones and anything read from heart rate share this caveat.")
         add("")
     if hrq and hrq["stretches"]:
-        add("## Heart-rate data quality")
-        add(f"Grade: **{hrq['grade'].capitalize()}** · {hrq['method']} A heuristic, not a diagnosis.  ")
+        add("## Heart-rate recording quality")
+        add(f"Grade: **{hrq['grade'].capitalize()}** · {hrq['method']} A heuristic for dropouts and jumps: a smooth, complete trace "
+            "can still read too high or too low.  ")
         add("")
         add("| From | To | Why |")
         add("|---:|---:|---|")

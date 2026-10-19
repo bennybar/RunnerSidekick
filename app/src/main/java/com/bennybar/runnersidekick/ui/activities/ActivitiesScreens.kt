@@ -421,6 +421,12 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 if (fromWatch.isNotEmpty()) item {
                     Group(title = "VO₂ max and the watch's numbers") {
                         fromWatch.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) }
+                        // The runner can leave a run out of our VO2 max (heart rate that looked wrong, say): its own value stays here
+                        r.vo2Ours?.takeIf { it.value != null || it.heldOut }?.let { o ->
+                            row("Leave out of our VO₂ max", supporting = if (o.heldOut) "Held out by you: not in the estimate"
+                                else "For a run whose heart rate looked wrong",
+                                trailing = { androidx.compose.material3.Switch(checked = o.heldOut, onCheckedChange = { vm.holdOutVo2(it) }) })
+                        }
                         r.vo2Ours?.why?.let { why -> custom {
                             Text("No VO₂ max of ours from this run: $why. It needs a steady, flat run of 20+ minutes after the warm-up " +
                                 "with good heart rate.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -486,7 +492,7 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 }
             }
             Text("Pace uses moving time (stops excluded). Elapsed includes stops." + (r.hrQuality?.takeIf { it.grade != "good" }?.let { q ->
-                " Heart rate looked ${q.grade} in ${q.stretches.size} ${if (q.stretches.size == 1) "stretch" else "stretches"} (" +
+                " The heart-rate recording looked ${q.grade} in ${q.stretches.size} ${if (q.stretches.size == 1) "stretch" else "stretches"} (" +
                     q.stretches.take(3).joinToString { "${Format.duration(it.startS)}–${Format.duration(it.endS)}" } +
                     "), so read heart-rate numbers loosely."
             } ?: ""), style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))

@@ -332,6 +332,17 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Hold a run out of our VO₂; altitude noise fixed (2026-10-19, v0.65.0)
+- Run screen › VO₂ section › "Leave out of our VO₂ max" (`PUT /v1/activities/{sid}/vo2-hold`, setting `vo2_held_out`):
+  the run's own estimate stays on it, marked held out; the Cardio page counts it as "held out by you".
+- Gradients (running-1.11) from altitude smoothed over a symmetric ±15 s window, measured over 100 m, under 1% as flat:
+  ±1 m of GPS altitude noise on flat ground had added 1.7% to the hill-adjusted pace (uphill counts more than downhill
+  gives back); now about 0, and a real 3% hill keeps its adjustment. Affects flat-equivalent pace, decoupling and the
+  VO₂ estimate. Every run in the VO₂ estimate needs altitude for 90% of its stretch (cardio-0.4).
+- Wording: "Heart-rate recording quality" (a smooth trace can still read wrong) and a separate "unusual heart rate for
+  this pace" flag; subgroup medians "don't isolate watch accuracy or the effect of heat"; sensitivity as an example
+  ("if your actual maximum were 5 lower or higher"); the spread as the observed run range.
+
 ## VO₂ estimate, round 3 (2026-10-19, server only, cardio-0.3)
 - Hill-adjusted pace on every run the VO₂ estimate takes (practically the recorded pace on the flat), so there's no
   switch of method at 10 m/km; "hill-adjusted" only names runs above it. A hilly run needs a gradient for 90% of its

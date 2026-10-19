@@ -29,14 +29,14 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.3"  # 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
+CARDIO_VERSION = "cardio-0.4"  # 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
 MAX_NET_GRADE = 0.01        # the analysed stretch's overall rise or fall, at most 1%
 MAX_CLIMB_PER_KM = 10.0     # m/km, up and down each: flat enough for the ACSM level-ground equation on the recorded pace
 HILLY_MAX_CLIMB_PER_KM = 20.0  # m/km: up to here (VO2 estimate only) the hill-adjusted pace stands in for the recorded one
-MIN_GRADE_COVERAGE = 0.9       # ...and a hilly run needs a gradient for 90% of its stretch
+MIN_GRADE_COVERAGE = 0.9       # ...and every run needs a gradient for 90% of its stretch
 OUTLIER_VO2 = 5.0              # a run this far from the median is flagged for review (kept: high or low isn't proof of error)
 MIN_RUN_SPEED = 134.0 / 60  # m/s; slower is walking, where the running equation doesn't apply
 RECENT_DAYS, RECENT_RUNS = 60, 8
@@ -170,7 +170,7 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
         return None, "the stretch climbs or descends overall"
     if with_hr < MIN_HR_COVERAGE * seg:
         return None, "heart-rate gaps"
-    if hill_adjusted and with_grade < MIN_GRADE_COVERAGE * seg:  # a missing gradient would silently count as flat
+    if allow_hills and with_grade < MIN_GRADE_COVERAGE * seg:  # every run is hill-adjusted: a missing gradient would count as flat
         return None, "altitude missing for part of the run (needed to hill-adjust it)"
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
@@ -247,7 +247,11 @@ def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dic
     """The per-run estimates of the 60 days up to d, oldest first, and how many runs were left out for each reason. Runs
     from every watch count (the runner's choice), each estimate keeping which watch it came from."""
     used, left = [], {}
+    held = set(get_setting(conn, "vo2_held_out", []) or [])
     for a in rp.activities(conn, source, (d - timedelta(days=RECENT_DAYS)).isoformat(), d.isoformat()):
+        if a["source_id"] in held:  # the runner left it out (e.g. heart rate that looked wrong)
+            left["held out by you"] = left.get("held out by you", 0) + 1
+            continue
         e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"]), hm["value"])
         if e:
             e["watch"] = watch_of(a)
@@ -263,7 +267,8 @@ def estimate_for_run(conn, source: str, a: dict) -> dict:
     d = date.fromisoformat(a["local_date"])
     hm = hr_max(conn, source, d)
     e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"]), hm.get("value"))
-    return {k: e[k] for k in ("value", "hrr_share", "hot", "hill_adjusted")} if e else {"value": None, "why": why}
+    out = {k: e[k] for k in ("value", "hrr_share", "hot", "hill_adjusted")} if e else {"value": None, "why": why}
+    return {**out, "held_out": a["source_id"] in set(get_setting(conn, "vo2_held_out", []) or [])}
 
 
 def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
@@ -311,19 +316,21 @@ def build(conn, source: str, today: date) -> dict:
         n_hill = sum(e["hill_adjusted"] for e in recent)
         runs_part.update(status="ok", value=round(mid), spread=[round(min(vals)), round(max(vals))],
                          breakdown=[{"label": lab, "value": v} for lab, v in groups if v],
-                         sensitivity=f"With the same runs and a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}) it would be "
-                                     f"about {round(lower)}; 5 beats higher ({hm['value'] + 5:.0f}), about {round(higher)}.",
+                         sensitivity=f"If your actual maximum heart rate were 5 beats lower or higher ({hm['value'] - 5:.0f} or "
+                                     f"{hm['value'] + 5:.0f}), this estimate would be about {round(lower)}–{round(higher)}. An example of "
+                                     "how much it leans on that one number, not an uncertainty range.",
                          headline=f"from your last {len(recent)} qualifying runs",
-                         detail=f"The median of your last {len(recent)} qualifying runs, whatever the weather. Beside it, as descriptive "
-                                "subgroup medians (not estimates of their own): " + "; ".join(f"{lab} {v}" for lab, v in groups if v) + ". "
+                         detail=f"The median of your last {len(recent)} qualifying runs, whatever the weather; its observed run range "
+                                f"is {round(min(vals))}–{round(max(vals))} (how much runs differ, not the likely range of your true VO₂ max). "
+                                "Beside it, descriptive subgroup medians: " + "; ".join(f"{lab} {v}" for lab, v in groups if v) + ". "
+                                "Different runs, dates and conditions: these don't isolate watch accuracy or the effect of heat. "
                                 + ("Heat raises heart rate, which tends to lower a run's estimate; it isn't corrected for. "
                                    if any(e["hot"] for e in recent) else "")
-                                + (f"The estimate mixes {' and '.join(w.capitalize() for w in watches)} runs: their medians differ, which "
-                                   "may be how each watch measures heart rate rather than fitness. " if len(watches) > 1 else "")
+                                + (f"The estimate mixes {' and '.join(w.capitalize() for w in watches)} runs. " if len(watches) > 1 else "")
                                 + (f"{n_hill} {'run was' if n_hill == 1 else 'runs were'} hilly (10–20 m/km), on hill-adjusted pace: "
                                    "less precise than on the flat. " if n_hill else "")
-                                + ("Worth checking (far from the rest, kept): " + ", ".join(f"{e['date']} ({e['value']:.1f})" for e in odd)
-                                   + ". " if odd else "")
+                                + ("Unusual heart rate for this pace (kept unless you hold it out on the run): "
+                                   + ", ".join(f"{e['date']} ({e['value']:.1f})" for e in odd) + ". " if odd else "")
                                 + f"Maximum heart rate used: {hm['value']:.0f} bpm ({hm['source']}), an assumption, not a test; "
                                 "resting heart rate: your watch's overnight value.")
     else:

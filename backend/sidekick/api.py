@@ -760,6 +760,21 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         from . import routes
         return {"routes": routes.all_routes(conn, cfg.source), "basis": routes.BASIS, "algorithm_version": routes.ROUTES_VERSION}
 
+    class Vo2HoldIn(BaseModel):
+        held_out: bool
+
+    @api.put("/v1/activities/{sid}/vo2-hold")
+    def vo2_hold(sid: str, body: Vo2HoldIn, conn=Depends(db)):
+        """Leave a run out of Runner Sidekick's VO2 max (or take it back in): its own estimate stays on the run."""
+        a = one(conn.activity, {"source": cfg.source, "source_id": sid})
+        if a is None:
+            raise HTTPException(404, "No such run")
+        held = [x for x in rp.get_setting(conn, "vo2_held_out", []) or [] if x != sid] + ([sid] if body.held_out else [])
+        set_setting(conn, "vo2_held_out", held)
+        with report_lock(conn):
+            rp.build_post_run(conn, cfg.source, sid, synthetic)
+        return {"held_out": body.held_out}
+
     @api.delete("/v1/activities/{sid}")
     def delete_run(sid: str, conn=Depends(db)):
         """The runner deletes a run: it leaves runs, records, trends and reports, and is never imported again (Garmin's

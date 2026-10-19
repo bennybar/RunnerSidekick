@@ -511,7 +511,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     # Heart-rate quality: when parts look unreliable, what's read from heart rate says so (the readings stay as recorded)
     hrq = rn.hr_quality(samples_for(conn, a["id"]))
     if hrq and hrq["grade"] != "good":
-        dc = {**dc, "hr_caveat": f"Heart rate looked {hrq['grade']} in parts of this run, so read this loosely."}
+        dc = {**dc, "hr_caveat": f"The heart-rate recording looked {hrq['grade']} in parts of this run, so read this loosely."}
     if dc["eligible"]:
         v = dc["decoupling_pct"]
         findings.append({
