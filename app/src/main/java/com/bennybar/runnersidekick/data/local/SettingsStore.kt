@@ -70,7 +70,7 @@ class SettingsStore(private val context: Context) {
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
-            backendUrl = p[kUrl] ?: BuildConfig.DEFAULT_BACKEND_URL,
+            backendUrl = BuildConfig.DEFAULT_BACKEND_URL,  // built in, not a setting
             hasToken = p[kToken] != null,
             units = if (p[kImperial] == true) Units.IMPERIAL else Units.METRIC,
             currentMode = p[kMode],
@@ -108,7 +108,7 @@ class SettingsStore(private val context: Context) {
 
     suspend fun credentials(): Pair<String, String>? {
         val p = context.dataStore.data.first()
-        val url = p[kUrl] ?: BuildConfig.DEFAULT_BACKEND_URL
+        val url = BuildConfig.DEFAULT_BACKEND_URL
         val token = p[kToken]?.let { decrypt(it) } ?: return null
         return if (url.isBlank()) null else url to token
     }

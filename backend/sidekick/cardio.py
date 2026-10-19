@@ -29,7 +29,7 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.7"  # 0.7: bands and percentiles from unrounded values, sensitivity from unrounded readings; 0.6: HUNT with the model's activity coding and a seated pulse, the median for comparison only, medians at full precision; 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
+CARDIO_VERSION = "cardio-0.8"  # 0.8: seated pulse named self-measured; 0.7: bands and percentiles from unrounded values, sensitivity from unrounded readings; 0.6: HUNT with the model's activity coding and a seated pulse, the median for comparison only, medians at full precision; 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
@@ -82,14 +82,16 @@ def hunt_part(conn, source: str, sex: str | None, age: int | None, today: date) 
     b0, b_age, b_waist, b_rhr, b_pa = HUNT_EQ[sex]
     r = seated if seated else median(rhr)
     v = b0 - b_age * age - b_waist * waist - b_rhr * r + b_pa * pa
-    if not seated:
+    if seated:
+        caveat += " Your pulse is self-measured; the study measured resting heart rate by ECG after 5 minutes of rest."
+    else:
         caveat += (" Adapted: the study used a seated resting pulse; your watch's overnight value reads lower, so this "
-                   f"estimate reads higher (each 10 bpm adds about {10 * b_rhr:.1f}). Add a seated pulse below, measured as the study did.")
+                   f"estimate reads higher (each 10 bpm adds about {10 * b_rhr:.1f}). Add a self-measured seated pulse below.")
     return {**base, "status": "ok", "value": round(v), "value_exact": v, "pa_index": pa, "rhr_basis": "seated" if seated else "overnight",
-            "headline": "from your answers and seated pulse" if seated else "adapted: with your watch's overnight resting heart rate",
+            "headline": "from your answers and self-measured seated pulse" if seated else "adapted: with your watch's overnight resting heart rate",
             "caveat": caveat,
             "detail": f"{b0} − {b_age}×age {age} − {b_waist}×waist {waist:g} cm − {b_rhr}×resting heart rate {r:.0f} "
-                      f"({'seated' + (f', set {seated_at}' if seated_at else '') if seated else 'overnight, 4-week median'}) + {b_pa}×activity "
+                      f"({'self-measured seated' + (f', set {seated_at}' if seated_at else '') if seated else 'overnight, 4-week median'}) + {b_pa}×activity "
                       f"index {pa:g} = {v:.1f}" + (f" (waist set {waist_at})" if waist_at else "") + "."}
 
 
@@ -310,12 +312,12 @@ def rest_on(conn, source: str, day: str) -> float | None:
     return median(vals) if len(vals) >= 7 else None
 
 
-def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dict[str, int]]:
-    """The per-run estimates of the 60 days up to d, oldest first, and how many runs were left out for each reason. Runs
-    from every watch count (the runner's choice), each estimate keeping which watch it came from."""
+def run_estimates(conn, source: str, d: date, hm: dict, days: int = RECENT_DAYS) -> tuple[list[dict], dict[str, int]]:
+    """The per-run estimates of the 60 days (or `days`) up to d, oldest first, and how many runs were left out for each
+    reason. Runs from every watch count (the runner's choice), each estimate keeping which watch it came from."""
     used, left = [], {}
     held = set(get_setting(conn, "vo2_held_out", []) or [])
-    for a in rp.activities(conn, source, (d - timedelta(days=RECENT_DAYS)).isoformat(), d.isoformat()):
+    for a in rp.activities(conn, source, (d - timedelta(days=days)).isoformat(), d.isoformat()):
         if a["source_id"] in held:  # the runner left it out (e.g. heart rate that looked wrong)
             left["held out by you"] = left.get("held out by you", 0) + 1
             continue
@@ -350,6 +352,24 @@ def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     if len(recent) < 3:
         return None
     return median(e["exact"] for e in recent), date.fromisoformat(recent[-1]["date"])
+
+
+def own_vo2_series(conn, source: str, today: date, days: int = 120) -> list[dict]:
+    """Runner Sidekick's VO2 max as it stood after each qualifying run of the last `days` (the same rule as own_vo2, with
+    today's maximum heart rate), for the VO2 max tile and its trend."""
+    hm = hr_max(conn, source, today)
+    if not hm.get("value"):
+        return []
+    used = run_estimates(conn, source, today, hm, days + RECENT_DAYS)[0]
+    out = []
+    for i, e in enumerate(used):
+        if e["date"] < (today - timedelta(days=days)).isoformat():
+            continue
+        since = (date.fromisoformat(e["date"]) - timedelta(days=RECENT_DAYS)).isoformat()
+        recent = [x for x in used[:i + 1] if x["date"] >= since][-RECENT_RUNS:]
+        if len(recent) >= 3:
+            out.append({"date": e["date"], "value": round(median(x["exact"] for x in recent), 1)})
+    return out
 
 
 def build(conn, source: str, today: date) -> dict:

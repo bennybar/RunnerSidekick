@@ -92,3 +92,6 @@ def test_sidekick_fitness_age_stays_within_the_table_in_whole_years():
     assert compare.sidekick_fitness_age("male", 5.0) == (None, "below")
     it = compare.own_fitness_age_item("male", 46, {"status": "ok", "value": 90.0}, "Samsung")
     assert it["bound"] == "above" and it["fitness_age"] is None and "twenties" not in it["headline"] and "20–29" in it["headline"]
+    # Without a value, the message names the source chosen in Settings
+    assert "Runner Sidekick's VO₂ max" in compare.own_fitness_age_item("male", 46, {"status": "unavailable"}, "Runner Sidekick")["headline"]
+    assert "Samsung watch" in compare.own_fitness_age_item("male", 46, {"status": "unavailable"}, "Samsung")["headline"]

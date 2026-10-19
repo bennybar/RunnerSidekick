@@ -121,7 +121,8 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
                 "and the highest you've held for a minute.",
             onDismiss = { editing = null }) { v -> onSave { it.copy(hrMax = v?.toInt()) }; editing = null }
         "seated" -> NumberDialog("Resting pulse, seated (bpm)", answers?.restingPulseSeated?.toDouble(), 30.0..120.0, "Clear (use the watch's overnight value)",
-            hint = "Sit quietly for 5 minutes, then read your pulse on the watch (or count for 30 seconds and double it). The HUNT study measured it this way.",
+            hint = "Sit quietly for 5 minutes. Take a fresh heart-rate measurement on your watch (not its daily resting heart rate), or count " +
+                "your pulse for 60 seconds. The study measured resting heart rate by ECG after 5 minutes of rest.",
             onDismiss = { editing = null }) { v -> onSave { it.copy(restingPulseSeated = v?.toInt()) }; editing = null }
         "waist" -> NumberDialog("Waist (cm)", answers?.profileWaistCm, 50.0..200.0, "Clear",
             hint = "Around your waist at the navel, standing relaxed, after breathing out.",

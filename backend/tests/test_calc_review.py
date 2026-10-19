@@ -1001,6 +1001,25 @@ def test_hunt_estimate_and_the_median_kept_as_a_comparison(tmp_path):
     assert cl.put("/v1/settings", headers=hd, json={"hunt_intensity": "hard"}).status_code == 422
 
 
+def test_the_vo2_tile_follows_the_chosen_source(tmp_path):
+    from sidekick import cardio
+    from sidekick.auth import create_token
+    from test_multiuser import client, wait_sync
+    conn = synced()
+    for a in rp.activities(conn, "fixture", "0000-01-01", ANCHOR.isoformat()):
+        conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"checked_at": utc_now(), "weather": {
+            "temperature_2m": 18.0, "dew_point_2m": 10.0, "apparent_temperature": 18.0}}}, upsert=True)
+    series, now = cardio.own_vo2_series(conn, "fixture", ANCHOR), cardio.own_vo2(conn, "fixture", ANCHOR)
+    assert series and now and series[-1]["value"] == round(now[0], 1) and series[-1]["date"] == now[1].isoformat()
+    # Through the API: the watch's series by default, Runner Sidekick's once chosen
+    c = client(tmp_path)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    wait_sync(c, h)
+    assert c.get("/v1/fitness", headers=h).json()["vo2_maker"] in ("Garmin", "Samsung")
+    c.put("/v1/settings", headers=h, json={"vo2_source": "sidekick"})
+    assert c.get("/v1/fitness", headers=h).json()["vo2_maker"] == "Runner Sidekick"
+
+
 def test_cardio_places_each_estimate_by_its_unrounded_value():
     from sidekick import cardio, compare
     conn = synced()

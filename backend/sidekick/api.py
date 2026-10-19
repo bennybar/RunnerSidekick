@@ -628,10 +628,15 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, "samsung_vo2max_running" if on_samsung
                                                                      else "garmin_vo2max_running", d.isoformat()).items())
                if k >= (d - timedelta(days=120)).isoformat()]
+        maker = "Samsung" if on_samsung else "Garmin"
+        from .scores import vo2_maker
+        if vo2_maker(conn, d) == "Runner Sidekick":  # the runner chose Runner Sidekick's VO2 max in Settings
+            from .cardio import own_vo2_series
+            vo2, maker = own_vo2_series(conn, cfg.source, d), "Runner Sidekick"
         report = rp.build_insights(conn, cfg.source, d, synthetic)
         easy = next((i for i in report["insights"] if i["id"] == "easy_pace"), None)
         return {"garmin": None if on_samsung else rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2,
-                "vo2_maker": "Samsung" if on_samsung else "Garmin", "records": rp.records(conn, cfg.source),
+                "vo2_maker": maker, "records": rp.records(conn, cfg.source),
                 "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
     summary_inflight: set[tuple] = set()

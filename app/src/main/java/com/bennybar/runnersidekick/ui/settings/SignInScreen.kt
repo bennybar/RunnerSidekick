@@ -70,7 +70,7 @@ fun SignInScreen() {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(repo.signInNote.value.also { repo.signInNote.value = null }) }
     var manual by remember { mutableStateOf(false) }
-    var url by remember { mutableStateOf(BuildConfig.DEFAULT_BACKEND_URL) }
+    val url = BuildConfig.DEFAULT_BACKEND_URL  // built in, not a setting
     var token by remember { mutableStateOf("") }
     val googleReady = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
 
@@ -116,15 +116,12 @@ fun SignInScreen() {
         error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
         TextButton(onClick = { manual = !manual }) { Text(if (manual) "Hide device token" else "Use a device token instead") }
         if (manual) {
-            // URL and token keyboards: no autocorrect (it turns "http" into "https" and mangles tokens)
-            OutlinedTextField(url, { url = it.trim() }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                    autoCorrectEnabled = false))
+            // Token keyboard: no autocorrect (it mangles tokens)
             OutlinedTextField(token, { token = it.trim() }, label = { Text("Device token (rsk_…)") }, singleLine = true,
                 visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
                     autoCorrectEnabled = false))
-            Button(enabled = !busy && url.isNotBlank() && token.startsWith("rsk_"), modifier = Modifier.fillMaxWidth(), onClick = {
+            Button(enabled = !busy && token.startsWith("rsk_"), modifier = Modifier.fillMaxWidth(), onClick = {
                 scope.launch {
                     busy = true; error = null
                     try {

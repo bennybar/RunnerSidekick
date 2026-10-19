@@ -159,8 +159,11 @@ def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
     base = {"id": "fitness_age", "title": "VO₂-based fitness age", "source": "Runner Sidekick"}
     v = vo2.get("value") if vo2.get("status") == "ok" else None
     if v is None:
-        return {**base, "status": "unavailable", "headline": "Needs a VO₂ max from your watch",
-                "detail": "Runner Sidekick's fitness age comes from your watch's VO₂ max."}
+        ours = maker == "Runner Sidekick"
+        return {**base, "status": "unavailable",
+                "headline": "Needs Runner Sidekick's VO₂ max (3 qualifying runs)" if ours else f"Needs a VO₂ max from your {maker} watch",
+                "detail": "Runner Sidekick's fitness age comes from the VO₂ max chosen in Settings: "
+                          + ("Runner Sidekick's estimate from your runs, which needs 3 qualifying runs in 60 days." if ours else f"{maker}'s.")}
     f, where = sidekick_fitness_age(sex, v)
     lo, hi = nm.VO2_BANDS[0], nm.VO2_BANDS[-1]
     who = SEX_WORD[sex][1]

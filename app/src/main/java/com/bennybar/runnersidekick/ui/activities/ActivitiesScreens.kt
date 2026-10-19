@@ -423,12 +423,12 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         fromWatch.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) }
                         // The runner can leave a run out of our VO2 max (heart rate that looked wrong, say): its own value stays here
                         r.vo2Ours?.takeIf { it.value != null || it.heldOut }?.let { o ->
-                            row("Leave out of our VO₂ max", supporting = if (o.heldOut) "Held out by you: not in the estimate"
+                            row("Leave out of Runner Sidekick's VO₂ max", supporting = if (o.heldOut) "Held out by you: not in the estimate"
                                 else "For a run whose heart rate looked wrong",
                                 trailing = { androidx.compose.material3.Switch(checked = o.heldOut, onCheckedChange = { vm.holdOutVo2(it) }) })
                         }
                         r.vo2Ours?.why?.let { why -> custom {
-                            Text("No VO₂ max of ours from this run: $why. It needs a steady, flat run of 20+ minutes after the warm-up " +
+                            Text("No Runner Sidekick VO₂ max from this run: $why. It needs a steady, flat run of 20+ minutes after the warm-up " +
                                 "with good heart rate.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } }
                     }
@@ -478,8 +478,8 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 Format.duration(a.movingS) to (if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "moving · ${Format.duration(a.elapsedS)} total" else "moving"),
                 "+${Format.elevation(a.elevationGainM, units)}" to "climb",
                 // Ours from this run, big; the watch's beside it
-                if (ours != null) "%.0f".format(ours) to ("VO₂ ours" + (vo2?.let { " · ${r.watch} $it" } ?: ""))
-                else (vo2 ?: "—") to ("VO₂ (${r.watch})" + (if (vo2 != null) " · ours: n/a" else "")),
+                if (ours != null) "%.0f".format(ours) to ("VO₂ Sidekick" + (vo2?.let { " · ${r.watch} $it" } ?: ""))
+                else (vo2 ?: "—") to ("VO₂ (${r.watch})" + (if (vo2 != null) " · Sidekick: n/a" else "")),
             )
             tiles.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {

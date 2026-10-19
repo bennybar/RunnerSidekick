@@ -228,7 +228,7 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
         avg = sum(st) / len(st)
         parts.append(part("steps", "Daily steps", 100 * (avg - 2000) / (target - 2000), f"{round(avg):,} a day · our reference target {target:,}",
                           f"Average of the last 2 weeks ({len(st)} days); 2,000 scores 0, {target:,} scores 100. The target sits where Paluch "
-                          "et al. 2022 saw the mortality association level off; the line between is ours",
+                          "et al. 2022 saw the mortality association level off; the line between is Runner Sidekick's",
                           (f"About {round(target - avg):,} more steps a day would reach {target:,}", 100, "over 2 weeks")))
     else:
         parts.append(part("steps", "Daily steps", None, "Needs 7 days of steps", "Average of the last 2 weeks"))
@@ -389,7 +389,7 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
         rating = compare.vo2_item(prof["sex"], age, {"vo2max": {"value": vp["vo2"]}}).get("rating")
         fitness["label"] = rating or fitness["label"]
     fitness["note"] = ("Sidekick fitness points: your VO₂ max percentile for your age and sex where the published table has "
-                       "one (40th–95th), our own extension outside it, so not a percentile there.")
+                       "one (40th–95th), Runner Sidekick's own extension outside it, so not a percentile there.")
     if fitness.get("status") != "unavailable":
         from . import progress
         fitness["progress"] = progress.build(conn, source, today)
@@ -399,6 +399,6 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
                                 "steps partly reward the same movement)"},
             # The time each number looks at, so it's clear why they move differently
             "horizon": {"health": "Last 2–4 weeks", "fitness": "Latest VO₂ estimate"},
-            "basis": "Fixed weights; each counted part is anchored to a published reference, the point curves are ours. Missing parts "
+            "basis": "Fixed weights; each counted part is anchored to a published reference, the point curves are Runner Sidekick's. Missing parts "
                      "are listed, never guessed. Context lines aren't counted. Trends use today's reference group. Not a medical score.",
             "algorithm_version": SCORES_VERSION}

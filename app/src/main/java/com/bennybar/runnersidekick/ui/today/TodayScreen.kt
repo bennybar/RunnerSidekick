@@ -227,7 +227,7 @@ private fun NoReport(busy: Boolean, notConnected: Boolean, onOpenSettings: () ->
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             when {
-                notConnected -> EmptyState(Icons.Outlined.LinkOff, "Connect your backend", "Enter the backend address and device token to load your data.") {
+                notConnected -> EmptyState(Icons.Outlined.LinkOff, "Not signed in", "Sign in to load your data.") {
                     Button(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, null); Spacer(Modifier.width(8.dp)); Text("Open settings") }
                 }
                 busy -> Column(Modifier.fillMaxWidth().padding(top = 96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -341,9 +341,9 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
 @Composable
 private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
                      onTap: (Finding) -> Unit) {
-    // Garmin's current VO2 max; with the Samsung watch, its latest estimate
-    val vo2 = fitness?.garmin?.vo2max?.value ?: fitness?.vo2maxSeries?.lastOrNull()?.value
+    // The VO2 max chosen in Settings: Runner Sidekick's (its series), else Garmin's current one, or the Samsung watch's latest
     val maker = fitness?.vo2Maker ?: "Garmin"
+    val vo2 = (if (maker == "Runner Sidekick") null else fitness?.garmin?.vo2max?.value) ?: fitness?.vo2maxSeries?.lastOrNull()?.value
     // null marks the VO2 max tile's slot, right after the overnight readings
     val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -353,7 +353,7 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { f ->
                     if (f == null) {
-                        // The watch's VO2 max (one decimal, as the watch shows it), with the change over about four weeks
+                        // The chosen VO2 max (one decimal), with the change over about four weeks
                         val series = fitness!!.vo2maxSeries
                         val old = series.lastOrNull { java.time.LocalDate.parse(it.date) <= java.time.LocalDate.parse(r.localDate).minusDays(28) }
                         val ch = old?.let { vo2!! - it.value }

@@ -1004,3 +1004,18 @@ After the round-4 review:
 - HUNT wording: "15 to under 30 minutes" (30 belongs to 30–60 only); a seated pulse is "measured as the study did",
   not "the formula as published" (the activity coding is still from a secondary report).
 - Cardio page: the median of the estimates is a collapsed technical detail under the evidence.
+
+## Round-6 wording; VO₂ tile follows the setting (2026-10-19, v0.68.1)
+- Seated pulse: "a fresh heart-rate measurement on your watch (not its daily resting heart rate), or count your pulse for
+  60 seconds"; named "self-measured", with "the study measured resting heart rate by ECG after 5 minutes of rest"
+  (cardio-0.8). It still replaces the overnight value without the "adapted" label.
+- Fitness age (ours) without a value names the chosen source ("Needs our VO₂ max estimate (3 qualifying runs)", or the
+  watch's) instead of always "from your watch".
+- Today's VO₂ max tile follows Settings › VO₂ max for scores: with Runner Sidekick's chosen, `/v1/fitness` sends its
+  series (`cardio.own_vo2_series`: the median as it stood after each qualifying run, 120 days) and the tile shows it,
+  where it used to show the watch's (Samsung's) even then.
+- Wording: "Runner Sidekick" instead of "ours" in sentences, "Sidekick" on the chips and the run hero tile; Settings descriptions
+  no longer say "this watch's runs" or "your watch's VO₂ max" for Runner Sidekick's options.
+- The server address is built in (release: runnersidekick.ibarak.org; debug: the emulator's local backend) and no
+  longer a setting: Settings' Server row and the sign-in screen's address field are gone (the device-token sign-in
+  stays, against the built-in address).

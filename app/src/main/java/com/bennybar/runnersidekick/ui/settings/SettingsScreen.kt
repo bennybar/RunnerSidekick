@@ -39,7 +39,6 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Watch
-import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FileDownload
@@ -137,17 +136,6 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
             message.value = done
             launch { runCatching { after() } }  // its errors aren't this save's
         }
-
-    fun saveBackend(url: String, token: String) = saveFrom("backend", "Connected",
-        after = { repo.refreshAll(); remote.value = repo.remoteSettings() }) {
-        // The saved token never goes to a new address: a new server needs its own token (the sheet asks for one), and
-        // whatever is saved is checked there first, so a wrong address or token can't sign you out
-        val sameHost = url.trimEnd('/') == repo.settings.credentials()?.first?.trimEnd('/')
-        val use = token.ifBlank { if (sameHost) repo.settings.credentials()?.second ?: "" else "" }
-        if (use.isBlank()) throw com.bennybar.runnersidekick.data.remote.ApiException.Http(400, "Enter the device token for this server.")
-        repo.checkToken(url, use)?.let { throw com.bennybar.runnersidekick.data.remote.ApiException.Http(401, it) }
-        repo.settings.setBackend(url, token)
-    }
 
     fun saveRemote(s: SettingsDto, sheet: String? = null) = saveFrom(sheet, "Saved") { remote.value = repo.saveRemoteSettings(s) }
 
@@ -305,8 +293,6 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
                             else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                         })
-                    row("Server", supporting = local?.backendUrl ?: "", icon = if (s?.connection?.state == "connected") Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("backend") })
                     row("Sign out", supporting = "Removes the token and cached data from this phone", icon = Icons.AutoMirrored.Outlined.Logout,
                         iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "signout" })
                     if (m?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
@@ -347,22 +333,22 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
                         row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
-                                "Your watch's estimate" else "Runner Sidekick's experimental estimate, from this watch's steady runs (needs 3 in 60 days)",
+                                "Your watch's estimate" else "Runner Sidekick's experimental estimate, from your steady runs on any watch (needs 3 in 60 days)",
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
                                 androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("watch" to "Watch", "sidekick" to "Ours").forEach { (k, l) ->
+                                    listOf("watch" to "Watch", "sidekick" to "Sidekick").forEach { (k, l) ->
                                         androidx.compose.material3.FilterChip(r.vo2Source == k, enabled = !busy,
                                             onClick = { if (r.vo2Source != k) vm.saveRemote(r.copy(vo2Source = k)) }, label = { Text(l) })
                                     }
                                 }
                             })
                         row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
-                                "Runner Sidekick's: the age your watch's VO₂ max is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
+                                "Runner Sidekick's: the age your VO₂ max (as chosen above) is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
                                 androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("garmin" to "Garmin", "sidekick" to "Ours").forEach { (k, l) ->
+                                    listOf("garmin" to "Garmin", "sidekick" to "Sidekick").forEach { (k, l) ->
                                         androidx.compose.material3.FilterChip(r.fitnessAgeSource == k, enabled = !busy,
                                             onClick = { if (r.fitnessAgeSource != k) vm.saveRemote(r.copy(fitnessAgeSource = k)) }, label = { Text(l) })
                                     }
@@ -453,8 +439,6 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     }
     val r = remote
     when (open) {
-        "backend" -> BackendSheet(local?.backendUrl ?: "", local?.hasToken == true, busy, sheetError, onClose = close) { url, token ->
-            vm.saveBackend(url, token) }
         "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = close) {
             ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
         "training" -> r?.let { TrainingSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "training") } }
@@ -598,22 +582,6 @@ private fun Label(text: String, hint: String? = null) {
     Column {
         Text(text, style = MaterialTheme.typography.titleMedium)
         hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-    }
-}
-
-@Composable
-private fun BackendSheet(current: String, hasToken: Boolean, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (String, String) -> Unit) {
-    var url by rememberSaveable { mutableStateOf(current) }
-    var token by remember { mutableStateOf("") }
-    val newHost = url.trim().trimEnd('/') != current.trimEnd('/')
-    SectionSheet("Server", dirty = url != current || token.isNotBlank(), canSave = !busy && url.isNotBlank() && (token.isNotBlank() || (hasToken && !newHost)),
-        onSave = { onSave(url, token) }, onClose = onClose, error = error) {
-        OutlinedTextField(url, { url = it }, label = { Text("Backend URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false))
-        OutlinedTextField(token, { token = it }, label = { Text(if (hasToken && !newHost) "Device token (saved, enter to replace)" else "Device token for this server") },
-            supportingText = if (newHost && hasToken) ({ Text("Your saved token isn't sent to a new server; enter the one for it.") }) else null,
-            singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
     }
 }
 
