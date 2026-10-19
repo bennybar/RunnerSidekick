@@ -438,6 +438,10 @@ data class PostRunReport(
     @SerialName("hr_quality") val hrQuality: HrQuality? = null,
     /** How the run went against what it was meant to be (a verdict, not a score); a race's age grade */
     val verdict: RunVerdict? = null,
+    /** The watch that recorded the run: "Garmin" or "Samsung" */
+    val watch: String = "Garmin",
+    /** Runner Sidekick's VO2 max from this run, or why it doesn't give one */
+    @SerialName("vo2_ours") val vo2Ours: RunVo2? = null,
     @SerialName("garmin_readiness_day") val garminReadinessDay: Point? = null,
     val splits: List<Split> = emptyList(),
     val classification: Classification,
@@ -968,3 +972,6 @@ data class RunVerdict(
 
 @Serializable
 data class AgeGrade(@SerialName("age_grade_pct") val pct: Double, @SerialName("class") val gradeClass: String)
+
+@Serializable
+data class RunVo2(val value: Double? = null, val why: String? = null)

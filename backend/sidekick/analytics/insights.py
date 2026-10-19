@@ -87,7 +87,7 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     q = "How is your running time spread across heart-rate zones?"
     if not zones or not zones.get("floors"):
         return insight("intensity", q, "training", "not_enough_data", "Heart-rate zones not available",
-                       "Garmin heart-rate zones couldn't be read, so intensity can't be grouped.", method="time in Garmin HR zones")
+                       "Your heart-rate zones (from your Garmin profile) couldn't be read, so intensity can't be grouped.", method="time in your HR zones (from your Garmin profile)")
     floors = zones["floors"]  # zone1..zone5 floors in bpm
     # Runs whose heart rate covers most of their moving time (the same rule as drift): a few valid seconds aren't a run's intensity
     def covered(r):
@@ -100,7 +100,7 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     if len(usable) < MIN_RUNS:
         return insight("intensity", q, "training", "not_enough_data", "Not enough runs yet",
                        f"Needs {MIN_RUNS} runs with heart rate over at least {rn.MIN_ZONE_COVERAGE:.0%} of the run; {len(usable)} so far.",
-                       n=len(usable), method="time in Garmin HR zones")
+                       n=len(usable), method="time in your HR zones (from your Garmin profile)")
     totals = [0.0] * 6
     hard_runs = 0
     per_run = []
@@ -127,13 +127,13 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
                        f"{hard_runs} of {n} runs spent at least half their moving time above {floors[3]} bpm (your zone 4). "
                        f"Only {round(100 * easy)}% of running time was in zones 1–3.",
                        n=n, effect=effect, evidence=[r.source_id for r in usable], date_range=[usable[0].local_date, usable[-1].local_date],
-                       method="Moving-time share per Garmin HR zone, all runs, gaps and stops excluded.", confounders=caveat, chart=chart,
+                       method="Moving-time share per HR zone (zones from your Garmin profile), all runs, gaps and stops excluded.", confounders=caveat, chart=chart,
                        practical=f"Many endurance plans keep most running easy, below about {floors[2]} bpm on your zones. "
                                  "If building endurance is the goal, some genuinely easy runs could be worth trying. "
                                  "If hard running is deliberate, this is just a description.")
     return insight("intensity", q, "training", "no_clear_pattern", f"Mixed intensity: {round(100 * easy)}% easy, {round(100 * hard)}% hard",
                    "Your running time is spread across zones rather than concentrated at high intensity.", n=n, effect=effect,
-                   evidence=[r.source_id for r in usable], method="Moving-time share per Garmin HR zone.", confounders=caveat, chart=chart)
+                   evidence=[r.source_id for r in usable], method="Moving-time share per HR zone (zones from your Garmin profile).", confounders=caveat, chart=chart)
 
 
 # ---------------------------------------------------------------- I2 aerobic efficiency trend

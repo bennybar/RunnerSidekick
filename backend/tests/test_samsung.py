@@ -321,3 +321,15 @@ def test_climb_and_descent_from_altitude_when_samsung_leaves_them_out():
     a = samsung.activity(r)
     assert abs(a.elevation_gain_m - 20) < 1 and abs(a.elevation_loss_m - 20) < 1
     assert samsung.activity({**run(ANCHOR), "climb_m": 6, "descent_m": 5}).elevation_loss_m == 5  # Samsung's own, when given
+
+
+def test_a_run_says_which_watch_and_gives_our_vo2_or_why_not():
+    from sidekick import reports as rp
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    samsung.ingest(conn, "garmin", {"activities": [{**run(ANCHOR, "o", seconds=1500), "vo2max": 55.4}]})
+    r = rp.build_post_run(conn, "garmin", "samsung-o", False)
+    assert r["watch"] == "Samsung" and r["vo2_ours"]["value"] is None and r["vo2_ours"]["why"]  # no weather or resting HR here
+    from sidekick import run_export
+    md = run_export.markdown(conn, "garmin", "samsung-o", fetch=lambda *x, **k: None)[1]
+    assert "VO₂ max (Runner Sidekick, from this run): not calculated (" in md and "VO₂ max (Samsung estimate" in md

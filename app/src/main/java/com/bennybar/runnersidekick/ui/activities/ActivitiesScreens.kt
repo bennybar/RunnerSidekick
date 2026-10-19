@@ -411,13 +411,20 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         }
                     }
                 }
-                // Garmin's headline VO2 max for that day (one decimal, as in Garmin and Fitness); the run's own whole-number
-                // estimate only when the day's value is missing, labelled as such
-                val vo2 = r.garminVo2maxDay?.let { listOf("VO₂ max" to "%.1f".format(it.value)) }
+                // The watch's headline VO2 max for that day (one decimal, as the watch shows it); the run's own whole-number
+                // estimate only when the day's value is missing, labelled as such. Beside it, Runner Sidekick's from this run.
+                val vo2 = r.garminVo2maxDay?.let { listOf("VO₂ max (${r.watch}'s)" to "%.1f".format(it.value)) }
                     ?: r.garminMetrics["vO2MaxValue"]?.let { listOf("VO₂ max (this run's estimate)" to it.toString().trim('"')) }.orEmpty()
-                val garmin = vo2 + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
-                if (garmin.isNotEmpty()) item {
-                    Group(title = "From Garmin") { garmin.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) } }
+                val ours = r.vo2Ours?.let { o -> listOf("VO₂ max (Runner Sidekick, this run)" to (o.value?.let { "%.1f".format(it) } ?: "—")) }.orEmpty()
+                val fromWatch = vo2 + ours + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
+                if (fromWatch.isNotEmpty()) item {
+                    Group(title = "VO₂ max and the watch's numbers") {
+                        fromWatch.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) }
+                        r.vo2Ours?.why?.let { why -> custom {
+                            Text("No VO₂ max of ours from this run: $why. It needs a steady, flat run of 20+ minutes after the warm-up " +
+                                "with good heart rate.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } }
+                    }
                 }
             }
         }
@@ -450,8 +457,9 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 }
             }
             val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
-            // Garmin's VO2 max on the day of the run (as Garmin shows it); the run's own estimate as a fallback
+            // The watch's VO2 max on the day of the run (as the watch shows it); the run's own estimate as a fallback
             val vo2 = r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"')
+            val ours = r.vo2Ours?.value
             val tiles = listOf(
                 (a.avgHr?.roundToInt()?.toString() ?: "—") to "avg bpm",
                 // Garmin's Training Effect; a watch without it (Samsung) shows the app's own training load for the run
@@ -462,7 +470,9 @@ private fun RunHero(r: PostRunReport, units: Units) {
                 // Elapsed only when stops made it differ
                 Format.duration(a.movingS) to (if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "moving · ${Format.duration(a.elapsedS)} total" else "moving"),
                 "+${Format.elevation(a.elevationGainM, units)}" to "climb",
-                (vo2 ?: "—") to (if (r.garminVo2maxDay != null || vo2 == null) "VO₂ estimate" else "VO₂ (run)"),
+                // Ours from this run, big; the watch's beside it
+                if (ours != null) "%.0f".format(ours) to ("VO₂ ours" + (vo2?.let { " · ${r.watch} $it" } ?: ""))
+                else (vo2 ?: "—") to ("VO₂ (${r.watch})" + (if (vo2 != null) " · ours: n/a" else "")),
             )
             tiles.chunked(3).forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {

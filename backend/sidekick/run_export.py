@@ -229,6 +229,10 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     samsung = a.get("manufacturer") == "Samsung"
     if r.get("garmin_vo2max_day"):  # the watch's own estimate: Samsung's on a Samsung run (run report picks it)
         add(f"VO₂ max ({'Samsung' if samsung else 'Garmin'} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
+    ours = r.get("vo2_ours") or {}
+    if ours:
+        add(f"VO₂ max (Runner Sidekick, from this run): **{ours['value']:.1f}**  " if ours.get("value") is not None
+            else f"VO₂ max (Runner Sidekick, from this run): not calculated ({ours.get('why')})  ")
     hrq = r.get("hr_quality")
     if hrq:
         add(f"HR data quality: **{hrq['grade'].capitalize()}**" + (f" ({clock(hrq['flagged_s'])} flagged)" if hrq["flagged_s"] else "") + "  ")

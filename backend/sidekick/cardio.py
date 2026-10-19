@@ -233,6 +233,16 @@ def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dic
     return used, left
 
 
+def estimate_for_run(conn, source: str, a: dict) -> dict:
+    """This run's own VO2 max estimate (as one of the runs behind 'ours'), or why it doesn't give one: {"value": ...} or
+    {"value": None, "why": ...}."""
+    d = date.fromisoformat(a["local_date"])
+    hm = hr_max(conn, source, d)
+    vals = [v for k, v in rp.series(conn, source, "resting_hr", d.isoformat()).items() if k >= (d - timedelta(days=28)).isoformat()]
+    e, why = run_estimate(conn, a, median(vals) if len(vals) >= 7 else None, hm.get("value"))
+    return {k: e[k] for k in ("value", "hrr_share", "hot")} if e else {"value": None, "why": why}
+
+
 def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     """Runner Sidekick's VO2 max as of d (the median of the last 8 qualifying runs of the 60 days before, from 3), with the
     day of the newest of them; None until there are 3. What the scores use when the runner chose ours in Settings."""

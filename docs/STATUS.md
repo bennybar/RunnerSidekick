@@ -332,6 +332,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Our VO₂ max on each run; watch-named labels (2026-10-19, v0.62.0)
+- Each run's report has `vo2_ours` (Runner Sidekick's estimate from this run, `cardio.estimate_for_run`, or why it gives
+  none) and `watch` (the watch that recorded it). The header's VO₂ tile shows ours with the watch's beside it; the
+  "From Garmin" section is now "VO₂ max and the watch's numbers", rows named by watch; the export has both lines.
+- "Garmin HR zones" wording: "HR zones" on runs, "your HR zones (from your Garmin profile)" in insights (report-2.13).
+
 ## VO₂ max for scores: ours by default (2026-10-19, v0.61.0)
 - Settings › About you › VO₂ max for scores: Ours (default) or Watch (`vo2_source`). With ours, the fitness score,
   VO₂ progress, Compare and the VO₂-based fitness age use Runner Sidekick's estimate from your runs (`cardio.own_vo2`:
