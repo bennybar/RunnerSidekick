@@ -965,7 +965,7 @@ def test_cardio_flat_means_flat_and_sensitivity_keeps_the_same_runs(monkeypatch)
     conn.run_weather.update_one({"source_id": a["source_id"]}, {"$set": {"checked_at": utc_now(), "weather": {
         "temperature_2m": 18.0, "dew_point_2m": 10.0, "apparent_temperature": 18.0}}}, upsert=True)
     down = {**a, "elevation_gain_m": 0.0, "elevation_loss_m": 216.0, "distance_m": 7200.0}  # a steady 3% descent
-    assert cardio.run_estimate(conn, down, 50, 185)[1].startswith("hilly")
+    assert cardio.run_estimate(conn, down, 50, 185)[1] == "too hilly (over 20 m of climb per km)"  # 30 m/km: past hill-adjusting too
     assert cardio.run_estimate(conn, {**a, "elevation_loss_m": None}, 50, 185)[1] == "elevation not recorded"
     # Sensitivity: the same observation, only the maximum changed, and a lower maximum gives a lower estimate
     e = {"vo2": 40.0, "hr": 150.0, "hr_rest": 50.0}

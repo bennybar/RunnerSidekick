@@ -29,12 +29,13 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.1"
+CARDIO_VERSION = "cardio-0.2"  # 0.2: runs up to 20 m/km on hill-adjusted pace; all watches; cooler runs first
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
 MAX_NET_GRADE = 0.01        # the analysed stretch's overall rise or fall, at most 1%
-MAX_CLIMB_PER_KM = 10.0     # m/km, up and down each; flatter runs only: the ACSM equation used is the flat-ground one (no hill model of the app's)
+MAX_CLIMB_PER_KM = 10.0     # m/km, up and down each: flat enough for the ACSM level-ground equation on the recorded pace
+HILLY_MAX_CLIMB_PER_KM = 20.0  # m/km: up to here (VO2 estimate only) the hill-adjusted pace stands in for the recorded one
 MIN_RUN_SPEED = 134.0 / 60  # m/s; slower is walking, where the running equation doesn't apply
 RECENT_DAYS, RECENT_RUNS = 60, 8
 SUSTAINED_S = 60.0          # the observed maximum is the highest heart rate held for a minute, not a one-off spike
@@ -110,7 +111,7 @@ def hr_max(conn, source: str, today: date) -> dict:
     return {"value": None, "source": None}
 
 
-def steady_stretch(conn, a: dict, allow_hot: bool = False) -> tuple[dict | None, str | None]:
+def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = False) -> tuple[dict | None, str | None]:
     """A run's steady, level, well-recorded stretch after the warm-up: its time-weighted speed and heart rate, and whether
     the day was hot. Or None and why the run doesn't qualify. Shared by cardio fitness and pace at a reference heart rate."""
     an = rp.run_analysis(conn, a)
@@ -128,15 +129,20 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False) -> tuple[dict | None,
     if a.get("elevation_gain_m") is None or a.get("elevation_loss_m") is None or not a.get("distance_m"):
         return None, "elevation not recorded"  # unknown isn't flat
     km = a["distance_m"] / 1000
-    if a["elevation_gain_m"] / km > MAX_CLIMB_PER_KM or a["elevation_loss_m"] / km > MAX_CLIMB_PER_KM:
-        return None, "hilly (the running equation used is for flat ground)"
+    climb = max(a["elevation_gain_m"], a["elevation_loss_m"]) / km
+    # Hillier than flat: with allow_hills, the hill-adjusted pace (the app's Minetti-based flat-equivalent, grades over
+    # ~50 m so GPS altitude jitter is smoothed) stands in for the recorded pace, up to 20 m/km
+    hill_adjusted = climb > MAX_CLIMB_PER_KM
+    if hill_adjusted and not (allow_hills and climb <= HILLY_MAX_CLIMB_PER_KM):
+        return None, ("too hilly (over 20 m of climb per km)" if allow_hills else "hilly (the running equation used is for flat ground)")
     s = rp.samples_for(conn, a["id"])
     if s is None:
         return None, "no samples"
     w = rn._weights(s)
+    speeds = rn.gap_speeds(s) if hill_adjusted else s.speed
     moved, seg, with_hr, sv, sh = 0.0, 0.0, 0.0, 0.0, 0.0
     first = last = None  # the analysed stretch's (distance, elevation) at its ends: it has to be level overall too
-    for wi, v, h, d, e in zip(w, s.speed, s.hr, s.dist, s.elev):
+    for wi, v, h, d, e in zip(w, speeds, s.hr, s.dist, s.elev):
         if wi <= 0:
             continue
         moved += wi
@@ -161,14 +167,14 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False) -> tuple[dict | None,
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
         return None, "walking pace"
-    return {"v": v, "hr": hr, "hot": ht["hot"], "s": s, "w": w}, None
+    return {"v": v, "hr": hr, "hot": ht["hot"], "s": s, "w": w, "hill_adjusted": hill_adjusted}, None
 
 
 def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> tuple[dict | None, str | None]:
     """One run's VO2 max estimate, or None and why it was left out."""
     if hr_rest is None or not hrmax:
         return None, "resting or maximum heart rate not known yet"
-    st, why = steady_stretch(conn, a)
+    st, why = steady_stretch(conn, a, allow_hills=True)
     if st is None:
         return None, why
     v, hr, s, w, with_hr = st["v"], st["hr"], st["s"], st["w"], None
@@ -191,6 +197,7 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
         return None, "too hard for a reliable reading"
     vo2 = 3.5 + 0.2 * v * 60
     return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1), "hot": st["hot"],
+            "hill_adjusted": st["hill_adjusted"],
             "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
 
 
@@ -256,7 +263,7 @@ def estimate_for_run(conn, source: str, a: dict) -> dict:
     d = date.fromisoformat(a["local_date"])
     hm = hr_max(conn, source, d)
     e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"]), hm.get("value"))
-    return {k: e[k] for k in ("value", "hrr_share", "hot")} if e else {"value": None, "why": why}
+    return {k: e[k] for k in ("value", "hrr_share", "hot", "hill_adjusted")} if e else {"value": None, "why": why}
 
 
 def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
@@ -292,6 +299,9 @@ def build(conn, source: str, today: date) -> dict:
                          headline=f"from your last {len(recent)} qualifying runs",
                          detail=("Not enough cooler runs, so warm, humid ones are included: heat raises heart rate, which "
                                  "lowers the estimate (it isn't corrected for). " if warm else "") +
+                                (f"{sum(e['hill_adjusted'] for e in recent)} of these runs {'was' if sum(e['hill_adjusted'] for e in recent) == 1 else 'were'} "
+                                 "hilly: their hill-adjusted pace was used, which is less precise than on the flat (heart rate lags "
+                                 "the terrain, and GPS altitude adds error). " if any(e["hill_adjusted"] for e in recent) else "") +
                                 (f"From {', '.join(sorted({e['watch'].capitalize() for e in recent}))} runs together: watches read heart "
                                  "rate differently, which moves the estimate. " if len({e['watch'] for e in recent}) > 1 else "") +
                                 f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "

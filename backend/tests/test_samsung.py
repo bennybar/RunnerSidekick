@@ -347,3 +347,27 @@ def test_app_preferences_are_kept_on_the_server(tmp_path):
     client.put("/v1/settings", json={"theme": "OCEAN", "notifications": True}, headers=h)
     s = client.get("/v1/settings", headers=h).json()  # as a reinstalled app would read them
     assert (s["units"], s["theme"], s["notifications"], s["running_days"]) == ("imperial", "OCEAN", True, [1, 3])
+
+
+def test_a_hilly_run_gets_a_hill_adjusted_vo2_up_to_20_m_per_km():
+    from sidekick import cardio
+    conn = connect(user_db_name(1, "garmin"))
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-01-01"}])
+    set_setting(conn, "hr_max", 188)
+    for k in range(10):  # resting heart rate around the run
+        conn.daily_observation.insert_one({"source": "garmin", "local_date": (ANCHOR - timedelta(days=k)).isoformat(), "metric": "resting_hr",
+                                           "value": 50.0, "state": "measured", "method": "samsung_lowest_30min_hr"})
+
+    def hilly(uid, metres_per_km):
+        r = run(ANCHOR, uid, seconds=2100, speed=2.8)  # 35 min, ~5.9 km, steady pace, heart rate ~142
+        for i, p in enumerate(r["route"]):  # rolling: up and down every 400 s, the given climb per km overall
+            amp = metres_per_km * (r["distance_m"] / 1000) / (2100 / 400)  # each cycle climbs amp and descends it
+            p[3] = 20 + amp * (1 - abs((i % 400) - 200) / 200)
+        r.pop("climb_m")
+        samsung.ingest(conn, "garmin", {"activities": [r]})
+        sid = f"samsung-{uid}"
+        conn.run_weather.insert_one({"source_id": sid, "weather": {"temperature_2m": 18, "dew_point_2m": 10}, "checked_at": "z"})
+        return conn.activity.find_one({"source_id": sid})
+    est = cardio.estimate_for_run(conn, "garmin", hilly("h15", 15))
+    assert est["value"] is not None and est["hill_adjusted"] is True
+    assert cardio.estimate_for_run(conn, "garmin", hilly("h30", 30)) == {"value": None, "why": "too hilly (over 20 m of climb per km)"}

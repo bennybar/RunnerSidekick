@@ -332,6 +332,12 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Hill-adjusted VO₂ estimate (2026-10-19, v0.64.0)
+- Our VO₂ estimate (cardio-0.2) takes runs with more than 10 and up to 20 m of climb or descent per km on their
+  hill-adjusted pace (the app's Minetti-based flat-equivalent, grades over ~50 m) instead of the recorded pace; flat
+  runs as before; over 20 m/km "too hilly". Marked hill-adjusted per run (run screen, export) and counted on the Cardio
+  page. Pace at your usual heart rate stays flat-only.
+
 ## Review fixes: VO₂ per watch, default to the watch's, honest wording; preferences on the server (2026-10-19, v0.63.0)
 - VO₂ max for scores defaults to the watch's; ours is opt-in and labelled experimental (not a validated VO₂ max test).
 - Ours per watch was tried and reverted the same day at the runner's request: runs (and resting heart rate) from every

@@ -231,7 +231,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add(f"VO₂ max ({'Samsung' if samsung else 'Garmin'} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
     ours = r.get("vo2_ours") or {}
     if ours:
-        add(f"VO₂ max (Runner Sidekick, from this run): **{ours['value']:.1f}**  " if ours.get("value") is not None
+        add(f"VO₂ max (Runner Sidekick, from this run{', hill-adjusted pace' if ours.get('hill_adjusted') else ''}): **{ours['value']:.1f}**  "
+            if ours.get("value") is not None
             else f"VO₂ max (Runner Sidekick, from this run): not calculated ({ours.get('why')})  ")
     hrq = r.get("hr_quality")
     if hrq:

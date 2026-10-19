@@ -415,7 +415,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 // estimate only when the day's value is missing, labelled as such. Beside it, Runner Sidekick's from this run.
                 val vo2 = r.garminVo2maxDay?.let { listOf("VO₂ max (${r.watch}'s)" to "%.1f".format(it.value)) }
                     ?: r.garminMetrics["vO2MaxValue"]?.let { listOf("VO₂ max (this run's estimate)" to it.toString().trim('"')) }.orEmpty()
-                val ours = r.vo2Ours?.let { o -> listOf("VO₂ max (Runner Sidekick, this run)" to (o.value?.let { "%.1f".format(it) } ?: "—")) }.orEmpty()
+                val ours = r.vo2Ours?.let { o -> listOf("VO₂ max (Runner Sidekick, this run${if (o.hillAdjusted) ", hill-adjusted" else ""})" to
+                    (o.value?.let { "%.1f".format(it) } ?: "—")) }.orEmpty()
                 val fromWatch = vo2 + ours + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
                 if (fromWatch.isNotEmpty()) item {
                     Group(title = "VO₂ max and the watch's numbers") {
