@@ -1,5 +1,6 @@
 """Calculation defects reported in the v0.30.2 review, each reproduced and then pinned."""
 
+import statistics
 from datetime import date, datetime, timedelta, timezone
 
 from sidekick import progress, race, stats
@@ -955,6 +956,45 @@ def test_cardio_inputs_are_robust_to_spikes_zeros_and_stale_readings(monkeypatch
     assert q["status"] == "ok" and q["value"] == round(want)
     # Notes never diagnose a cause
     assert not any("usual cause" in n for n in cardio.build(conn, "fixture", ANCHOR)["notes"])
+
+
+def test_hunt_estimate_and_the_combined_median_behind_fitness_age(tmp_path):
+    from sidekick import cardio, compare
+    from sidekick.auth import create_token
+    from sidekick.db import set_setting
+    from test_multiuser import client
+    conn = synced()
+    assert cardio.build(conn, "fixture", ANCHOR)["hunt"]["status"] == "needs_input"  # no waist or answers yet: nothing made up
+    set_setting(conn, "profile_waist_cm", 85.0)
+    for k, v in (("hunt_frequency", "2_3_weekly"), ("hunt_intensity", "sweat"), ("hunt_duration", "30_60")):
+        set_setting(conn, k, v)
+    out = cardio.build(conn, "fixture", ANCHOR)
+    h = out["hunt"]
+    age = int(h["detail"].split("age ")[1].split(" ")[0])
+    rhr = float(h["detail"].split("resting heart rate ")[1].split(" ")[0])
+    # Nes et al. 2011, men: PA index 2.5 × 2 × 0.75 = 3.75
+    want = 100.27 - 0.296 * age - 0.369 * 85 - 0.155 * rhr + 0.226 * 3.75
+    assert h["status"] == "ok" and h["pa_index"] == 3.75 and abs(h["value_exact"] - want) < 0.1
+    assert h["pa_weights_verified"] is False and "couldn't be checked" in h["caveat"]  # said on the page until verified
+    assert [q["key"] for q in out["hunt_questions"]] == ["hunt_frequency", "hunt_intensity", "hunt_duration"]
+    # The combined value is the median of the estimates present, full precision
+    c = out["combined"]
+    vals = sorted(i["value"] for i in c["inputs"])
+    assert "hunt" in {i["id"] for i in c["inputs"]} and c["value"] == round(statistics.median(vals), 1)
+    assert c["spread"] == [round(vals[0], 1), round(vals[-1], 1)]
+    assert cardio.combined({"runs": {"value": 50, "value_exact": 50.2}, "garmin": {"maker": "Samsung", "value": 55},
+                            "hunt": {"status": "needs_input"}, "questionnaire": {"value": 44}})["value"] == 50.2
+    # Fitness age (own) follows the combined value and names what went in
+    set_setting(conn, "fitness_age_source", "sidekick")
+    fa = next(i for i in compare.build(conn, "fixture", ANCHOR)["items"] if i["id"] == "fitness_age")
+    assert fa["vo2"] == c["value"] and "HUNT formula" in fa["detail"]
+    # Answers via the API: kept with their day, clearable, and only the published choices
+    cl = client(tmp_path)
+    hd = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    s = cl.put("/v1/settings", headers=hd, json={"profile_waist_cm": 88, "hunt_frequency": "weekly"}).json()
+    assert s["profile_waist_cm"] == 88 and s["profile_waist_cm_at"] and s["hunt_frequency"] == "weekly"
+    assert cl.put("/v1/settings", headers=hd, json={"hunt_frequency": None}).json()["hunt_frequency"] is None
+    assert cl.put("/v1/settings", headers=hd, json={"hunt_intensity": "hard"}).status_code == 422
 
 
 def test_cardio_flat_means_flat_and_sensitivity_keeps_the_same_runs(monkeypatch):

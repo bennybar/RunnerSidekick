@@ -154,13 +154,17 @@ def sidekick_fitness_age(sex: str, value: float) -> tuple[int | None, str]:
     return round(age), "within"
 
 
-def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
-    """The fitness age item from Runner Sidekick's own calculation (chosen in Settings instead of Garmin's)."""
+def own_fitness_age_item(sex: str, age: int, comb: dict | None, typical_age: float | None = None) -> dict:
+    """The fitness age item from Runner Sidekick's own calculation (chosen in Settings instead of Garmin's), from the
+    median of the VO2 max estimates on the Cardio page (cardio.combined)."""
     base = {"id": "fitness_age", "title": "VO₂-based fitness age", "source": "Runner Sidekick"}
-    v = vo2.get("value") if vo2.get("status") == "ok" else None
+    v = comb.get("value") if comb else None
     if v is None:
-        return {**base, "status": "unavailable", "headline": "Needs a VO₂ max from your watch",
-                "detail": "Runner Sidekick's fitness age comes from your watch's VO₂ max."}
+        return {**base, "status": "unavailable", "headline": "Needs a VO₂ max estimate",
+                "detail": "Runner Sidekick's fitness age comes from the VO₂ max estimates on the Cardio page: your runs, your "
+                          "watch, the HUNT formula and the questionnaire."}
+    ins = comb["inputs"]
+    what = ", ".join(f"{i['title']} {i['value']:.1f}" for i in ins)
     f, where = sidekick_fitness_age(sex, v)
     lo, hi = nm.VO2_BANDS[0], nm.VO2_BANDS[-1]
     who = SEX_WORD[sex][1]
@@ -177,15 +181,20 @@ def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
                 f"Around {f}: about {abs(diff)} years older than your age" if diff <= -2 else f"Around {f}: close to your actual age")
     return {**base, "status": "ok", "fitness_age": f, "age": age, "bound": None if where == "within" else where,
             "label": shown or head, "headline": head,
-            "detail": f"Your VO₂ max of {v:.1f} ({maker}'s estimate) " + (f"is typical for {who} {shown}." if shown else
-                      f"is {'above' if where == 'above' else 'below'} what the reference table covers for {who}, so no age is given."),
-            "method": "Runner Sidekick: the age at which your VO₂ max is typical for your sex in the Cooper Institute ratings, "
-                      "where typical is the midpoint of each age group's 40th and 60th percentile values (not a published "
+            "vo2": v, "inputs": ins, "spread": comb["spread"],
+            "detail": (f"The median of {len(ins)} VO₂ max estimate{'s' if len(ins) != 1 else ''} ({what}) is {v:.1f}, which "
+                       + (f"is typical for {who} {shown}." if shown else
+                          f"is {'above' if where == 'above' else 'below'} what the reference table covers for {who}, so no age is given.")),
+            "method": "Runner Sidekick: the median of the VO₂ max estimates available (from your runs, your watch, the HUNT "
+                      "formula, the questionnaire), placed at the age where it is typical for your sex in the Cooper Institute "
+                      "ratings; typical is the midpoint of each age group's 40th and 60th percentile values (not a published "
                       "median), interpolated between age groups and rounded. Only within the table's age groups.",
             "caveats": ["Approximate: one point of VO₂ max can move it by several years.",
-                        "Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
-                        f"{maker}'s VO₂ max is an estimate from pace and heart rate, not a lab test."],
-            "chart": {"type": "ages", "age": age, "fitness_age": f, "achievable": None, "vo2_age": vo2.get("typical_age")}}
+                        "Resting heart rate, waist and activity enter through the HUNT formula and the questionnaire; the "
+                        "estimates share inputs, so their agreeing doesn't make the result more certain.",
+                        "Every estimate here is indirect, not a lab test."]
+                       + ([f"The estimates range {comb['spread'][0]:.1f}–{comb['spread'][1]:.1f}."] if len(ins) > 1 else []),
+            "chart": {"type": "ages", "age": age, "fitness_age": f, "achievable": None, "vo2_age": typical_age}}
 
 
 # ---------------------------------------------------------------- resting heart rate
@@ -337,9 +346,12 @@ def build(conn, source: str, today: date) -> dict:
     from .scores import vo2_maker
     g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None, "vo2_maker": vo2_maker(conn, today)}
     vo2 = vo2_item(p["sex"], p["age"], g)
-    from .scores import vo2_maker
-    fa = (own_fitness_age_item(p["sex"], p["age"], vo2, vo2_maker(conn, today))
-          if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick" else fitness_age_item(p["age"], g, vo2))
+    if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick":
+        from .cardio import build as cardio_build
+        comb = cardio_build(conn, source, today).get("combined")
+        fa = own_fitness_age_item(p["sex"], p["age"], comb, vo2_typical_age(p["sex"], comb["value"])[0] if comb else None)
+    else:
+        fa = fitness_age_item(p["age"], g, vo2)
     out["items"] = [vo2, fa, rhr_item(conn, source, p["sex"], p["age"], today),
                     age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]
     return out

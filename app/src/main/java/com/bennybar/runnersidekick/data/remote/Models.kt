@@ -531,10 +531,12 @@ data class NumberItem(
 @Serializable
 data class NumberPoint(val date: String, val v: Double, val label: String? = null, @SerialName("source_id") val sourceId: String? = null)
 
-/** Cardio fitness (experimental): the evidence about aerobic capacity side by side, never blended. */
+/** Cardio fitness (experimental): the evidence about aerobic capacity side by side; their median is what our fitness age uses. */
 @Serializable
 data class Cardio(
     val runs: CardioPart, val questionnaire: CardioPart, val performance: CardioPart, val garmin: CardioPart,
+    val hunt: CardioPart? = null, val combined: CardioCombined? = null,
+    @SerialName("hunt_questions") val huntQuestions: List<HuntQuestion> = emptyList(),
     @SerialName("hr_max") val hrMax: CardioHrMax = CardioHrMax(),
     val notes: List<String> = emptyList(), val basis: String = "",
     @SerialName("par_scale") val parScale: List<ParOption> = emptyList(),
@@ -568,6 +570,20 @@ data class CardioHrMax(val value: Double? = null, val source: String? = null)
 
 @Serializable
 data class ParOption(val value: Int, val text: String)
+
+/** The median of the VO2 max estimates available, with each one that went in */
+@Serializable
+data class CardioCombined(val value: Double, val inputs: List<CombinedInput> = emptyList(), val spread: List<Double> = emptyList())
+
+@Serializable
+data class CombinedInput(val id: String, val title: String, val value: Double)
+
+/** One of HUNT's three activity questions, with its published answer wording */
+@Serializable
+data class HuntQuestion(val key: String, val title: String, val options: List<HuntOption> = emptyList())
+
+@Serializable
+data class HuntOption(val value: String, val text: String)
 
 /** Your records: Garmin's all-time personal records next to the app's bests, with age comparisons where they exist. */
 @Serializable
@@ -627,9 +643,18 @@ data class SettingsDto(
     @SerialName("profile_height_cm_at") val profileHeightCmAt: String? = null,
     @SerialName("hr_max") val hrMax: Int? = null,
     @SerialName("hr_max_at") val hrMaxAt: String? = null,
+    /** For the HUNT estimate: waist at the navel, and the three activity answers */
+    @SerialName("profile_waist_cm") val profileWaistCm: Double? = null,
+    @SerialName("profile_waist_cm_at") val profileWaistCmAt: String? = null,
+    @SerialName("hunt_frequency") val huntFrequency: String? = null,
+    @SerialName("hunt_frequency_at") val huntFrequencyAt: String? = null,
+    @SerialName("hunt_intensity") val huntIntensity: String? = null,
+    @SerialName("hunt_intensity_at") val huntIntensityAt: String? = null,
+    @SerialName("hunt_duration") val huntDuration: String? = null,
+    @SerialName("hunt_duration_at") val huntDurationAt: String? = null,
     /** The runner's watch from today: "garmin" or "samsung"; the server keeps each switch with its date */
     val watch: String? = null,
-    /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the watch's VO2 max) */
+    /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the median of the VO2 max estimates) */
     @SerialName("fitness_age_source") val fitnessAgeSource: String = "garmin",
     /** The VO2 max the fitness score, fitness age and Compare use: "watch" (default) or "sidekick" (ours, experimental) */
     @SerialName("vo2_source") val vo2Source: String = "watch",

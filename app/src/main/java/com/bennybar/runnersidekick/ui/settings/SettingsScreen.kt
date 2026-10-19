@@ -358,7 +358,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 }
                             })
                         row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
-                                "Runner Sidekick's: the age your watch's VO₂ max is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
+                                "Runner Sidekick's: the age the median of the VO₂ max estimates is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
                                 androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

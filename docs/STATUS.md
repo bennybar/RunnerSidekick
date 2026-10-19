@@ -976,3 +976,13 @@ From the v0.30.2 review, each reproduced first (`tests/test_calc_review.py`, `te
 ## Process
 - External review checkpoints (BRIEF §12, Codex Astra) are **waived by the user (2026-10-01)**. No review packets are
   kept, and progress isn't gated on review.
+
+## Fitness age from several VO₂ estimates; HUNT formula (2026-10-19, v0.66.0)
+- A fifth piece of evidence on the Cardio page: the HUNT non-exercise VO₂ formula (Nes et al. 2011) from age, sex, waist,
+  the watch's resting heart rate (4-week median, ≥ 7 days) and three activity questions (how often, how hard, how long).
+  The points per answer of its activity index aren't verified against the original table (`HUNT_WEIGHTS_VERIFIED =
+  False`); the page says the estimate is provisional. New dated settings: `profile_waist_cm`, `hunt_frequency`,
+  `hunt_intensity`, `hunt_duration` (Cardio page › Your answers).
+- `cardio.combined`: the median of the estimates present (ours from runs, the watch's, HUNT, the questionnaire), with
+  each input and the spread. Runner Sidekick's fitness age now uses it instead of the single VO₂ value; the Fitness
+  score still follows the VO₂ setting (cardio-0.5).

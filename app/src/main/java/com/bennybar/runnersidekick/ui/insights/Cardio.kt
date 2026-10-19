@@ -44,7 +44,7 @@ import com.bennybar.runnersidekick.ui.components.Group
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun CardioCard(c: Cardio, onOpen: () -> Unit) {
-    val parts = listOf(c.runs, c.garmin, c.questionnaire).filter { it.value != null }
+    val parts = listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire).filter { it.value != null }
     Group(title = "Cardio fitness (experimental)") {
         row(parts.joinToString(" · ") { "${short(it)} ${it.value!!.toInt()}" }.ifEmpty { "Not enough evidence yet" },
             supporting = listOfNotNull(c.runs.comparison?.headline ?: c.garmin.comparison?.headline,
@@ -54,7 +54,7 @@ fun CardioCard(c: Cardio, onOpen: () -> Unit) {
     }
 }
 
-private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> p.maker ?: "Garmin"; "questionnaire" -> "Questionnaire"; else -> p.title }
+private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> p.maker ?: "Garmin"; "questionnaire" -> "Questionnaire"; "hunt" -> "HUNT"; else -> p.title }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -67,7 +67,16 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Cardio fitness", style = MaterialTheme.typography.headlineSmall)
             Text(c.basis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            listOf(c.runs, c.garmin, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
+            c.combined?.let { m ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Median of the estimates", style = MaterialTheme.typography.titleMedium)
+                    Text(fmt(m.value), style = MaterialTheme.typography.headlineMedium, color = cs.primary)
+                    Text(m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" }, style = MaterialTheme.typography.bodyMedium)
+                    Text("What Runner Sidekick's fitness age uses." + (if (m.inputs.size > 1) " The estimates range " +
+                        "${fmt(m.spread[0])}–${fmt(m.spread[1])}." else ""), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            }
+            listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
             if (c.notes.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("How they relate", style = MaterialTheme.typography.titleMedium)
                 c.notes.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
@@ -83,6 +92,13 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
                     onClick = { editing = "height" })
                 row("Maximum heart rate", supporting = c.hrMax.value?.let { "${it.toInt()} bpm · ${c.hrMax.source}" } ?: "Not known yet",
                     onClick = { editing = "hrmax" })
+                row("Waist", supporting = a?.profileWaistCm?.let { "${fmt(it)} cm · " + from(a.profileWaistCmAt) } ?: "Not set",
+                    onClick = { editing = "waist" })
+                c.huntQuestions.forEach { q ->
+                    val (v, at) = huntAnswer(a, q.key)
+                    row(q.title, supporting = q.options.firstOrNull { it.value == v }?.let { o -> o.text + (at?.let { " · answered ${Format.shortDate(it)}" } ?: "") }
+                        ?: "Not answered", onClick = { editing = q.key })
+                }
             }
         }
     }
@@ -96,7 +112,28 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
             hint = "Only if you know it from an all-out race finish or a test. Otherwise leave it: the app uses the higher of Garmin's setting " +
                 "and the highest you've held for a minute.",
             onDismiss = { editing = null }) { v -> onSave { it.copy(hrMax = v?.toInt()) }; editing = null }
+        "waist" -> NumberDialog("Waist (cm)", answers?.profileWaistCm, 50.0..200.0, "Clear",
+            hint = "Around your waist at the navel, standing relaxed, after breathing out.",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(profileWaistCm = v) }; editing = null }
+        else -> c.huntQuestions.firstOrNull { it.key == editing }?.let { q ->
+            ChoiceDialog(q.title, q.options.map { it.value to it.text }, huntAnswer(answers, q.key).first, onDismiss = { editing = null }) { v ->
+                onSave {
+                    when (q.key) {
+                        "hunt_frequency" -> it.copy(huntFrequency = v)
+                        "hunt_intensity" -> it.copy(huntIntensity = v)
+                        else -> it.copy(huntDuration = v)
+                    }
+                }
+                editing = null
+            }
+        }
     }
+}
+
+private fun huntAnswer(a: SettingsDto?, key: String): Pair<String?, String?> = when (key) {
+    "hunt_frequency" -> a?.huntFrequency to a?.huntFrequencyAt
+    "hunt_intensity" -> a?.huntIntensity to a?.huntIntensityAt
+    else -> a?.huntDuration to a?.huntDurationAt
 }
 
 private fun from(src: String?) = when {
@@ -142,6 +179,25 @@ private fun ParDialog(c: Cardio, current: Int?, onDismiss: () -> Unit, onPick: (
                     RadioButton(selected = o.value == current, onClick = null)
                     Spacer(Modifier.width(10.dp))
                     Text("${o.value}. ${o.text}", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }, confirmButton = { if (current != null) TextButton(onClick = { onPick(null) }) { Text("Clear") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+}
+
+/** One of HUNT's activity questions, with its published answers. */
+@Composable
+private fun ChoiceDialog(title: String, options: List<Pair<String, String>>, current: String?, onDismiss: () -> Unit,
+                         onPick: (String?) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { (v, text) ->
+                Row(Modifier.fillMaxWidth().selectable(v == current, role = Role.RadioButton) { onPick(v) }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = v == current, onClick = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text(text, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
