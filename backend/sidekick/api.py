@@ -92,7 +92,7 @@ SYNC_WAIT_S, SYNC_WAIT_TRIES = 3, 80  # a manual sync waits up to 4 minutes for 
 
 
 DATED_SETTINGS = ("activity_par", "profile_weight_kg", "profile_height_cm", "hr_max", "profile_waist_cm", "hunt_frequency",
-                  "hunt_intensity", "hunt_duration")
+                  "hunt_intensity", "hunt_duration", "resting_pulse_seated")
 
 
 class GarminTicketIn(BaseModel):
@@ -125,6 +125,7 @@ class SettingsIn(BaseModel):
     hunt_frequency: Literal["never", "lt_weekly", "weekly", "2_3_weekly", "almost_daily"] | None = None
     hunt_intensity: Literal["easy", "sweat", "exhaustion"] | None = None
     hunt_duration: Literal["lt15", "15_30", "30_60", "gt60"] | None = None
+    resting_pulse_seated: int | None = Field(default=None, ge=30, le=120)  # seated, after 5 minutes' rest, as the study measured
     week_start_day: Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] | None = None
     watch: Literal["garmin", "samsung"] | None = None   # the runner's watch from today; switches are kept with their dates
     fitness_age_source: Literal["garmin", "sidekick"] | None = None  # whose fitness age to show

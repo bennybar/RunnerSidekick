@@ -29,7 +29,7 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.5"  # 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
+CARDIO_VERSION = "cardio-0.6"  # 0.6: HUNT with the model's activity coding and a seated pulse, the median for comparison only, medians at full precision; 0.5: HUNT non-exercise estimate, the combined median; 0.4: altitude coverage for every run, smoothed gradients (running-1.11); 0.3: 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
@@ -46,56 +46,65 @@ SUSTAINED_S = 60.0          # the observed maximum is the highest heart rate hel
 # polygenic-fitness paper, PMC12265795): intercept, and per year of age, cm of waist, bpm of resting heart rate, point
 # of the PA index
 HUNT_EQ = {"male": (100.27, 0.296, 0.369, 0.155, 0.226), "female": (74.74, 0.247, 0.259, 0.114, 0.198)}
-# The PA index multiplies points for how often, how hard and how long (frequency 0–5 × intensity 1–3 × duration
-# 0.1–1.0, as published). The points for each answer below are NOT VERIFIED against the original table (Kurtze et al.
-# 2008; paywalled): they match the published ranges and medians, and the page says they're unverified.
-HUNT_WEIGHTS_VERIFIED = False
-HUNT_FREQUENCY = [("never", "Never", 0.0), ("lt_weekly", "Less than once a week", 0.5), ("weekly", "Once a week", 1.0),
-                  ("2_3_weekly", "2–3 times a week", 2.5), ("almost_daily", "Almost every day", 5.0)]
-HUNT_INTENSITY = [("easy", "No sweating or heavy breathing", 1.0), ("sweat", "Sweating and heavy breathing", 2.0),
-                  ("exhaustion", "Push myself to exhaustion", 3.0)]
-HUNT_DURATION = [("lt15", "Less than 15 minutes", 0.1), ("15_30", "15–30 minutes", 0.38), ("30_60", "30–60 minutes", 0.75),
-                 ("gt60", "More than 60 minutes", 1.0)]
+# The model's own activity index (weighting intensity more than HUNT's general questionnaire index): frequency × duration
+# × intensity, coded as reported by a study applying Nes et al. (US DOT report 55934, 2021): frequency 0 (never or less
+# than weekly) / 1 / 2 / 3, duration 1 (under 30 min) / 1.5 (30 min or more), intensity 0 / 5 / 10. Not checked against
+# the original paper's table, which wasn't available.
+HUNT_WEIGHTS_SOURCE = "as coded from Nes et al. by a study applying the model (US DOT report 55934, 2021)"
+HUNT_FREQUENCY = [("never", "Never", 0.0), ("lt_weekly", "Less than once a week", 0.0), ("weekly", "Once a week", 1.0),
+                  ("2_3_weekly", "2–3 times a week", 2.0), ("almost_daily", "Almost every day", 3.0)]
+HUNT_INTENSITY = [("easy", "No sweating or heavy breathing", 0.0), ("sweat", "Sweating and heavy breathing", 5.0),
+                  ("exhaustion", "Push myself to exhaustion", 10.0)]
+HUNT_DURATION = [("lt15", "Less than 15 minutes", 1.0), ("15_30", "15–30 minutes", 1.0), ("30_60", "30–60 minutes", 1.5),
+                 ("gt60", "More than 60 minutes", 1.5)]
 
 
 def hunt_part(conn, source: str, sex: str | None, age: int | None, today: date) -> dict:
-    """VO2 max from the HUNT non-exercise formula: age, sex, waist, resting heart rate (your watch's 4-week median) and
-    the three-question activity index. A population formula: a broad baseline, several units off for one person."""
-    base = {"id": "hunt", "title": "HUNT formula (non-exercise)", "source": "Nes et al. 2011, the HUNT Study, Norway",
-            "caveat": "A population formula from who you are and how active you say you are, not from a run. "
-                      + ("" if HUNT_WEIGHTS_VERIFIED else "The points for each activity answer couldn't be checked against the "
-                         "published table yet, so this estimate is provisional.")}
+    """VO2 max from the HUNT non-exercise formula: age, sex, waist, resting heart rate and the three-question activity
+    index. A population formula: a broad baseline, several units off for one person. The study measured resting heart
+    rate seated after rest; without that answer, the watch's overnight 4-week median stands in, read lower, so the
+    estimate reads high (10 bpm ≈ 1.5 for men) and is labelled adapted."""
+    base = {"id": "hunt", "title": "HUNT formula (non-exercise)", "source": "Nes et al. 2011, the HUNT Study, Norway"}
     waist, waist_at = _dated(conn, "profile_waist_cm")
+    seated, seated_at = _dated(conn, "resting_pulse_seated")
     ans = {k: get_setting(conn, k, None) for k in ("hunt_frequency", "hunt_intensity", "hunt_duration")}
     since = (today - timedelta(days=27)).isoformat()
     rhr = [v for k, v in rp.series(conn, source, "resting_hr", today.isoformat()).items() if k >= since]
     missing = [w for w, ok in (("sex and birth date", sex and age), ("waist", waist), ("the three activity answers", all(ans.values())),
-                               ("7 days of resting heart rate", len(rhr) >= 7)) if not ok]
+                               ("a resting pulse", seated or len(rhr) >= 7)) if not ok]
+    caveat = ("A population formula from who you are and how active you say you are, not from a run. Activity points "
+              + HUNT_WEIGHTS_SOURCE + ".")
     if missing:
-        return {**base, "status": "needs_input", "headline": "Needs " + ", ".join(missing)}
+        return {**base, "status": "needs_input", "headline": "Needs " + ", ".join(missing), "caveat": caveat}
     pts = {k: dict((key, w) for key, _, w in opts)[ans[k]] for k, opts in
            (("hunt_frequency", HUNT_FREQUENCY), ("hunt_intensity", HUNT_INTENSITY), ("hunt_duration", HUNT_DURATION))}
     pa = pts["hunt_frequency"] * pts["hunt_intensity"] * pts["hunt_duration"]
     b0, b_age, b_waist, b_rhr, b_pa = HUNT_EQ[sex]
-    r = median(rhr)
+    r = seated if seated else median(rhr)
     v = b0 - b_age * age - b_waist * waist - b_rhr * r + b_pa * pa
-    return {**base, "status": "ok", "value": round(v), "value_exact": round(v, 1), "pa_index": round(pa, 2),
-            "pa_weights_verified": HUNT_WEIGHTS_VERIFIED, "headline": "from your answers and resting heart rate",
-            "detail": f"{b0} − {b_age}×age {age} − {b_waist}×waist {waist:g} cm − {b_rhr}×resting heart rate {r:.0f} + {b_pa}×activity "
-                      f"index {pa:.2f} = {v:.1f}" + (f" (waist set {waist_at})" if waist_at else "") + "."}
+    if not seated:
+        caveat += (" Adapted: the study used a seated resting pulse; your watch's overnight value reads lower, so this "
+                   f"estimate reads higher (each 10 bpm adds about {10 * b_rhr:.1f}). Add a seated pulse below for the formula as published.")
+    return {**base, "status": "ok", "value": round(v), "value_exact": v, "pa_index": pa, "rhr_basis": "seated" if seated else "overnight",
+            "headline": "from your answers and seated pulse" if seated else "adapted: with your watch's overnight resting heart rate",
+            "caveat": caveat,
+            "detail": f"{b0} − {b_age}×age {age} − {b_waist}×waist {waist:g} cm − {b_rhr}×resting heart rate {r:.0f} "
+                      f"({'seated' + (f', set {seated_at}' if seated_at else '') if seated else 'overnight, 4-week median'}) + {b_pa}×activity "
+                      f"index {pa:g} = {v:.1f}" + (f" (waist set {waist_at})" if waist_at else "") + "."}
 
 
 def combined(out: dict) -> dict | None:
-    """The VO2 max fitness age uses: the median of the estimates available (ours from your runs, the watch's, the HUNT
-    formula, the questionnaire), each failing differently, so a single odd one moves it less. They share some inputs
-    (age, sex, heart rate), so agreeing doesn't make it more certain."""
-    parts = [(k, out[k]) for k in ("runs", "garmin", "hunt", "questionnaire") if out.get(k, {}).get("value") is not None]
+    """For comparison only (scores and fitness age use the VO2 max source you chose): the median of the estimates
+    available (ours from your runs, the watch's, HUNT with a seated pulse, the questionnaire). They share inputs (age,
+    sex, heart rate, activity), so agreeing doesn't make it more certain."""
+    parts = [(k, out[k]) for k in ("runs", "garmin", "hunt", "questionnaire") if out.get(k, {}).get("value") is not None
+             and not (k == "hunt" and out[k].get("rhr_basis") != "seated")]
     if not parts:
         return None
-    vals = [float(p.get("value_exact") or p["value"]) for _, p in parts]
+    vals = [float(p.get("value_exact", p["value"])) for _, p in parts]
     names = {"runs": "your runs", "garmin": f"{out['garmin'].get('maker', 'the watch')}'s", "hunt": "HUNT formula",
              "questionnaire": "questionnaire"}
-    return {"value": round(median(vals), 1), "inputs": [{"id": k, "title": names[k], "value": v} for (k, _), v in zip(parts, vals)],
+    return {"value": round(median(vals), 1), "inputs": [{"id": k, "title": names[k], "value": round(v, 1)} for (k, _), v in zip(parts, vals)],
             "spread": [round(min(vals), 1), round(max(vals), 1)]}
 
 
@@ -261,7 +270,8 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     if share > HRR_RANGE[1]:
         return None, "too hard for a reliable reading"
     vo2 = 3.5 + 0.2 * v * 60
-    return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1), "hot": st["hot"],
+    return {"date": a["local_date"], "source_id": a["source_id"], "value": round(3.5 + (vo2 - 3.5) / share, 1),
+            "exact": 3.5 + (vo2 - 3.5) / share, "hot": st["hot"],
             "hill_adjusted": st["hill_adjusted"],
             "hrr_share": round(share, 2), "speed_m_s": round(v, 3), "hr": round(hr, 1), "hr_rest": hr_rest, "vo2": round(vo2, 2)}, None
 
@@ -339,7 +349,7 @@ def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     recent = run_estimates(conn, source, d, hm)[0][-RECENT_RUNS:]
     if len(recent) < 3:
         return None
-    return round(median(e["value"] for e in recent), 1), date.fromisoformat(recent[-1]["date"])
+    return median(e["exact"] for e in recent), date.fromisoformat(recent[-1]["date"])
 
 
 def build(conn, source: str, today: date) -> dict:
@@ -353,25 +363,25 @@ def build(conn, source: str, today: date) -> dict:
                  "points": used, "caveat": "An experimental combination of published equations (ACSM running equation, Swain's heart-rate "
                  "reserve), not a validated VO₂ max test. The spread is how much your runs vary, not how accurate the estimate is."}
     if len(recent) >= 3:
-        vals = [e["value"] for e in recent]
+        vals = [e["exact"] for e in recent]
         mid = median(vals)
         # How much the estimate leans on the assumed maximum heart rate: the same runs and readings, only that changed
         lower = median(with_hr_max(e, hm["value"] - 5) for e in recent)
         higher = median(with_hr_max(e, hm["value"] + 5) for e in recent)
 
         def sub_median(rows: list[dict]) -> str | None:
-            return f"{median(e['value'] for e in rows):.1f} ({len(rows)} run{'s' if len(rows) != 1 else ''})" if rows else None
+            return f"{median(e['exact'] for e in rows):.1f} ({len(rows)} run{'s' if len(rows) != 1 else ''})" if rows else None
         # What's in the median, so its effect is visible: by weather, by watch, and runs far from it (kept, for review)
         groups = [(lab, sub_median([e for e in recent if f(e)])) for lab, f in (
             ("cool runs", lambda e: not e["hot"]), ("warm runs", lambda e: e["hot"]))]
         watches = sorted({e["watch"] for e in recent})
         if len(watches) > 1:
             groups += [(f"{w.capitalize()} runs", sub_median([e for e in recent if e["watch"] == w])) for w in watches]
-        odd = [e for e in recent if abs(e["value"] - mid) >= OUTLIER_VO2]
+        odd = [e for e in recent if abs(e["exact"] - mid) >= OUTLIER_VO2]
         for e in used:
-            e["unusual"] = abs(e["value"] - mid) >= OUTLIER_VO2
+            e["unusual"] = abs(e["exact"] - mid) >= OUTLIER_VO2
         n_hill = sum(e["hill_adjusted"] for e in recent)
-        runs_part.update(status="ok", value=round(mid), value_exact=round(mid, 1), spread=[round(min(vals)), round(max(vals))],
+        runs_part.update(status="ok", value=round(mid), value_exact=mid, spread=[round(min(vals)), round(max(vals))],
                          breakdown=[{"label": lab, "value": v} for lab, v in groups if v],
                          sensitivity=f"If your actual maximum heart rate were 5 beats lower or higher ({hm['value'] - 5:.0f} or "
                                      f"{hm['value'] + 5:.0f}), this estimate would be about {round(lower)}–{round(higher)}. An example of "
@@ -418,7 +428,7 @@ def build(conn, source: str, today: date) -> dict:
     else:
         bmi = weight / (height / 100) ** 2
         v = 56.363 + 1.921 * par - 0.381 * p["age"] - 0.754 * bmi + 10.987 * (1 if p["sex"] == "male" else 0)
-        q.update(status="ok", value=round(v), bmi=round(bmi, 1), headline="from your answers",
+        q.update(status="ok", value=round(v), value_exact=v, bmi=round(bmi, 1), headline="from your answers",
                  detail=f"From your age ({p['age']}), sex, BMI {bmi:.1f} and activity level {par} of 7"
                         + (f" (answered {par_at})" if par_at else "") + ".")
     out["questionnaire"] = q
@@ -445,7 +455,7 @@ def build(conn, source: str, today: date) -> dict:
     from .scores import watch_vo2
     found = watch_vo2(conn, source, today, today)  # this place is the watch's own estimate, whatever the scores use  # the newest reading, from the daily series or Garmin's snapshot, and not stale
     gv = (found[0], found[1].isoformat()) if found else None
-    out["garmin"] = ({"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "value_exact": round(gv[0], 1), "date": gv[1],
+    out["garmin"] = ({"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "value_exact": gv[0], "date": gv[1],
                       "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
                      if gv else {"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
     # With the Samsung watch, this place is Samsung's estimate instead (its own formula, so not Garmin's series)
@@ -454,7 +464,7 @@ def build(conn, source: str, today: date) -> dict:
     if watch_on(conn, today.isoformat()) == SAMSUNG:
         sv = [(k, v) for k, v in rp.series(conn, source, "samsung_vo2max_running", today.isoformat()).items()
               if k >= (today - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()]
-        out["garmin"] = ({"id": "garmin", "maker": "Samsung", "title": "Samsung's VO₂ max", "status": "ok", "value": round(max(sv)[1]), "value_exact": round(max(sv)[1], 1), "date": max(sv)[0],
+        out["garmin"] = ({"id": "garmin", "maker": "Samsung", "title": "Samsung's VO₂ max", "status": "ok", "value": round(max(sv)[1]), "value_exact": max(sv)[1], "date": max(sv)[0],
                           "headline": f"as of {max(sv)[0]}", "detail": "Samsung's estimate from your runs with the watch."}
                          if sv else {"id": "garmin", "maker": "Samsung", "title": "Samsung's VO₂ max", "status": "unavailable",
                                      "headline": "After a run with the Samsung watch"})
@@ -495,8 +505,9 @@ def build(conn, source: str, today: date) -> dict:
                      "points away for one person.")
     out["notes"] = notes
     out["combined"] = combined(out)
-    out["basis"] = ("Experimental. The estimates are shown side by side; Runner Sidekick's fitness age uses their median. They share "
-                    "some inputs, so agreeing doesn't make them more certain. Only a laboratory test measures VO₂ max.")
+    out["basis"] = ("Experimental. The estimates are shown side by side, with their median for comparison; scores and fitness age "
+                    "use the VO₂ max source chosen in Settings. They share some inputs, so agreeing doesn't make them more certain. "
+                    "Only a laboratory test measures VO₂ max.")
     out["par_scale"] = [{"value": v, "text": t} for v, t in PAR_SCALE]
     out["hunt_questions"] = [{"key": key, "title": title, "options": [{"value": v, "text": txt} for v, txt, _ in opts]}
                              for key, title, opts in (("hunt_frequency", "How often do you exercise?", HUNT_FREQUENCY),

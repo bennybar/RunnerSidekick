@@ -90,5 +90,5 @@ def test_sidekick_fitness_age_stays_within_the_table_in_whole_years():
     assert compare.sidekick_fitness_age("male", t[2]) == (round(mids[2]), "within")
     assert compare.sidekick_fitness_age("male", 90.0) == (None, "above")
     assert compare.sidekick_fitness_age("male", 5.0) == (None, "below")
-    it = compare.own_fitness_age_item("male", 46, {"value": 90.0, "inputs": [{"id": "garmin", "title": "Samsung", "value": 90.0}], "spread": [90.0, 90.0]})
+    it = compare.own_fitness_age_item("male", 46, {"status": "ok", "value": 90.0}, "Samsung")
     assert it["bound"] == "above" and it["fitness_age"] is None and "twenties" not in it["headline"] and "20–29" in it["headline"]

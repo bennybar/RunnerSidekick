@@ -958,7 +958,7 @@ def test_cardio_inputs_are_robust_to_spikes_zeros_and_stale_readings(monkeypatch
     assert not any("usual cause" in n for n in cardio.build(conn, "fixture", ANCHOR)["notes"])
 
 
-def test_hunt_estimate_and_the_combined_median_behind_fitness_age(tmp_path):
+def test_hunt_estimate_and_the_median_kept_as_a_comparison(tmp_path):
     from sidekick import cardio, compare
     from sidekick.auth import create_token
     from sidekick.db import set_setting
@@ -972,29 +972,59 @@ def test_hunt_estimate_and_the_combined_median_behind_fitness_age(tmp_path):
     h = out["hunt"]
     age = int(h["detail"].split("age ")[1].split(" ")[0])
     rhr = float(h["detail"].split("resting heart rate ")[1].split(" ")[0])
-    # Nes et al. 2011, men: PA index 2.5 × 2 × 0.75 = 3.75
-    want = 100.27 - 0.296 * age - 0.369 * 85 - 0.155 * rhr + 0.226 * 3.75
-    assert h["status"] == "ok" and h["pa_index"] == 3.75 and abs(h["value_exact"] - want) < 0.1
-    assert h["pa_weights_verified"] is False and "couldn't be checked" in h["caveat"]  # said on the page until verified
-    assert [q["key"] for q in out["hunt_questions"]] == ["hunt_frequency", "hunt_intensity", "hunt_duration"]
-    # The combined value is the median of the estimates present, full precision
+    # Nes et al. 2011, men, the model's activity coding: 2 (2–3 a week) × 1.5 (30 min or more) × 5 (sweating) = 15
+    want = 100.27 - 0.296 * age - 0.369 * 85 - 0.155 * rhr + 0.226 * 15
+    assert h["status"] == "ok" and h["pa_index"] == 15 and abs(h["value_exact"] - want) < 1e-9
+    assert h["rhr_basis"] == "overnight" and "Adapted" in h["caveat"] and "adapted" in h["headline"]
+    assert "hunt" not in {i["id"] for i in (out["combined"] or {"inputs": []})["inputs"]}  # adapted: not in the median
+    # A seated pulse, as the study measured: the formula as published, and the median may take it
+    set_setting(conn, "resting_pulse_seated", 62)
+    out = cardio.build(conn, "fixture", ANCHOR)
+    h = out["hunt"]
+    assert h["rhr_basis"] == "seated" and abs(h["value_exact"] - (100.27 - 0.296 * age - 0.369 * 85 - 0.155 * 62 + 0.226 * 15)) < 1e-9
+    assert "Adapted" not in h["caveat"]
     c = out["combined"]
     vals = sorted(i["value"] for i in c["inputs"])
-    assert "hunt" in {i["id"] for i in c["inputs"]} and c["value"] == round(statistics.median(vals), 1)
-    assert c["spread"] == [round(vals[0], 1), round(vals[-1], 1)]
-    assert cardio.combined({"runs": {"value": 50, "value_exact": 50.2}, "garmin": {"maker": "Samsung", "value": 55},
+    assert "hunt" in {i["id"] for i in c["inputs"]} and abs(c["value"] - statistics.median(vals)) <= 0.1
+    assert cardio.combined({"runs": {"value": 50, "value_exact": 50.24}, "garmin": {"maker": "Samsung", "value": 55},
                             "hunt": {"status": "needs_input"}, "questionnaire": {"value": 44}})["value"] == 50.2
-    # Fitness age (own) follows the combined value and names what went in
+    # Fitness age stays on the VO2 max source chosen in Settings, not the median
     set_setting(conn, "fitness_age_source", "sidekick")
     fa = next(i for i in compare.build(conn, "fixture", ANCHOR)["items"] if i["id"] == "fitness_age")
-    assert fa["vo2"] == c["value"] and "HUNT formula" in fa["detail"]
+    assert "HUNT" not in fa["detail"] and "median" not in fa["detail"]
     # Answers via the API: kept with their day, clearable, and only the published choices
     cl = client(tmp_path)
     hd = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
-    s = cl.put("/v1/settings", headers=hd, json={"profile_waist_cm": 88, "hunt_frequency": "weekly"}).json()
-    assert s["profile_waist_cm"] == 88 and s["profile_waist_cm_at"] and s["hunt_frequency"] == "weekly"
+    s = cl.put("/v1/settings", headers=hd, json={"profile_waist_cm": 88, "hunt_frequency": "weekly", "resting_pulse_seated": 60}).json()
+    assert s["profile_waist_cm"] == 88 and s["profile_waist_cm_at"] and s["hunt_frequency"] == "weekly" and s["resting_pulse_seated_at"]
     assert cl.put("/v1/settings", headers=hd, json={"hunt_frequency": None}).json()["hunt_frequency"] is None
     assert cl.put("/v1/settings", headers=hd, json={"hunt_intensity": "hard"}).status_code == 422
+
+
+def test_gradients_ease_in_without_a_jump_and_a_short_steep_climb_mostly_counts():
+    from statistics import mean
+    from sidekick.analytics import running as rn
+    from sidekick.connectors.base import Samples
+
+    def uplift(elev, dt=1.0, v=2.9):
+        n = len(elev)
+        s = Samples([i * dt for i in range(n)], [150] * n, [v] * n, [v * dt * i for i in range(n)], elev, [165] * n)
+        return mean(rn.gap_speeds(s)) / v - 1
+
+    def slope(g):
+        return uplift([g * 2.9 * i for i in range(2400)])
+    # Either side of 1% reads about the same (a hard cut gave 0 and +3.5%); 1.5% and up are untouched
+    assert abs(slope(0.0101) - slope(0.0099)) < 0.002 and slope(0.004) == 0
+    assert slope(0.0075) < slope(0.0099) < slope(0.0125) and abs(slope(0.03) - (min(rn.minetti_cost(0.03) / rn.minetti_cost(0), 1 + 0.105) - 1)) < 0.002
+
+    # 50 m up over 300 m, then down again: smoothing blurs its edges, but most of it counts, at 1 s or 5 s sampling
+    def climb(dt):
+        return [min(max(2.9 * dt * i - 2000, 0), 300) / 6 - min(max(2.9 * dt * i - 2300, 0), 300) / 6 for i in range(int(2400 / dt))]
+    c0 = rn.minetti_cost(0)
+    true = mean(min(rn.minetti_cost(g) / c0, 1 + rn.UPHILL_PER_GRADE * g) if g >= 0 else max(rn.DOWNHILL_FLOOR, 1 + rn.DOWNHILL_PER_GRADE * g)
+                for g in ((1 / 6 if 2000 <= 2.9 * i < 2300 else -1 / 6 if 2300 <= 2.9 * i < 2600 else 0) for i in range(2400))) - 1
+    for dt in (1.0, 5.0):
+        assert 0.75 * true < uplift(climb(dt), dt) <= true  # measured: 1.55% of 1.88%
 
 
 def test_cardio_flat_means_flat_and_sensitivity_keeps_the_same_runs(monkeypatch):

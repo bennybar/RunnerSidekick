@@ -531,7 +531,7 @@ data class NumberItem(
 @Serializable
 data class NumberPoint(val date: String, val v: Double, val label: String? = null, @SerialName("source_id") val sourceId: String? = null)
 
-/** Cardio fitness (experimental): the evidence about aerobic capacity side by side; their median is what our fitness age uses. */
+/** Cardio fitness (experimental): the evidence about aerobic capacity side by side, with their median for comparison only. */
 @Serializable
 data class Cardio(
     val runs: CardioPart, val questionnaire: CardioPart, val performance: CardioPart, val garmin: CardioPart,
@@ -571,7 +571,7 @@ data class CardioHrMax(val value: Double? = null, val source: String? = null)
 @Serializable
 data class ParOption(val value: Int, val text: String)
 
-/** The median of the VO2 max estimates available, with each one that went in */
+/** The median of the VO2 max estimates available, with each one that went in (a comparison: scores don't use it) */
 @Serializable
 data class CardioCombined(val value: Double, val inputs: List<CombinedInput> = emptyList(), val spread: List<Double> = emptyList())
 
@@ -652,9 +652,12 @@ data class SettingsDto(
     @SerialName("hunt_intensity_at") val huntIntensityAt: String? = null,
     @SerialName("hunt_duration") val huntDuration: String? = null,
     @SerialName("hunt_duration_at") val huntDurationAt: String? = null,
+    /** Seated, after 5 minutes' rest, as the HUNT study measured it */
+    @SerialName("resting_pulse_seated") val restingPulseSeated: Int? = null,
+    @SerialName("resting_pulse_seated_at") val restingPulseSeatedAt: String? = null,
     /** The runner's watch from today: "garmin" or "samsung"; the server keeps each switch with its date */
     val watch: String? = null,
-    /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the median of the VO2 max estimates) */
+    /** Whose fitness age to show: "garmin", or "sidekick" (Runner Sidekick's, from the watch's VO2 max) */
     @SerialName("fitness_age_source") val fitnessAgeSource: String = "garmin",
     /** The VO2 max the fitness score, fitness age and Compare use: "watch" (default) or "sidekick" (ours, experimental) */
     @SerialName("vo2_source") val vo2Source: String = "watch",

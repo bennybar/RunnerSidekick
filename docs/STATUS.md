@@ -986,3 +986,14 @@ From the v0.30.2 review, each reproduced first (`tests/test_calc_review.py`, `te
 - `cardio.combined`: the median of the estimates present (ours from runs, the watch's, HUNT, the questionnaire), with
   each input and the spread. Runner Sidekick's fitness age now uses it instead of the single VO₂ value; the Fitness
   score still follows the VO₂ setting (cardio-0.5).
+
+## HUNT fixed; fitness age back on the chosen source; no gradient jump at 1% (2026-10-19, v0.67.0)
+After the round-4 review:
+- HUNT's activity index now uses the model's own coding (frequency 0/0/1/2/3, duration 1/1/1.5/1.5, intensity 0/5/10,
+  as reported by US DOT report 55934 applying Nes et al.); 0.66.0's points were about 4× too small.
+- A seated resting pulse answer (`resting_pulse_seated`), as the study measured. Without it, HUNT uses the watch's
+  overnight value and is labelled adapted (it reads high: 10 bpm ≈ +1.5) and stays out of the median.
+- Fitness age goes back to the VO₂ source chosen in Settings; the median of the estimates stays on the Cardio page as a
+  comparison only (cardio-0.6). Medians use unrounded per-run values.
+- Gradients ease in from 0.5% to 1.5% instead of a hard cut at 1% (0.99% → 0, 1.01% → +3.5% speed before;
+  running-1.12). ±1 m flat noise still about +0.03%; a 50 m rise over 300 m reads +1.55% against +1.88% exact.

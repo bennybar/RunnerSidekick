@@ -72,7 +72,7 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
                     Text("Median of the estimates", style = MaterialTheme.typography.titleMedium)
                     Text(fmt(m.value), style = MaterialTheme.typography.headlineMedium, color = cs.primary)
                     Text(m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" }, style = MaterialTheme.typography.bodyMedium)
-                    Text("What Runner Sidekick's fitness age uses." + (if (m.inputs.size > 1) " The estimates range " +
+                    Text("For comparison: scores and fitness age use the VO₂ max chosen in Settings." + (if (m.inputs.size > 1) " The estimates range " +
                         "${fmt(m.spread[0])}–${fmt(m.spread[1])}." else ""), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
             }
@@ -92,6 +92,8 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
                     onClick = { editing = "height" })
                 row("Maximum heart rate", supporting = c.hrMax.value?.let { "${it.toInt()} bpm · ${c.hrMax.source}" } ?: "Not known yet",
                     onClick = { editing = "hrmax" })
+                row("Resting pulse, seated", supporting = a?.restingPulseSeated?.let { "$it bpm · " + from(a.restingPulseSeatedAt) }
+                    ?: "Not set (HUNT uses your watch's overnight value)", onClick = { editing = "seated" })
                 row("Waist", supporting = a?.profileWaistCm?.let { "${fmt(it)} cm · " + from(a.profileWaistCmAt) } ?: "Not set",
                     onClick = { editing = "waist" })
                 c.huntQuestions.forEach { q ->
@@ -112,6 +114,9 @@ fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> Sett
             hint = "Only if you know it from an all-out race finish or a test. Otherwise leave it: the app uses the higher of Garmin's setting " +
                 "and the highest you've held for a minute.",
             onDismiss = { editing = null }) { v -> onSave { it.copy(hrMax = v?.toInt()) }; editing = null }
+        "seated" -> NumberDialog("Resting pulse, seated (bpm)", answers?.restingPulseSeated?.toDouble(), 30.0..120.0, "Clear (use the watch's overnight value)",
+            hint = "Sit quietly for 5 minutes, then read your pulse on the watch (or count for 30 seconds and double it). The HUNT study measured it this way.",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(restingPulseSeated = v?.toInt()) }; editing = null }
         "waist" -> NumberDialog("Waist (cm)", answers?.profileWaistCm, 50.0..200.0, "Clear",
             hint = "Around your waist at the navel, standing relaxed, after breathing out.",
             onDismiss = { editing = null }) { v -> onSave { it.copy(profileWaistCm = v) }; editing = null }

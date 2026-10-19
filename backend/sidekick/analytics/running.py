@@ -5,12 +5,13 @@ Pace basis: moving time (samples with speed >= MOVING_SPEED) unless stated other
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.11"  # 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.12"  # 1.12: gradients ease in from 0.5% to 1.5% (no jump at 1%); 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -246,7 +247,8 @@ GRADE_WINDOW_M = 100.0  # grade measured over ~100 m of distance, from altitude 
                         # a metre or two, and uphill costs more than downhill gives back, so unsmoothed noise reads as a climb
                         # (measured: ±1 m noise on flat ground added 1.7% to the hill-adjusted pace; now about 0)
 ELEV_SMOOTH_S = 15.0    # ±15 s moving average of altitude
-FLAT_GRADE = 0.01       # gradients under 1% count as flat
+FLAT_GRADE = 0.005      # gradients under 0.5% count as flat, and ease in to their full value at 1.5%: no jump at one
+FULL_GRADE = 0.015      # threshold (measured: a hard 1% cut gave 0 at 0.99% and +3.5% speed at 1.01%)
 GRADE_CLAMP = 0.30      # outside ±30% the energy-cost model isn't reliable; clamp
 # Downhill, Minetti's energy cost falls to ~60% of flat at −10%, far more credit than runners get: heart-rate-based
 # grade adjustment (Strava's, 2017) bottoms out near 85% of flat. So a descent counts as at most 15% easier than flat.
@@ -290,7 +292,10 @@ def grades(s: Samples) -> list[float | None]:
             j += 1
         if s.dist[j] is not None and elev[j] is not None and s.dist[i] - s.dist[j] >= GRADE_WINDOW_M * 0.6:
             g = (elev[i] - elev[j]) / (s.dist[i] - s.dist[j])
-            out[i] = 0.0 if abs(g) < FLAT_GRADE else max(-GRADE_CLAMP, min(GRADE_CLAMP, g))
+            a = abs(g)
+            if a < FULL_GRADE:
+                g = math.copysign(max(0.0, a - FLAT_GRADE) * FULL_GRADE / (FULL_GRADE - FLAT_GRADE), g)
+            out[i] = max(-GRADE_CLAMP, min(GRADE_CLAMP, g))
     return out
 
 
