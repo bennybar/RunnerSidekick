@@ -316,7 +316,7 @@ def build(conn, source: str, today: date) -> dict:
                          headline=f"from your last {len(recent)} qualifying runs",
                          detail=f"The median of your last {len(recent)} qualifying runs, whatever the weather. Beside it, as descriptive "
                                 "subgroup medians (not estimates of their own): " + "; ".join(f"{lab} {v}" for lab, v in groups if v) + ". "
-                                + ("Warm, humid runs read lower (heat raises heart rate; it isn't corrected for). "
+                                + ("Heat raises heart rate, which tends to lower a run's estimate; it isn't corrected for. "
                                    if any(e["hot"] for e in recent) else "")
                                 + (f"The estimate mixes {' and '.join(w.capitalize() for w in watches)} runs: their medians differ, which "
                                    "may be how each watch measures heart rate rather than fitness. " if len(watches) > 1 else "")
