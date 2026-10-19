@@ -334,8 +334,8 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
 
 ## Review fixes: VO₂ per watch, default to the watch's, honest wording; preferences on the server (2026-10-19, v0.63.0)
 - VO₂ max for scores defaults to the watch's; ours is opt-in and labelled experimental (not a validated VO₂ max test).
-- Ours per watch: a watch's runs aren't pooled with another's (heart rate reads differently), resting heart rate from
-  the same watch's days; after a switch "Learning this watch: n of 3" with the previous watch's value for reference.
+- Ours per watch was tried and reverted the same day at the runner's request: runs (and resting heart rate) from every
+  watch count together; the page says so when the estimate mixes watches.
   Cooler runs only when there are 3 of them; otherwise warm ones are included and the page says so (not corrected).
 - Fitness score label in Compare's rating words; a note says the points are a percentile only within the published
   40th–95th range. "Health" is now "Healthy habits" (not a measure of heart health; activity and steps overlap); the step
