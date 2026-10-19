@@ -64,6 +64,11 @@ def vo2_typical_age(sex: str, value: float) -> tuple[float | None, str]:
     return None, "within"
 
 
+def ordinal(n: int) -> str:
+    """84 → "84th", 41 → "41st", 52 → "52nd", 13 → "13th"."""
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
 def vo2_item(sex: str, age: int, g: dict) -> dict:
     v = (g.get("vo2max") or {}).get("value")
     who = g.get("vo2_maker") or "Garmin"
@@ -84,7 +89,7 @@ def vo2_item(sex: str, age: int, g: dict) -> dict:
     elif where == "above":
         pos = f"above the 95th percentile for {grp}"
     else:
-        pos = f"higher than about {round(pct)}% of {grp}"
+        pos = f"around the {ordinal(round(pct))} percentile for {grp} (the reference group)"
     t_age, t_where = vo2_typical_age(sex, v)
     typical = (f"typical for a {SEX_WORD[sex][0]} of about {round(t_age)}" if t_age is not None else
                f"above the typical level of {SEX_WORD[sex][1]} in their twenties" if t_where == "younger" else
@@ -94,7 +99,7 @@ def vo2_item(sex: str, age: int, g: dict) -> dict:
         {"label": nm.VO2_RATINGS[k], "from": pts[k], "to": pts[k + 1] if k < 3 else hi_dom} for k in range(4)]
     return {**base, "status": "ok", "value": v, "unit": "mL/kg/min", "rating": rating, "percentile": round(pct) if pct is not None else None,
             "position": where, "group": grp, "typical_age": round(t_age) if t_age is not None else None,
-            "headline": f"{rating} for {grp}",
+            "headline": f"In the table's {rating} band for {grp}",
             "detail": f"Your VO₂ max of {v:.1f} ({who}) is {pos}. It is {typical}.",
             "method": f"{who}'s VO₂ max placed among the Cooper Institute ratings for your sex and age group; the position between "
                       "published percentiles is interpolated. 'Typical' is the midpoint of the 40th and 60th percentiles.",

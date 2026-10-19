@@ -145,9 +145,9 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str,
         pts = vo2_points(sex, age, v)
         grp = compare.group_label(sex, lo, hi)
         _, where = nm.percentile_of(v, nm.VO2[sex][i], nm.VO2_PERCENTILES)
-        # Inside the published table: its percentile. Outside it: only the table's edge, never an invented percentile.
+        # Inside the published table: about its percentile in the reference group. Outside it: only the table's edge.
         rank = ("below the 40th percentile" if where == "below" else "above the 95th percentile" if where == "above"
-                else f"better than about {round(pts)}%")
+                else f"around the {compare.ordinal(round(pts))} percentile")
         nxt = next(((t, p) for t, p in zip(nm.VO2[sex][i], nm.VO2_PERCENTILES) if t > v), None)
         how = ("keep building easy running now; add a harder session once readiness allows" if hold_back
                else "mostly easy running with one harder session a week is the usual way up")

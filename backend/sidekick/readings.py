@@ -63,7 +63,8 @@ def notes(findings: list[dict], comparison: dict | None) -> dict[str, dict]:
         out[m] = {"verdict": verdict, "meaning": MEANING[m]}
     v = items.get("vo2max")
     if v:
-        out["vo2max"] = {"verdict": f"{v['value']:.1f} is {v['rating'].lower()} for {v['group']}"
-                                    + (f": higher than about {v['percentile']}% of them." if v.get("percentile") is not None else "."),
+        from .compare import ordinal
+        out["vo2max"] = {"verdict": f"{v['value']:.1f} is in the table's {v['rating']} band for {v['group']}"
+                                    + (f": around the {ordinal(v['percentile'])} percentile of that reference group." if v.get("percentile") is not None else "."),
                          "meaning": MEANING["vo2max"]}
     return out

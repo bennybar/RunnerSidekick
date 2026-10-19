@@ -18,4 +18,5 @@ def test_verdicts_compare_with_your_range_and_your_age_group():
     assert "short of the 7 hours" in n["sleep_duration"]["verdict"] and "below your usual range" in n["sleep_duration"]["verdict"]
     assert n["hrv_overnight_avg"]["verdict"] == "39 ms. Your own usual range is still being learned."
     assert n["running_moving_time_7d"]["verdict"].startswith("Not in yet today")
-    assert "higher than about 79%" in n["vo2max"]["verdict"] and all(x["meaning"] for x in n.values())
+    assert "in the table's Good band" in n["vo2max"]["verdict"] and "around the 79th percentile of that reference group" in n["vo2max"]["verdict"]
+    assert all(x["meaning"] for x in n.values())

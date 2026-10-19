@@ -332,6 +332,15 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## VO₂ estimate, round 3 (2026-10-19, server only, cardio-0.3)
+- Hill-adjusted pace on every run the VO₂ estimate takes (practically the recorded pace on the flat), so there's no
+  switch of method at 10 m/km; "hill-adjusted" only names runs above it. A hilly run needs a gradient for 90% of its
+  stretch (a missing one used to count as flat).
+- One stable basis: the median of the last 8 qualifying runs whatever the weather (cool-first made the value jump when
+  a third cool run arrived). Beside it, as descriptive subgroup medians: cool and warm runs, and each watch's runs when
+  they're mixed; runs 5 or more from the median are flagged for review and kept. Sensitivity in both directions (±5 bpm
+  maximum heart rate). Wording: "in the table's Excellent band", "around the 84th percentile (the reference group)".
+
 ## Hill-adjusted VO₂ estimate (2026-10-19, v0.64.0)
 - Our VO₂ estimate (cardio-0.2) takes runs with more than 10 and up to 20 m of climb or descent per km on their
   hill-adjusted pace (the app's Minetti-based flat-equivalent, grades over ~50 m) instead of the recorded pace; flat

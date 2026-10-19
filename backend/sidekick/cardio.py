@@ -29,13 +29,15 @@ from . import weather as wx
 from .analytics import running as rn
 from .db import get_setting
 
-CARDIO_VERSION = "cardio-0.2"  # 0.2: runs up to 20 m/km on hill-adjusted pace; all watches; cooler runs first
+CARDIO_VERSION = "cardio-0.3"  # 0.3: hill-adjusted pace on every run (no switch at 10 m/km), gradient coverage, one all-weather basis with subgroup medians; 0.2: runs up to 20 m/km; all watches
 WARMUP_S, MIN_SEGMENT_S, MIN_HR_COVERAGE = 600.0, 1200.0, 0.9
 HRR_RANGE = (0.5, 0.9)      # the share of heart-rate reserve where the relationship is used
 IN_RANGE_SHARE = 0.8        # ...for at least this share of the stretch
 MAX_NET_GRADE = 0.01        # the analysed stretch's overall rise or fall, at most 1%
 MAX_CLIMB_PER_KM = 10.0     # m/km, up and down each: flat enough for the ACSM level-ground equation on the recorded pace
 HILLY_MAX_CLIMB_PER_KM = 20.0  # m/km: up to here (VO2 estimate only) the hill-adjusted pace stands in for the recorded one
+MIN_GRADE_COVERAGE = 0.9       # ...and a hilly run needs a gradient for 90% of its stretch
+OUTLIER_VO2 = 5.0              # a run this far from the median is flagged for review (kept: high or low isn't proof of error)
 MIN_RUN_SPEED = 134.0 / 60  # m/s; slower is walking, where the running equation doesn't apply
 RECENT_DAYS, RECENT_RUNS = 60, 8
 SUSTAINED_S = 60.0          # the observed maximum is the highest heart rate held for a minute, not a one-off spike
@@ -139,10 +141,13 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
     if s is None:
         return None, "no samples"
     w = rn._weights(s)
-    speeds = rn.gap_speeds(s) if hill_adjusted else s.speed
-    moved, seg, with_hr, sv, sh = 0.0, 0.0, 0.0, 0.0, 0.0
+    # The VO2 estimate uses the hill-adjusted pace on every run it takes (practically the recorded pace on the flat), so
+    # there's no switch of method at 10 m/km; "hill_adjusted" only names the runs above it
+    speeds = rn.gap_speeds(s) if allow_hills else s.speed
+    graded = rn.grades(s) if allow_hills else [None] * len(s.t)
+    moved, seg, with_hr, with_grade, sv, sh = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     first = last = None  # the analysed stretch's (distance, elevation) at its ends: it has to be level overall too
-    for wi, v, h, d, e in zip(w, speeds, s.hr, s.dist, s.elev):
+    for wi, v, h, d, e, g in zip(w, speeds, s.hr, s.dist, s.elev, graded):
         if wi <= 0:
             continue
         moved += wi
@@ -152,6 +157,7 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
             first = first or (d, e)
             last = (d, e)
         seg += wi
+        with_grade += wi if g is not None else 0.0
         if h is not None:
             with_hr += wi
             sv += v * wi
@@ -164,6 +170,8 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
         return None, "the stretch climbs or descends overall"
     if with_hr < MIN_HR_COVERAGE * seg:
         return None, "heart-rate gaps"
+    if hill_adjusted and with_grade < MIN_GRADE_COVERAGE * seg:  # a missing gradient would silently count as flat
+        return None, "altitude missing for part of the run (needed to hill-adjust it)"
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
         return None, "walking pace"
@@ -249,14 +257,6 @@ def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dic
     return used, left
 
 
-def pick(used: list[dict]) -> tuple[list[dict], bool]:
-    """The runs a VO2 max comes from: the last 8, cooler ones only when there are 3 of them (heat raises heart rate and
-    lowers the estimate, so warm and cool runs aren't mixed when it can be avoided). And whether warm runs are in."""
-    recent = used[-RECENT_RUNS:]
-    cool = [e for e in recent if not e["hot"]]
-    return (cool, False) if len(cool) >= 3 else (recent, any(e["hot"] for e in recent))
-
-
 def estimate_for_run(conn, source: str, a: dict) -> dict:
     """This run's own VO2 max estimate (as one of the runs behind 'ours'), or why it doesn't give one: {"value": ...} or
     {"value": None, "why": ...}."""
@@ -272,7 +272,9 @@ def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     hm = hr_max(conn, source, d)
     if not hm.get("value"):
         return None
-    recent, _ = pick(run_estimates(conn, source, d, hm)[0])
+    # One stable basis: the last 8 qualifying runs whatever the weather (choosing by weather made the value jump when a
+    # cool run arrived, with nothing changed); the cool and warm medians are shown beside it on the Cardio page
+    recent = run_estimates(conn, source, d, hm)[0][-RECENT_RUNS:]
     if len(recent) < 3:
         return None
     return round(median(e["value"] for e in recent), 1), date.fromisoformat(recent[-1]["date"])
@@ -284,7 +286,7 @@ def build(conn, source: str, today: date) -> dict:
     out["hr_max"] = hm
     # 1. From your runs, whichever watch recorded them
     used, left = run_estimates(conn, source, today, hm)
-    recent, warm = pick(used)
+    recent = used[-RECENT_RUNS:]
     runs_part = {"id": "runs", "title": "From your runs (experimental)", "runs_used": len(used), "left_out": left,
                  "points": used, "caveat": "An experimental combination of published equations (ACSM running equation, Swain's heart-rate "
                  "reserve), not a validated VO₂ max test. The spread is how much your runs vary, not how accurate the estimate is."}
@@ -292,24 +294,41 @@ def build(conn, source: str, today: date) -> dict:
         vals = [e["value"] for e in recent]
         mid = median(vals)
         # How much the estimate leans on the assumed maximum heart rate: the same runs and readings, only that changed
-        lower = [with_hr_max(e, hm["value"] - 5) for e in recent]
+        lower = median(with_hr_max(e, hm["value"] - 5) for e in recent)
+        higher = median(with_hr_max(e, hm["value"] + 5) for e in recent)
+
+        def sub_median(rows: list[dict]) -> str | None:
+            return f"{median(e['value'] for e in rows):.1f} ({len(rows)} run{'s' if len(rows) != 1 else ''})" if rows else None
+        # What's in the median, so its effect is visible: by weather, by watch, and runs far from it (kept, for review)
+        groups = [(lab, sub_median([e for e in recent if f(e)])) for lab, f in (
+            ("cool runs", lambda e: not e["hot"]), ("warm runs", lambda e: e["hot"]))]
+        watches = sorted({e["watch"] for e in recent})
+        if len(watches) > 1:
+            groups += [(f"{w.capitalize()} runs", sub_median([e for e in recent if e["watch"] == w])) for w in watches]
+        odd = [e for e in recent if abs(e["value"] - mid) >= OUTLIER_VO2]
+        for e in used:
+            e["unusual"] = abs(e["value"] - mid) >= OUTLIER_VO2
+        n_hill = sum(e["hill_adjusted"] for e in recent)
         runs_part.update(status="ok", value=round(mid), spread=[round(min(vals)), round(max(vals))],
-                         sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
-                                     f"about {round(median(lower))}.",
+                         breakdown=[{"label": lab, "value": v} for lab, v in groups if v],
+                         sensitivity=f"With the same runs and a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}) it would be "
+                                     f"about {round(lower)}; 5 beats higher ({hm['value'] + 5:.0f}), about {round(higher)}.",
                          headline=f"from your last {len(recent)} qualifying runs",
-                         detail=("Not enough cooler runs, so warm, humid ones are included: heat raises heart rate, which "
-                                 "lowers the estimate (it isn't corrected for). " if warm else "") +
-                                (f"{sum(e['hill_adjusted'] for e in recent)} of these runs {'was' if sum(e['hill_adjusted'] for e in recent) == 1 else 'were'} "
-                                 "hilly: their hill-adjusted pace was used, which is less precise than on the flat (heart rate lags "
-                                 "the terrain, and GPS altitude adds error). " if any(e["hill_adjusted"] for e in recent) else "") +
-                                (f"From {', '.join(sorted({e['watch'].capitalize() for e in recent}))} runs together: watches read heart "
-                                 "rate differently, which moves the estimate. " if len({e['watch'] for e in recent}) > 1 else "") +
-                                f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
-                                f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: your watch's overnight value (the "
-                                f"published relationship used seated resting measurements).")
+                         detail=f"The median of your last {len(recent)} qualifying runs, whatever the weather. Beside it, as descriptive "
+                                "subgroup medians (not estimates of their own): " + "; ".join(f"{lab} {v}" for lab, v in groups if v) + ". "
+                                + ("Warm, humid runs read lower (heat raises heart rate; it isn't corrected for). "
+                                   if any(e["hot"] for e in recent) else "")
+                                + (f"The estimate mixes {' and '.join(w.capitalize() for w in watches)} runs: their medians differ, which "
+                                   "may be how each watch measures heart rate rather than fitness. " if len(watches) > 1 else "")
+                                + (f"{n_hill} {'run was' if n_hill == 1 else 'runs were'} hilly (10–20 m/km), on hill-adjusted pace: "
+                                   "less precise than on the flat. " if n_hill else "")
+                                + ("Worth checking (far from the rest, kept): " + ", ".join(f"{e['date']} ({e['value']:.1f})" for e in odd)
+                                   + ". " if odd else "")
+                                + f"Maximum heart rate used: {hm['value']:.0f} bpm ({hm['source']}), an assumption, not a test; "
+                                "resting heart rate: your watch's overnight value.")
     else:
         runs_part.update(status="not_enough", headline="Not enough qualifying runs yet",
-                         detail=f"Needs 3 steady, cool runs with good heart rate and 20+ minutes after the warm-up in the last "
+                         detail=f"Needs 3 steady runs with good heart rate and 20+ minutes after the warm-up in the last "
                                 f"{RECENT_DAYS} days; {len(used)} so far.")
     out["runs"] = runs_part
 
@@ -386,9 +405,9 @@ def build(conn, source: str, today: date) -> dict:
             if it.get("status") != "ok":
                 continue
             pos = ("below the 40th percentile" if it["position"] == "below" else "above the 95th percentile" if it["position"] == "above"
-                   else f"higher than about {it['percentile']}%")
-            out[k]["comparison"] = {"headline": f"{it['rating']} for {it['group']}", "percentile": it["percentile"],
-                                    "detail": f"{v} is {pos} of {it['group']}" + (f"; typical for a {cp.SEX_WORD[p['sex']][0]} of about {it['typical_age']}"
+                   else f"around the {cp.ordinal(it['percentile'])} percentile")
+            out[k]["comparison"] = {"headline": f"In the table's {it['rating']} band for {it['group']}", "percentile": it["percentile"],
+                                    "detail": f"{v} is {pos} for {it['group']} (the reference group)" + (f"; typical for a {cp.SEX_WORD[p['sex']][0]} of about {it['typical_age']}"
                                                                                  if it.get("typical_age") else "") + ".",
                                     "source": cp.nm.VO2_SOURCE}
 
