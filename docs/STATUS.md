@@ -1019,3 +1019,9 @@ After the round-4 review:
 - The server address is built in (release: runnersidekick.ibarak.org; debug: the emulator's local backend) and no
   longer a setting: Settings' Server row and the sign-in screen's address field are gone (the device-token sign-in
   stays, against the built-in address).
+
+## VO₂ max progress (2026-10-19, v0.69.0)
+- Today › VO₂ max tile › sheet: a progress chart under the note, with chips for since 3 months, 6 months or a year
+  ago, and the change over that period. It follows Settings › VO₂ max for scores (Runner Sidekick's estimate as it
+  stood after each qualifying run, or the watch's readings). `/v1/fitness` now sends a year of VO₂ history (was 120
+  days).

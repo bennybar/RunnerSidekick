@@ -210,6 +210,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                 TextButton(onClick = { sheet = null; com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }) {
                     Text("Compare with your age group")
                 }
+                fitness?.value?.let { f -> Vo2Progress(f.vo2maxSeries, f.vo2Maker, r.localDate) }
             }
         }
         "briefing" -> report?.let { BriefingSheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
@@ -336,6 +337,65 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
     val byDate = f.sparkline.orEmpty().associate { it.date to it.value }
     val end = LocalDate.parse(endDate)
     return (13 downTo 0).map { byDate[end.minusDays(it.toLong()).toString()] }
+}
+
+/** VO2 max progress in the VO2 max sheet: the chosen source's readings since 3 months, 6 months or a year ago. */
+@Composable
+private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Point>, maker: String, today: String) {
+    val cs = MaterialTheme.colorScheme
+    var months by rememberSaveable { mutableStateOf(3) }
+    val from = java.time.LocalDate.parse(today).minusMonths(months.toLong())
+    val pts = series.filter { !java.time.LocalDate.parse(it.date).isBefore(from) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Progress", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(3 to "3 months", 6 to "6 months", 12 to "1 year").forEach { (m, l) ->
+                androidx.compose.material3.FilterChip(months == m, onClick = { months = m }, label = { Text(l) })
+            }
+        }
+        if (pts.size < 2) {
+            Text("Not enough $maker readings in this period yet.", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            return@Column
+        }
+        val ch = pts.last().value - pts.first().value
+        Text((if (kotlin.math.abs(ch) < 0.05) "About the same" else "%+.1f".format(ch)) +
+            " since ${com.bennybar.runnersidekick.ui.Format.shortDate(pts.first().date)} (%.1f → %.1f)".format(pts.first().value, pts.last().value),
+            style = MaterialTheme.typography.bodyLarge)
+        val lo = kotlin.math.floor(pts.minOf { it.value } - 0.5)
+        val hi = kotlin.math.ceil(pts.maxOf { it.value } + 0.5)
+        val d0 = java.time.LocalDate.parse(pts.first().date).toEpochDay().toDouble()
+        val span = (java.time.LocalDate.parse(pts.last().date).toEpochDay() - d0).coerceAtLeast(1.0)
+        val line = cs.primary
+        val grid = cs.outlineVariant
+        Row {
+            Column(Modifier.width(36.dp).height(140.dp)) {
+                Text("%.0f".format(hi), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("%.0f".format(lo), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            androidx.compose.foundation.Canvas(Modifier.weight(1f).height(140.dp).semantics {
+                contentDescription = "VO2 max from %.1f to %.1f over %d readings".format(pts.first().value, pts.last().value, pts.size)
+            }) {
+                fun x(p: com.bennybar.runnersidekick.data.remote.Point) =
+                    ((java.time.LocalDate.parse(p.date).toEpochDay() - d0) / span * size.width).toFloat()
+                fun y(v: Double) = (size.height * (1 - (v - lo) / (hi - lo))).toFloat()
+                val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
+                drawLine(grid, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), pathEffect = dash)
+                drawLine(grid, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), pathEffect = dash)
+                val path = androidx.compose.ui.graphics.Path()
+                pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p), y(p.value)) else path.lineTo(x(p), y(p.value)) }
+                drawPath(path, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+                pts.forEach { p -> drawCircle(line, 3.dp.toPx(), androidx.compose.ui.geometry.Offset(x(p), y(p.value))) }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 36.dp)) {
+            Text(com.bennybar.runnersidekick.ui.Format.shortDate(pts.first().date), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            Text(com.bennybar.runnersidekick.ui.Format.shortDate(pts.last().date), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+        }
+        Text(if (maker == "Runner Sidekick") "Runner Sidekick's estimate as it stood after each qualifying run." else "$maker's readings.",
+            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+    }
 }
 
 @Composable
