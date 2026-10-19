@@ -191,11 +191,18 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         message.value = if (key.isNullOrBlank()) "Your key was removed" else "Key saved on this phone"
     }
 
-    fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }
-    fun setTheme(t: com.bennybar.runnersidekick.ui.theme.ThemeChoice) = viewModelScope.launch { repo.settings.setTheme(t.name) }
-    fun setAppearance(a: com.bennybar.runnersidekick.ui.theme.Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }
-    fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }
-    fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }
+    // Each is saved on this phone at once and on the server, so a reinstall or a new phone gets it back
+    private fun keep(key: String, v: kotlinx.serialization.json.JsonPrimitive) = viewModelScope.launch { repo.savePreference(key, v) }
+    fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }.also {
+        keep("units", kotlinx.serialization.json.JsonPrimitive(if (u == Units.IMPERIAL) "imperial" else "metric")) }
+    fun setTheme(t: com.bennybar.runnersidekick.ui.theme.ThemeChoice) = viewModelScope.launch { repo.settings.setTheme(t.name) }.also {
+        keep("theme", kotlinx.serialization.json.JsonPrimitive(t.name)) }
+    fun setAppearance(a: com.bennybar.runnersidekick.ui.theme.Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }.also {
+        keep("appearance", kotlinx.serialization.json.JsonPrimitive(a.name)) }
+    fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }.also {
+        keep("notifications", kotlinx.serialization.json.JsonPrimitive(on)) }
+    fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }.also {
+        keep("background_refresh", kotlinx.serialization.json.JsonPrimitive(on)) }
 
     fun export(ctx: android.content.Context, uri: Uri) = launchIo {
         val body = repo.exportJson()
@@ -340,11 +347,11 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
                         row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
-                                "Your watch's estimate" else "Runner Sidekick's, from your steady runs (needs 3 in 60 days)",
+                                "Your watch's estimate" else "Runner Sidekick's experimental estimate, from this watch's steady runs (needs 3 in 60 days)",
                             icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
                                 androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("sidekick" to "Ours", "watch" to "Watch").forEach { (k, l) ->
+                                    listOf("watch" to "Watch", "sidekick" to "Ours").forEach { (k, l) ->
                                         androidx.compose.material3.FilterChip(r.vo2Source == k, enabled = !busy,
                                             onClick = { if (r.vo2Source != k) vm.saveRemote(r.copy(vo2Source = k)) }, label = { Text(l) })
                                     }

@@ -186,39 +186,36 @@ def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
 # ---------------------------------------------------------------- resting heart rate
 
 def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
-    base = {"id": "resting_hr", "title": "Resting heart rate", "source": nm.RHR_SOURCE}
-    since = (today - timedelta(days=27)).isoformat()
-    vals = [v for k, v in rp.series(conn, source, "resting_hr", today.isoformat()).items() if k >= since]
-    if len(vals) < MIN_RHR_DAYS:
+    """Your typical resting heart rate (4-week median, from the current watch) against your own 4 weeks before. No
+    population ranking: a watch's resting heart rate is the day's lowest stretch, mostly asleep, while survey values are
+    a seated pulse, so ranking one against the other would mislead. The survey's middle is given for orientation only."""
+    from .samsung import watch_on
+    base = {"id": "resting_hr", "title": "Resting heart rate", "source": "your own nights"}
+    watch = watch_on(conn, today.isoformat())
+    series = {k: v for k, v in rp.series(conn, source, "resting_hr", today.isoformat()).items() if watch_on(conn, k) == watch}
+
+    def med_from(end: date) -> tuple[float | None, int]:
+        vals = [v for k, v in series.items() if (end - timedelta(days=27)).isoformat() <= k <= end.isoformat()]
+        return (median(vals) if len(vals) >= MIN_RHR_DAYS else None), len(vals)
+    v, n = med_from(today)
+    if v is None:
         return {**base, "status": "unavailable", "headline": "Not enough resting heart rate data yet",
-                "detail": f"Needs {MIN_RHR_DAYS} days with a resting heart rate in the last 4 weeks; {len(vals)} so far."}
-    v = median(vals)
+                "detail": f"Needs {MIN_RHR_DAYS} days with a resting heart rate from this watch in the last 4 weeks; {n} so far."}
+    before, _ = med_from(today - timedelta(days=28))
     i, outside = nm.band_index(nm.RHR_BANDS, age)
     lo, hi = nm.RHR_BANDS[i]
-    pts = nm.RHR[sex][i]
-    pct, where = nm.percentile_of(v, pts, nm.RHR_PERCENTILES)
     grp = group_label(sex, lo, hi)
-    if where == "below":
-        pos, lower_than = f"lower than about 97% of {grp}", 97
-    elif where == "above":
-        pos, lower_than = f"higher than about 97% of {grp}", 3
-    else:
-        lower_than = round(100 - pct)
-        pos = f"lower than about {lower_than}% of {grp}" if lower_than >= 50 else f"higher than about {100 - lower_than}% of {grp}"
-    return {**base, "status": "ok", "value": round(v), "unit": "bpm", "days": len(vals), "lower_than_pct": lower_than, "group": grp,
-            "headline": f"Lower than about {lower_than}% of {grp}" if lower_than >= 50 else f"Around or above most {grp}",
-            "detail": f"Your typical resting heart rate over the last 4 weeks is {round(v)} bpm (median of {len(vals)} days), {pos} "
-                      f"in a US national survey, where the middle was {pts[4]} bpm.",
-            "method": "Median of your watch's daily resting heart rate (last 28 days) placed among the survey's published percentiles.",
+    change = "" if before is None else (", the same as the 4 weeks before" if round(v) == round(before) else
+                                        f", {abs(round(v - before))} {'lower' if v < before else 'higher'} than the 4 weeks before")
+    return {**base, "status": "ok", "value": round(v), "unit": "bpm", "days": n, "group": grp,
+            "headline": f"{round(v)} bpm, your 4-week median{change}",
+            "detail": f"Median of {n} days in the last 4 weeks from this watch. For orientation only: a US national survey's middle "
+                      f"for {grp} is {nm.RHR[sex][i][4]} bpm, but that's a seated pulse, higher than a watch's sleep-time value, so "
+                      "no ranking is given.",
+            "method": "Median of your watch's daily resting heart rate (last 28 days), against the 28 days before; same watch only.",
             "caveats": nearest_note(outside, age, lo, hi) + [
-                "The survey measured a seated pulse after about 4 minutes' rest. Your watch's resting heart rate is the lowest stretch of "
-                "the day, usually during sleep, so it reads lower, and this comparison flatters you by a few beats.",
-                "A low resting heart rate is common in people who train, but on its own it isn't a measure of health."],
-            "chart": {"type": "distribution", "unit": "bpm", "percentiles": list(nm.RHR_PERCENTILES), "points": list(pts), "value": round(v),
-                      "higher_is_better": False}}
+                "A low resting heart rate is common in people who train, but on its own it isn't a measure of health."]}
 
-
-# ---------------------------------------------------------------- HRV
 
 def hrv_item(conn, source: str, today: date) -> dict:
     """Overnight HRV against your own usual range on the current watch (population norms aren't comparable with a
@@ -229,6 +226,9 @@ def hrv_item(conn, source: str, today: date) -> dict:
     latest = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured"}, sort=[("local_date", -1)])
     if latest is None:
         return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "A Garmin records it while you sleep with the watch on; Samsung watches don't share it."}
+    if latest["local_date"] < (today - timedelta(days=6)).isoformat():  # nothing this week: say when the last one was
+        return {**base, "status": "unavailable", "headline": f"No overnight HRV since {latest['local_date']}",
+                "detail": f"The last reading was {round(latest['value'])} ms on {latest['local_date']}. Samsung watches don't share HRV."}
     values = rp.series(conn, source, "hrv_overnight_avg", today.isoformat(), latest.get("method"))
     era = rp.device_era_start(conn, source, today)
     in_era = {d: v for d, v in values.items() if not era or d >= era.isoformat()}

@@ -47,13 +47,11 @@ def notes(findings: list[dict], comparison: dict | None) -> dict[str, dict]:
                                                                                 else "longer than the usual 7–9 hours")
             verdict = f"{int(h)} h {round((h % 1) * 60):02d} min is {band}" + (f" and {usual}." if usual else ".") + tail
         elif m == "resting_hr":
-            # Today's value against your own range; the population rank belongs to your typical value (the 4-week median
-            # Compare uses), never to today's single reading
+            # Today's value against your own range, then your typical value (the 4-week median Compare uses) and its change
             r = items.get("resting_hr")
             verdict = f"{round(v)} bpm today" + (f", {usual}." if usual else ".")
             if r:
-                verdict += (f" {'Very good: y' if r['lower_than_pct'] >= 75 else 'Y'}our typical {r['value']} bpm is lower than about "
-                            f"{r['lower_than_pct']}% of {r['group']}.")
+                verdict += f" Your typical: {r['headline'][0].lower()}{r['headline'][1:]}."
             verdict += tail
         elif m == "hrv_overnight_avg":
             verdict = (f"Normal for you: {round(v)} ms is {usual}." if f.get("status") == "within" else

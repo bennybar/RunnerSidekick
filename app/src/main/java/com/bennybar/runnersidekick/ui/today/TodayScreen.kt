@@ -201,7 +201,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     }
     when (sheet) {
         "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
-            ScoreSheet(if (sheet == "health") "Health" else "Fitness", sc.scope[sheet!!], it, sc.basis, onDismiss = { sheet = null }) } }
+            ScoreSheet(if (sheet == "health") "Healthy habits" else "Fitness", sc.scope[sheet!!], it, sc.basis, onDismiss = { sheet = null }) } }
         "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(shownReadiness(it), r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
             SheetColumn(onDismiss = { sheet = null }) {
@@ -489,7 +489,7 @@ private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen
     val sc = com.bennybar.runnersidekick.ui.theme.LocalScoreColors.current
     // Equal heights, and a fixed two-line subtitle, so both numbers and bars line up
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-        ScoreTile("Health", s.scope["health"], s.horizon["health"], s.health, sc.health.container, sc.health.content,
+        ScoreTile("Healthy habits", s.scope["health"], s.horizon["health"], s.health, sc.health.container, sc.health.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), Modifier.weight(1f)) { onOpen("health") }
         ScoreTile("Fitness", s.scope["fitness"], s.horizon["fitness"], s.fitness, sc.fitness.container, sc.fitness.content,
             androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 8.dp, 28.dp), Modifier.weight(1f)) { onOpen("fitness") }

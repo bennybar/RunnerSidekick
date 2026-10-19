@@ -112,7 +112,7 @@ def build(conn, source: str, today: date) -> dict:
         if sex and birth:
             it = cp.rhr_item(conn, source, sex, cp.age_on(birth, today), today)
             cmp = {"headline": f"Your usual: {it.get('headline')[0].lower()}{it.get('headline')[1:]}",
-                   "detail": "Your usual resting heart rate (last 4 weeks) against people of your age and sex."} \
+                   "detail": "Your usual resting heart rate (last 4 weeks), against the 4 weeks before."} \
                 if it.get("status") == "ok" else None
         body.append({"id": "resting_hr", "title": "Lowest resting heart rate", "value": f"{v:.0f} bpm", "date": d, "source_id": None,
                      "source": "your nights", "comparison": cmp})

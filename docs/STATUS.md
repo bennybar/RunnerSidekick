@@ -332,6 +332,21 @@ Rules: [analysis-rules.md](analysis-rules.md). Setup: [SETUP.md](SETUP.md).
   halves. "eligible" still means steady and not too hilly, and only those feed the checks, durability and the coach;
   other runs show the numbers as indicative. Both are in each run's summary on the run screen (running-1.3).
 
+## Review fixes: VO₂ per watch, default to the watch's, honest wording; preferences on the server (2026-10-19, v0.63.0)
+- VO₂ max for scores defaults to the watch's; ours is opt-in and labelled experimental (not a validated VO₂ max test).
+- Ours per watch: a watch's runs aren't pooled with another's (heart rate reads differently), resting heart rate from
+  the same watch's days; after a switch "Learning this watch: n of 3" with the previous watch's value for reference.
+  Cooler runs only when there are 3 of them; otherwise warm ones are included and the page says so (not corrected).
+- Fitness score label in Compare's rating words; a note says the points are a percentile only within the published
+  40th–95th range. "Health" is now "Healthy habits" (not a measure of heart health; activity and steps overlap); the step
+  target eases from 8,000 at 55 to 6,000 at 65 instead of jumping on the 60th birthday.
+- Resting heart rate on Compare: your 4-week median against the 4 weeks before, same watch; no population ranking (a
+  watch's sleep-time value isn't a survey's seated pulse), the survey's middle for orientation only. Same in the Today
+  note, the AI facts and the records page.
+- HRV on Compare: "No overnight HRV since <date>" when there's none this week, instead of an old value as "this week".
+- App preferences (units, theme, light/dark, notifications, background refresh) are kept with the account on the
+  server and restored after sign-in on a reinstall; notifications only when Android grants the permission again.
+
 ## Our VO₂ max on each run; watch-named labels (2026-10-19, v0.62.0)
 - Each run's report has `vo2_ours` (Runner Sidekick's estimate from this run, `cardio.estimate_for_run`, or why it gives
   none) and `watch` (the watch that recorded it). The header's VO₂ tile shows ours with the watch's beside it; the

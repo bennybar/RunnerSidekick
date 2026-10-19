@@ -333,3 +333,17 @@ def test_a_run_says_which_watch_and_gives_our_vo2_or_why_not():
     from sidekick import run_export
     md = run_export.markdown(conn, "garmin", "samsung-o", fetch=lambda *x, **k: None)[1]
     assert "VO₂ max (Runner Sidekick, from this run): not calculated (" in md and "VO₂ max (Samsung estimate" in md
+
+
+def test_app_preferences_are_kept_on_the_server(tmp_path):
+    c = Config(data_dir=tmp_path, source="fixture", timezone="Asia/Jerusalem", backfill_days=40, refetch_days=3,
+               raw_retention_days=120, request_spacing_s=0)
+    h = {"Authorization": f"Bearer {create_token(tmp_path, 't')}"}
+    client = TestClient(create_app(c, connector=FixtureConnector(ANCHOR)))
+    s = client.get("/v1/settings", headers=h).json()
+    assert s["units"] is None and s["vo2_source"] == "watch"  # nothing saved yet; the watch's VO2 max by default
+    client.put("/v1/settings", json={"running_days": [1, 3]}, headers=h)
+    client.put("/v1/settings", json={"units": "imperial"}, headers=h)
+    client.put("/v1/settings", json={"theme": "OCEAN", "notifications": True}, headers=h)
+    s = client.get("/v1/settings", headers=h).json()  # as a reinstalled app would read them
+    assert (s["units"], s["theme"], s["notifications"], s["running_days"]) == ("imperial", "OCEAN", True, [1, 3])

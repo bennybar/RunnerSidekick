@@ -668,7 +668,39 @@ class Repository(
     suspend fun remoteSettings(): SettingsDto {
         val body = api.getRaw("/v1/settings")
         put("settings", body)  // kept, so the app knows (offline too) whether AI is on
-        return offMain { json.decodeFromString(body) }
+        val s: SettingsDto = offMain { json.decodeFromString(body) }
+        restorePreferences(s)
+        return s
+    }
+
+    /** The app's preferences live on the server: what it has wins on this phone (a reinstall gets them back); what it
+     *  doesn't have yet is sent from this phone once. */
+    private suspend fun restorePreferences(s: SettingsDto) {
+        val local = settings.settings.first()
+        val missing = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
+        fun keep(key: String, server: Any?, mine: Any?) {
+            if (server == null && mine != null) missing[key] = when (mine) {
+                is Boolean -> kotlinx.serialization.json.JsonPrimitive(mine)
+                else -> kotlinx.serialization.json.JsonPrimitive(mine.toString())
+            }
+        }
+        s.units?.let { settings.setUnits(if (it == "imperial") com.bennybar.runnersidekick.data.local.Units.IMPERIAL else com.bennybar.runnersidekick.data.local.Units.METRIC) }
+        s.theme?.let { settings.setTheme(it) }
+        s.appearance?.let { settings.setAppearance(it) }
+        s.notifications?.let { settings.setNotificationsEnabledIfAllowed(it) }
+        s.backgroundRefresh?.let { settings.setBackgroundRefresh(it) }
+        keep("units", s.units, if (local.units == com.bennybar.runnersidekick.data.local.Units.IMPERIAL) "imperial" else "metric")
+        keep("theme", s.theme, local.theme)
+        keep("appearance", s.appearance, local.appearance)
+        keep("notifications", s.notifications, local.notificationsEnabled)
+        keep("background_refresh", s.backgroundRefresh, local.backgroundRefresh)
+        if (missing.isNotEmpty()) runCatching { api.putRaw("/v1/settings", kotlinx.serialization.json.JsonObject(missing).toString()) }
+    }
+
+    /** One app preference changed on this phone: saved here at once and on the server (best effort; the next refresh
+     *  sends it if this one can't). */
+    suspend fun savePreference(key: String, value: kotlinx.serialization.json.JsonPrimitive) {
+        runCatching { api.putRaw("/v1/settings", kotlinx.serialization.json.JsonObject(mapOf(key to value)).toString()) }
     }
 
     /** Whether the AI coach is on (Settings). Everything AI is hidden when it isn't, and until it's known. */

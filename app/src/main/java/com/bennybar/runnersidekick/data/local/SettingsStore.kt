@@ -89,6 +89,11 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun setNotificationsEnabled(on: Boolean) = context.dataStore.edit { it[kNotify] = on }
+
+    /** Notifications restored from the server: on only when Android lets this install post them (a reinstall asks again). */
+    suspend fun setNotificationsEnabledIfAllowed(on: Boolean) = setNotificationsEnabled(on &&
+        androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED)
     suspend fun setBackgroundRefresh(on: Boolean) = context.dataStore.edit { it[kBackground] = on }
 
     suspend fun markWeeklyNotified(weekStart: String) = context.dataStore.edit { it[kWeekly] = weekStart }

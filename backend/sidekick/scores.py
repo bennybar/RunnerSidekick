@@ -90,9 +90,9 @@ def clock(sec: float) -> str:
 
 
 def vo2_maker(conn, d: date) -> str:
-    """Whose VO2 max counts on d: Runner Sidekick's own (from your runs) unless the runner chose the watch's in Settings,
-    and then the watch the runner had that day ("Garmin" or "Samsung")."""
-    if rp.get_setting(conn, "vo2_source", "sidekick") == "sidekick":
+    """Whose VO2 max counts on d: the watch the runner had that day ("Garmin" or "Samsung"), unless the runner turned on
+    Runner Sidekick's own experimental estimate in Settings."""
+    if rp.get_setting(conn, "vo2_source", "watch") == "sidekick":
         return "Runner Sidekick"
     from .samsung import SAMSUNG, watch_on
     return "Samsung" if watch_on(conn, d.isoformat()) == SAMSUNG else "Garmin"
@@ -221,7 +221,8 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
         parts.append(part("activity", "Weekly activity", None, f"Needs 10 days of intensity minutes ({len(days)} so far)",
                           "Garmin's intensity minutes, last 4 weeks"))
     # Daily steps against Paluch et al. 2022 (mortality falls up to about 8,000 under 60, about 6,000–8,000 from 60)
-    target = 6000 if age is not None and age >= 60 else 8000
+    # 8,000 up to 55, easing to 6,000 by 65 (no jump on a birthday)
+    target = round(8000 - 2000 * min(1, max(0, ((age or 0) - 55) / 10)), -2)
     st = [v for k, v in rp.series(conn, source, "steps", done).items() if k >= (d - timedelta(days=14)).isoformat()]
     if len(st) >= 7:
         avg = sum(st) / len(st)
@@ -382,11 +383,20 @@ def build(conn, source: str, today: date, hold_back: bool = False) -> dict:
         if now_v < old_v:
             fitness["trend"]["note"] = ("A device estimate trend, not a measured decline: heat, hills, fatigue or easy weeks can "
                                         "lower the watch's estimate for a while.")
+    # The label in the same words as Compare (the VO2 max rating for your group), so one value never reads two ways
+    vp = next((p for p in fitness.get("components", []) if p["id"] == "vo2max" and p.get("vo2")), None)
+    if vp and fitness.get("score") is not None:
+        rating = compare.vo2_item(prof["sex"], age, {"vo2max": {"value": vp["vo2"]}}).get("rating")
+        fitness["label"] = rating or fitness["label"]
+    fitness["note"] = ("Sidekick fitness points: your VO₂ max percentile for your age and sex where the published table has "
+                       "one (40th–95th), our own extension outside it, so not a percentile there.")
     if fitness.get("status") != "unavailable":
         from . import progress
         fitness["progress"] = progress.build(conn, source, today)
     return {"status": "ok", "age": age, "sex": prof["sex"], "fitness": fitness, "health": health,
-            "scope": {"fitness": "Aerobic fitness for your age, from Garmin's VO₂ max", "health": "Activity and sleep habits, from your watch"},
+            "scope": {"fitness": f"Aerobic fitness for your age, from {vo2_maker(conn, today)}'s VO₂ max",
+                      "health": "Healthy habits: activity and sleep, from your watch (not a measure of heart health; activity and "
+                                "steps partly reward the same movement)"},
             # The time each number looks at, so it's clear why they move differently
             "horizon": {"health": "Last 2–4 weeks", "fitness": "Latest VO₂ estimate"},
             "basis": "Fixed weights; each counted part is anchored to a published reference, the point curves are ours. Missing parts "

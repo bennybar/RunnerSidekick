@@ -74,7 +74,6 @@ def compare_bundle(cmp: dict) -> ch.Bundle:
         elif i["id"] == "resting_hr" and i["status"] == "ok":
             b.item(iid, "comparison", **base, group=i["group"])
             b.fact("resting_hr", "typical resting heart rate, last four weeks", f"{i['value']} bpm", i["value"])
-            b.fact("rhr_lower_than", "share of the group with a higher resting heart rate", f"{i['lower_than_pct']}%", i["lower_than_pct"])
         elif i["id"] == "age_grade" and i["status"] == "ok":
             b.item(iid, "comparison", **base)
             for r in i["rows"]:

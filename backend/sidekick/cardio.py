@@ -216,16 +216,28 @@ def vdot(metres: float, seconds: float) -> float:
     return cost / share
 
 
-def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dict[str, int]]:
-    """The per-run estimates of the 60 days up to d, oldest first, and how many runs were left out for each reason."""
-    rhr = rp.series(conn, source, "resting_hr", d.isoformat())
+def watch_of(a: dict) -> str:
+    return "samsung" if a.get("manufacturer") == "Samsung" else "garmin"
 
-    def rest_before(day: str):
-        vals = [v for k, v in rhr.items() if (date.fromisoformat(day) - timedelta(days=28)).isoformat() <= k <= day]
-        return median(vals) if len(vals) >= 7 else None
+
+def rest_on(conn, source: str, day: str, watch: str) -> float | None:
+    """The resting heart rate around a day: the median of the 28 days up to it, from the same watch only (each watch
+    measures it differently; Samsung's is our own estimate), from 7 days."""
+    from .samsung import watch_on
+    since = (date.fromisoformat(day) - timedelta(days=28)).isoformat()
+    vals = [v for k, v in rp.series(conn, source, "resting_hr", day).items() if k >= since and watch_on(conn, k) == watch]
+    return median(vals) if len(vals) >= 7 else None
+
+
+def run_estimates(conn, source: str, d: date, hm: dict, watch: str | None = None) -> tuple[list[dict], dict[str, int]]:
+    """The per-run estimates of the 60 days up to d, oldest first, and how many runs were left out for each reason.
+    With `watch`, only runs that watch recorded (estimates from different watches aren't pooled: a watch that reads
+    heart rate lower gives a higher VO2 max for the same fitness)."""
     used, left = [], {}
     for a in rp.activities(conn, source, (d - timedelta(days=RECENT_DAYS)).isoformat(), d.isoformat()):
-        e, why = run_estimate(conn, a, rest_before(a["local_date"]), hm["value"])
+        if watch and watch_of(a) != watch:
+            continue
+        e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"], watch_of(a)), hm["value"])
         if e:
             used.append(e)
         else:
@@ -233,23 +245,31 @@ def run_estimates(conn, source: str, d: date, hm: dict) -> tuple[list[dict], dic
     return used, left
 
 
+def pick(used: list[dict]) -> tuple[list[dict], bool]:
+    """The runs a VO2 max comes from: the last 8, cooler ones only when there are 3 of them (heat raises heart rate and
+    lowers the estimate, so warm and cool runs aren't mixed when it can be avoided). And whether warm runs are in."""
+    recent = used[-RECENT_RUNS:]
+    cool = [e for e in recent if not e["hot"]]
+    return (cool, False) if len(cool) >= 3 else (recent, any(e["hot"] for e in recent))
+
+
 def estimate_for_run(conn, source: str, a: dict) -> dict:
     """This run's own VO2 max estimate (as one of the runs behind 'ours'), or why it doesn't give one: {"value": ...} or
     {"value": None, "why": ...}."""
     d = date.fromisoformat(a["local_date"])
     hm = hr_max(conn, source, d)
-    vals = [v for k, v in rp.series(conn, source, "resting_hr", d.isoformat()).items() if k >= (d - timedelta(days=28)).isoformat()]
-    e, why = run_estimate(conn, a, median(vals) if len(vals) >= 7 else None, hm.get("value"))
+    e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"], watch_of(a)), hm.get("value"))
     return {k: e[k] for k in ("value", "hrr_share", "hot")} if e else {"value": None, "why": why}
 
 
 def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     """Runner Sidekick's VO2 max as of d (the median of the last 8 qualifying runs of the 60 days before, from 3), with the
     day of the newest of them; None until there are 3. What the scores use when the runner chose ours in Settings."""
+    from .samsung import watch_on
     hm = hr_max(conn, source, d)
     if not hm.get("value"):
         return None
-    recent = run_estimates(conn, source, d, hm)[0][-RECENT_RUNS:]
+    recent, _ = pick(run_estimates(conn, source, d, hm, watch_on(conn, d.isoformat()))[0])
     if len(recent) < 3:
         return None
     return round(median(e["value"] for e in recent), 1), date.fromisoformat(recent[-1]["date"])
@@ -259,12 +279,15 @@ def build(conn, source: str, today: date) -> dict:
     out = {"algorithm_version": CARDIO_VERSION, "experimental": True}
     hm = hr_max(conn, source, today)
     out["hr_max"] = hm
-    # 1. From your runs
-    used, left = run_estimates(conn, source, today, hm)
-    recent = used[-RECENT_RUNS:]
-    runs_part = {"id": "runs", "title": "From your runs", "runs_used": len(used), "left_out": left,
-                 "points": used, "caveat": "An experimental combination of published equations (ACSM running equation, Swain's heart-rate reserve). "
-                 "The spread is how much your runs vary, not how accurate the estimate is."}
+    # 1. From your runs: the current watch's only; the other watch's shown for reference
+    from .samsung import watch_on
+    watch = watch_on(conn, today.isoformat())
+    used, left = run_estimates(conn, source, today, hm, watch)
+    recent, warm = pick(used)
+    other = pick(run_estimates(conn, source, today, hm, "garmin" if watch == "samsung" else "samsung")[0])[0]
+    runs_part = {"id": "runs", "title": "From your runs (experimental)", "runs_used": len(used), "left_out": left,
+                 "points": used, "caveat": "An experimental combination of published equations (ACSM running equation, Swain's heart-rate "
+                 "reserve), not a validated VO₂ max test. The spread is how much your runs vary, not how accurate the estimate is."}
     if len(recent) >= 3:
         vals = [e["value"] for e in recent]
         mid = median(vals)
@@ -274,12 +297,15 @@ def build(conn, source: str, today: date) -> dict:
                          sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
                                      f"about {round(median(lower))}.",
                          headline=f"from your last {len(recent)} qualifying runs",
-                         detail=(f"{sum(e['hot'] for e in recent)} of these runs {'was' if sum(e['hot'] for e in recent) == 1 else 'were'} "
-                                 "warm and humid: heat raises heart rate, "
-                                 "which lowers the estimate a little. " if any(e["hot"] for e in recent) else "") +
+                         detail=("Not enough cooler runs, so warm, humid ones are included: heat raises heart rate, which "
+                                 "lowers the estimate (it isn't corrected for). " if warm else "") +
                                 f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
                                 f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: your watch's overnight value (the "
                                 f"published relationship used seated resting measurements).")
+    elif other and len(other) >= 3:  # just switched watches: this one is still being learnt
+        runs_part.update(status="not_enough", headline=f"Learning this watch: {len(recent)} of 3 qualifying runs",
+                         detail=f"Estimates from different watches aren't pooled (heart rate reads differently). Your previous "
+                                f"watch gave about {round(median(e['value'] for e in other))}.")
     else:
         runs_part.update(status="not_enough", headline="Not enough qualifying runs yet",
                          detail=f"Needs 3 steady, cool runs with good heart rate and 20+ minutes after the warm-up in the last "
