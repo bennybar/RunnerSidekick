@@ -264,7 +264,8 @@ def build(conn, source: str, today: date) -> dict:
                          sensitivity=f"With a maximum heart rate 5 beats lower ({hm['value'] - 5:.0f}), the same runs would give "
                                      f"about {round(median(lower))}.",
                          headline=f"from your last {len(recent)} qualifying runs",
-                         detail=(f"{sum(e['hot'] for e in recent)} of these runs were warm and humid: heat raises heart rate, "
+                         detail=(f"{sum(e['hot'] for e in recent)} of these runs {'was' if sum(e['hot'] for e in recent) == 1 else 'were'} "
+                                 "warm and humid: heat raises heart rate, "
                                  "which lowers the estimate a little. " if any(e["hot"] for e in recent) else "") +
                                 f"Your runs vary from {round(min(vals))} to {round(max(vals))}. Maximum heart rate used: "
                                 f"{hm['value']:.0f} bpm ({hm['source']}); resting heart rate: your watch's overnight value (the "
