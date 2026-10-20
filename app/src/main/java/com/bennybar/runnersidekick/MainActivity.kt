@@ -261,12 +261,8 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            // A floating pill (as in Ilay for Reddit), over a soft fade from the page colour so it never sits on a tile
-            // of the same tone; the page scrolls underneath it
+            // A floating pill (as in Ilay for Reddit); the page scrolls underneath it
             if (onTab) androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
-                val scrim = androidx.compose.material3.MaterialTheme.colorScheme.background
-                androidx.compose.foundation.layout.Box(Modifier.matchParentSize().background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(scrim.copy(alpha = 0f), scrim.copy(alpha = 0.92f)))))
                 FloatingNav(selected = TABS.indexOfFirst { t -> dest?.hierarchy?.any { it.route == t.route } == true }, onSelected = { go(TABS[it].route) })
             }
         },

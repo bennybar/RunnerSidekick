@@ -171,7 +171,10 @@ def hr_max(conn, source: str, today: date) -> dict:
     garmin = zones.get("max_hr")
     seen = None
     for a in rp.activities(conn, source, (today - timedelta(days=365)).isoformat(), today.isoformat()):
-        m = sustained_max(rp.samples_for(conn, a["id"]))
+        key = rp.run_key(conn, a)
+        if key not in _held_max:
+            _held_max[key] = sustained_max(rp.samples_for(conn, a["id"]))
+        m = _held_max[key]
         if m and (seen is None or m > seen[0]):
             seen = (m, a["local_date"])
     if seen and (not garmin or seen[0] > garmin):
@@ -179,6 +182,12 @@ def hr_max(conn, source: str, today: date) -> dict:
     if garmin:
         return {"value": float(garmin), "source": "Garmin's maximum heart rate setting"}
     return {"value": None, "source": None}
+
+
+# Results computed from a run's samples alone, per revision of the run (rp.run_key): the scores, Compare, Cardio and the
+# VO2 tile each ask for them several times per request, and reading and walking the samples is the slow part
+_held_max: dict = rp.Bounded()
+_stretch: dict = rp.Bounded()
 
 
 def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = False) -> tuple[dict | None, str | None]:
@@ -205,7 +214,16 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
     hill_adjusted = climb > MAX_CLIMB_PER_KM
     if hill_adjusted and not (allow_hills and climb <= HILLY_MAX_CLIMB_PER_KM):
         return None, ("too hilly (over 20 m of climb per km)" if allow_hills else "hilly (the running equation used is for flat ground)")
-    s = rp.samples_for(conn, a["id"])
+    key = (rp.run_key(conn, a), allow_hills)
+    if key not in _stretch:
+        _stretch[key] = _stretch_of(rp.samples_for(conn, a["id"]), allow_hills)
+    st, why = _stretch[key]
+    return ({**st, "hot": ht["hot"], "hill_adjusted": hill_adjusted}, None) if st else (None, why)
+
+
+def _stretch_of(s, allow_hills: bool) -> tuple[dict | None, str | None]:
+    """The samples part of steady_stretch: the stretch's time-weighted speed and heart rate, and its heart-rate readings
+    after the warm-up with their time weights (for the estimate's range check), or why it doesn't qualify."""
     if s is None:
         return None, "no samples"
     w = rn._weights(s)
@@ -243,7 +261,8 @@ def steady_stretch(conn, a: dict, allow_hot: bool = False, allow_hills: bool = F
     v, hr = sv / with_hr, sh / with_hr
     if v < MIN_RUN_SPEED:
         return None, "walking pace"
-    return {"v": v, "hr": hr, "hot": ht["hot"], "s": s, "w": w, "hill_adjusted": hill_adjusted}, None
+    hw = [(wi, h) for wi, h, k in zip(w, s.hr, _after_warmup(w)) if wi > 0 and k and h is not None]
+    return {"v": v, "hr": hr, "hw": hw}, None
 
 
 def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> tuple[dict | None, str | None]:
@@ -253,17 +272,10 @@ def run_estimate(conn, a: dict, hr_rest: float | None, hrmax: float | None) -> t
     st, why = steady_stretch(conn, a, allow_hills=True)
     if st is None:
         return None, why
-    v, hr, s, w, with_hr = st["v"], st["hr"], st["s"], st["w"], None
+    v, hr = st["v"], st["hr"]
     # The relationship holds within the submaximal range: most of the stretch has to be inside it, not just its average
-    inside = 0.0
-    moved = 0.0
-    for wi, h in zip(w, s.hr):
-        if wi <= 0:
-            continue
-        moved += wi
-        if moved > WARMUP_S and h is not None and HRR_RANGE[0] <= (h - hr_rest) / (hrmax - hr_rest) <= HRR_RANGE[1]:
-            inside += wi
-    with_hr = sum(wi for wi, h, k in zip(w, s.hr, _after_warmup(w)) if wi > 0 and k and h is not None)
+    inside = sum(wi for wi, h in st["hw"] if HRR_RANGE[0] <= (h - hr_rest) / (hrmax - hr_rest) <= HRR_RANGE[1])
+    with_hr = sum(wi for wi, _ in st["hw"])
     if inside < IN_RANGE_SHARE * with_hr:
         return None, "heart rate outside the reliable range for much of the run"
     share = (hr - hr_rest) / (hrmax - hr_rest)

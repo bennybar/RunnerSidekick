@@ -1045,3 +1045,10 @@ After the round-4 review:
 ## Flat tile colours (2026-10-20, v0.70.1)
 - Tiles are an even wash of their colour (no gradient fading to white); the readiness bar and the fill under sparklines
   are flat too. The fade behind the floating tab bar stays (it keeps the bar readable over tiles).
+
+## Faster sync; no fade behind the tab bar (2026-10-20, v0.70.2)
+- Today took ~14.5 s on the server with Runner Sidekick's VO₂ max chosen: the estimate (asked for 5 times per request)
+  re-read 60 days of runs' samples each time, and the maximum heart rate a year of them. The parts computed from a run's
+  samples alone (its steady stretch and the highest heart rate held for a minute) are now kept per revision of the run
+  (`rp.run_key`, as the run analysis already was); weather, resting and maximum heart rate are still read each time.
+- The floating tab bar no longer has a fade behind it.
