@@ -1066,3 +1066,8 @@ After the round-4 review:
   time (reuse revokes the connection). Disconnect revokes; account deletion disconnects; "delete everything" includes it.
 - First step only: on connect and on each refresh the server saves the tool catalog and the training context as they
   come (`watchletic_raw`), to build the importer on Watchletic's real answers. Runs aren't imported yet.
+- (server, after 0.71.0) Watchletic runs come in on every refresh: each running workout not yet seen at its revision is
+  exported as FIT and goes through `fit.ingest` (test recordings left out; the Samsung Health copy set aside), then
+  weather, reports and AI input like any new run. First look back 90 days, in the background after connecting.
+  Readiness, training context and fitness analytics are kept as they come (`watchletic_raw`). Seen workouts:
+  `watchletic_seen`. Watchletic readiness has no HRV for this user (sleep and some resting HR only).

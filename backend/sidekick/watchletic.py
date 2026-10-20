@@ -225,18 +225,63 @@ class Mcp:
             return text
 
 
-def explore(conn, user_dir: Path, data_dir: Path, redirect_uri: str) -> dict:
-    """First look after connecting: the tool catalog and the training context, kept as they came (watchletic_raw) so
-    the importer is built on Watchletic's real answers."""
+BACKFILL_DAYS = 90
+
+
+def _download(url: str) -> bytes:
+    with _client() as c:
+        r = c.get(url)
+    if r.status_code >= 300:
+        raise WatchleticError(f"Watchletic's file download failed ({r.status_code}).")
+    return r.content
+
+
+def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, tz: str) -> tuple[set[str], list[str], dict]:
+    """What's new in Watchletic: each running workout not seen at its current revision comes in as its FIT file
+    (fit.ingest: test recordings left out, the Samsung Health copy of the same run set aside). Everything else it gives
+    (readiness, training context, fitness analytics, the tool catalog) is kept as it came in watchletic_raw, for later.
+    Returns the changed dates and runs, and a summary."""
+    from . import fit
+    dates: set[str] = set()
+    runs: list[str] = []
+    got = {"new_runs": 0, "skipped": 0, "failed": 0}
+    since = (datetime.now(timezone.utc) - timedelta(days=BACKFILL_DAYS)).isoformat().replace("+00:00", "Z")
     with Mcp(access_token(user_dir, data_dir, redirect_uri)) as m:
-        tools = m.call("tools/list").get("tools", [])
-        conn.watchletic_raw.replace_one({"kind": "tools"}, {"kind": "tools", "at": utc_now(), "data": tools}, upsert=True)
-        out = {"tools": [t.get("name") for t in tools]}
-        try:
-            ctx = m.tool("get_training_context")
-            conn.watchletic_raw.replace_one({"kind": "context"}, {"kind": "context", "at": utc_now(), "data": ctx}, upsert=True)
-            out["context"] = True
-        except WatchleticError as e:
-            out["context"] = str(e)
+        cursor = None
+        while True:
+            page = m.tool("list_activities", {"activityType": "running", "from": since, "limit": 100, **({"cursor": cursor} if cursor else {})})
+            for a in page.get("data", []):
+                seen = conn.watchletic_seen.find_one({"id": a["id"]})
+                if seen and seen.get("revision") == a.get("revision"):
+                    continue
+                note = "imported"
+                if (a.get("durationSeconds") or 0) < fit.MIN_RUN_S or (a.get("distanceMeters") or 0) < fit.MIN_RUN_M:
+                    note = "too short to be a run"
+                    got["skipped"] += 1
+                else:
+                    try:
+                        f = m.tool("export_activity_file", {"activityId": a["id"], "format": "fit"})
+                        ch, rs = fit.ingest(conn, stream, _download(f["downloadUrl"]))
+                        dates |= ch
+                        runs += rs
+                        got["new_runs"] += len(rs)
+                    except Exception as e:  # one bad workout doesn't stop the rest; it's tried again next time
+                        got["failed"] += 1
+                        conn.watchletic_seen.update_one({"id": a["id"]}, {"$set": {"error": str(e)[:300], "at": utc_now()}}, upsert=True)
+                        continue
+                conn.watchletic_seen.replace_one({"id": a["id"]}, {"id": a["id"], "revision": a.get("revision"), "date": a.get("date"),
+                                                                   "note": note, "at": utc_now()}, upsert=True)
+            cursor = page.get("nextCursor")
+            if not cursor:
+                break
+        # Kept as they came, nothing derived from them yet
+        for kind, name, args in (("readiness", "list_readiness", {"limit": 100}), ("context", "get_training_context", {"timeZone": tz}),
+                                 ("fitness", "get_fitness_analytics", {})):
+            try:
+                conn.watchletic_raw.replace_one({"kind": kind}, {"kind": kind, "at": utc_now(), "data": m.tool(name, args)}, upsert=True)
+            except WatchleticError as e:
+                conn.watchletic_raw.replace_one({"kind": kind}, {"kind": kind, "at": utc_now(), "error": str(e)[:300]}, upsert=True)
+        if not conn.watchletic_raw.find_one({"kind": "tools"}, {"_id": 1}):
+            conn.watchletic_raw.insert_one({"kind": "tools", "at": utc_now(), "data": m.call("tools/list").get("tools", [])})
     mark(user_dir, last_sync=utc_now(), problem=None)
-    return out
+    return dates, runs, got

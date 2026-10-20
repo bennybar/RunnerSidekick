@@ -1098,10 +1098,29 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         try:
             wl.complete(accounts.app_db(), body.state, body.code, cfg.data_dir, WATCHLETIC_REDIRECT_URI,
                         lambda uid: accounts.user_dir(cfg.data_dir, uid), user_id=user["id"])
-            seen = wl.explore(conn, user_cfg(user).data_dir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)
         except (wl.WatchleticError, httpx.HTTPError) as e:
             raise HTTPException(409, str(e))
-        return {"connected": True, **seen}
+        # The first look back (90 days) can take a while: it runs on its own; the app's next refresh shows the runs
+        threading.Thread(target=watchletic_pull, args=(conn, user), daemon=True).start()
+        return {"connected": True}
+
+    def watchletic_pull(conn, user) -> dict:
+        """Brings in what's new in Watchletic, then reports on it like any new run (weather, reports, AI input)."""
+        from . import watchletic as wl
+        udir = user_cfg(user).data_dir
+        try:
+            with report_lock(conn):
+                dates, runs, got = wl.sync(conn, cfg.source, udir, cfg.data_dir, WATCHLETIC_REDIRECT_URI, str(tz(conn)))
+                if runs and not synthetic:
+                    from . import weather
+                    runs = list(dict.fromkeys(runs + weather.for_new_runs(conn, cfg.source, runs)))
+                if dates or runs:
+                    rp.regenerate(conn, cfg.source, synthetic, dates, runs, today(conn))
+        except (wl.WatchleticError, httpx.HTTPError) as e:
+            wl.mark(udir, problem=str(e))
+            return {"connected": True, "problem": str(e)}
+        auto_run_ai(conn, runs)
+        return {"connected": True, **got, "changed_runs": runs}
 
     @api.get("/v1/watchletic")
     def watchletic_status(user=Depends(current_user)):
@@ -1115,11 +1134,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         udir = user_cfg(user).data_dir
         if not wl.status(udir)["connected"]:
             return {"connected": False}
-        try:
-            return {"connected": True, **wl.explore(conn, udir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)}
-        except (wl.WatchleticError, httpx.HTTPError) as e:
-            wl.mark(udir, problem=str(e))
-            return {"connected": True, "problem": str(e)}
+        return watchletic_pull(conn, user)
 
     @api.delete("/v1/watchletic")
     def watchletic_disconnect(user=Depends(current_user)):
