@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import httpx
 import logging
 import threading
 import time
@@ -22,7 +23,7 @@ from dataclasses import replace
 from . import accounts
 from . import garmin_oauth as goauth
 from . import garmin_link
-from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, secrets, server_openai_key
+from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, WATCHLETIC_REDIRECT_URI, secrets, server_openai_key
 from fastapi.responses import HTMLResponse
 from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
@@ -977,7 +978,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
                   "all": ["deleted_run", "samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
-                          "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override"]}[scope]
+                          "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override", "watchletic_raw"]}[scope]
         for t in tables:
             conn[t].delete_many({})
         return {"deleted": tables}
@@ -1066,6 +1067,66 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             threading.Thread(target=do_sync, args=(ucfg, user["id"]), daemon=True).start()
         return {"connected": True}
 
+    # ---------------------------------------------------------------- Watchletic (official MCP, read-only)
+
+    @api.post("/v1/watchletic/start")
+    def watchletic_start(user=Depends(current_user)):
+        from . import watchletic as wl
+        try:
+            return {"authorize_url": wl.start(accounts.app_db(), user["id"], cfg.data_dir, WATCHLETIC_REDIRECT_URI)}
+        except (wl.WatchleticError, httpx.HTTPError) as e:
+            raise HTTPException(502, str(e))
+
+    @app.get("/v1/watchletic/callback", response_class=HTMLResponse)
+    def watchletic_callback(state: str = "", code: str = "", error: str = ""):
+        """Watchletic's redirect: nothing is linked here. The page hands the answer to the app, which finishes the
+        linking signed in as the user who started it."""
+        from html import escape
+        from urllib.parse import urlencode
+        from . import watchletic as wl
+        if error or not code or not state:
+            return oauth_page("Watchletic not connected", "The connection was cancelled or Watchletic returned an error.")
+        link = escape(wl.APP_RETURN + "?" + urlencode({"state": state, "code": code}))
+        return HTMLResponse(f"<!doctype html><meta name=viewport content='width=device-width'><title>Finish in the app</title>"
+                            f"<meta http-equiv=refresh content='0;url={link}'>"
+                            f"<body style='font-family:system-ui;padding:32px;max-width:520px;margin:auto'><h2>Almost done</h2>"
+                            f"<p><a href='{link}'>Open Runner Sidekick</a> to finish connecting Watchletic.</p></body>")
+
+    @api.post("/v1/watchletic/complete")
+    def watchletic_complete(body: GarminCompleteIn, conn=Depends(db), user=Depends(current_user)):
+        from . import watchletic as wl
+        try:
+            wl.complete(accounts.app_db(), body.state, body.code, cfg.data_dir, WATCHLETIC_REDIRECT_URI,
+                        lambda uid: accounts.user_dir(cfg.data_dir, uid), user_id=user["id"])
+            seen = wl.explore(conn, user_cfg(user).data_dir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)
+        except (wl.WatchleticError, httpx.HTTPError) as e:
+            raise HTTPException(409, str(e))
+        return {"connected": True, **seen}
+
+    @api.get("/v1/watchletic")
+    def watchletic_status(user=Depends(current_user)):
+        from . import watchletic as wl
+        return wl.status(user_cfg(user).data_dir)
+
+    @api.post("/v1/watchletic/sync")
+    def watchletic_sync(conn=Depends(db), user=Depends(current_user)):
+        """Picks up what's new in Watchletic (quietly nothing when it isn't connected)."""
+        from . import watchletic as wl
+        udir = user_cfg(user).data_dir
+        if not wl.status(udir)["connected"]:
+            return {"connected": False}
+        try:
+            return {"connected": True, **wl.explore(conn, udir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)}
+        except (wl.WatchleticError, httpx.HTTPError) as e:
+            wl.mark(udir, problem=str(e))
+            return {"connected": True, "problem": str(e)}
+
+    @api.delete("/v1/watchletic")
+    def watchletic_disconnect(user=Depends(current_user)):
+        from . import watchletic as wl
+        wl.disconnect(user_cfg(user).data_dir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)
+        return {"disconnected": True}
+
     @api.delete("/v1/garmin/connection")
     def garmin_disconnect(user=Depends(current_user)):
         sec = secrets(cfg.data_dir)
@@ -1089,6 +1150,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             raise HTTPException(409, "the owner account can't be deleted from the app")
         sec = secrets(cfg.data_dir)
         goauth.disconnect(user_cfg(user).data_dir, sec.get("garmin_client_id"), sec.get("garmin_client_secret"))  # Garmin requires it
+        from . import watchletic as wl
+        wl.disconnect(user_cfg(user).data_dir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)
         accounts.delete_user(accounts.app_db(), cfg.data_dir, user["id"])
         return {"deleted": True}
 

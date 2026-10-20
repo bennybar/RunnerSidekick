@@ -228,6 +228,24 @@ class Repository(
 
     suspend fun disconnectGarmin() { api.delete("/v1/garmin/connection", emptyMap()); refreshStatus() }
 
+    /** Watchletic: connected through its official API (read-only); new data is picked up with every refresh. */
+    val watchletic = kotlinx.coroutines.flow.MutableStateFlow<com.bennybar.runnersidekick.data.remote.WatchleticStatus?>(null)
+
+    suspend fun refreshWatchletic() {
+        watchletic.value = json.decodeFromString(com.bennybar.runnersidekick.data.remote.WatchleticStatus.serializer(), api.getRaw("/v1/watchletic"))
+    }
+
+    suspend fun watchleticAuthorizeUrl(): String =
+        json.parseToJsonElement(api.post("/v1/watchletic/start")).let { (it as kotlinx.serialization.json.JsonObject)["authorize_url"]!!.toString().trim('"') }
+
+    /** Finishes connecting Watchletic: the app hands its answer to the server, signed in as the user who started it. */
+    suspend fun completeWatchletic(state: String, code: String) {
+        api.postJson("/v1/watchletic/complete", """{"state":${kotlinx.serialization.json.JsonPrimitive(state)},"code":${kotlinx.serialization.json.JsonPrimitive(code)}}""")
+        refreshWatchletic()
+    }
+
+    suspend fun disconnectWatchletic() { api.delete("/v1/watchletic", emptyMap()); refreshWatchletic() }
+
     suspend fun deleteAccount() {
         api.delete("/v1/account", emptyMap())
         clearLocal(includeCheckins = true)
@@ -399,6 +417,7 @@ class Repository(
                 val s = refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
                 runCatching { uploadSamsung(s) }  // the Samsung watch's new data first, so what loads next includes it
                 importFit()  // and runs recorded with GTII
+                runCatching { api.post("/v1/watchletic/sync"); refreshWatchletic() }  // and what's new in Watchletic, when connected
                 db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
             },
             "Loading today" to {

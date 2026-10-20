@@ -32,6 +32,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="runnersidekick" android:host="garmin-callback" />
             </intent-filter>
+            <!-- Watchletic's answer, the same way -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="runnersidekick" android:host="watchletic-callback" />
+            </intent-filter>
         </activity>
     </application>
 

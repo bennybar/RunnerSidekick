@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) { openRun.value = route(intent); finishGarmin(intent) }
+        if (savedInstanceState == null) { openRun.value = route(intent); finishGarmin(intent); finishWatchletic(intent) }
         val repo = (application as RunnerApp).repository
         val progress = repo.progress
         setContent {
@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         route(intent)?.let { openRun.value = it }
         finishGarmin(intent)
+        finishWatchletic(intent)
     }
 
     /** Garmin's answer, handed over by the server's callback page: finish linking, signed in as this app's user. */
@@ -112,6 +113,19 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val msg = runCatching { repo.completeGarmin(state, code); "Garmin connected" }
                 .getOrElse { e -> (e as? com.bennybar.runnersidekick.data.remote.ApiException)?.message ?: "Garmin couldn't be connected. Please try again." }
+            android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Watchletic's answer, handed over by the server's callback page: finish linking, signed in as this app's user. */
+    private fun finishWatchletic(i: android.content.Intent?) {
+        val data = i?.data?.takeIf { it.scheme == "runnersidekick" && it.host == "watchletic-callback" } ?: return
+        val state = data.getQueryParameter("state") ?: return
+        val code = data.getQueryParameter("code") ?: return
+        val repo = (application as RunnerApp).repository
+        lifecycleScope.launch {
+            val msg = runCatching { repo.completeWatchletic(state, code); "Watchletic connected" }
+                .getOrElse { e -> (e as? com.bennybar.runnersidekick.data.remote.ApiException)?.message ?: "Watchletic couldn't be connected. Please try again." }
             android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show()
         }
     }

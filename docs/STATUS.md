@@ -1057,3 +1057,12 @@ After the round-4 review:
 - After the connection step (status, settings, the Samsung/GTII upload), the app asks for every screen at once instead
   of one after another; the progress label reads "Loading your data". The server's per-run caches tolerate two requests
   evicting at the same time.
+
+## Watchletic connection (2026-10-20, v0.71.0)
+- Me › Watch and data sources › Watchletic › Connect: Watchletic's official sign-in (OAuth 2.1 + PKCE, our server
+  registered dynamically with its HTTPS callback; read-only scope) through its MCP endpoint, the route Watchletic offers
+  third-party apps. As with Garmin, the callback page hands the answer to the app, which finishes the link signed in.
+  Tokens per user (`watchletic_oauth.json`, 0600); refresh tokens rotate and are saved before use, one refresh at a
+  time (reuse revokes the connection). Disconnect revokes; account deletion disconnects; "delete everything" includes it.
+- First step only: on connect and on each refresh the server saves the tool catalog and the training context as they
+  come (`watchletic_raw`), to build the importer on Watchletic's real answers. Runs aren't imported yet.

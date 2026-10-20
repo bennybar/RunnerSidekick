@@ -1011,3 +1011,12 @@ data class AgeGrade(@SerialName("age_grade_pct") val pct: Double, @SerialName("c
 data class RunVo2(val value: Double? = null, val why: String? = null, @SerialName("hill_adjusted") val hillAdjusted: Boolean = false,
                   /** The runner left this run out of Runner Sidekick's VO2 max */
                   @SerialName("held_out") val heldOut: Boolean = false)
+
+/** The Watchletic connection (read-only, through Watchletic's official API) */
+@Serializable
+data class WatchleticStatus(
+    val connected: Boolean = false,
+    @SerialName("linked_at") val linkedAt: String? = null,
+    @SerialName("last_sync") val lastSync: String? = null,
+    val problem: String? = null,
+)

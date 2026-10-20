@@ -46,6 +46,7 @@ GOOGLE_WEB_CLIENT_ID = "162421419636-deds89pjaleairjrbj6brdn29ldkhvh9.apps.googl
 
 PUBLIC_BASE_URL = "https://runnersidekick.ibarak.org"
 GARMIN_REDIRECT_URI = f"{PUBLIC_BASE_URL}/v1/garmin/oauth/callback"
+WATCHLETIC_REDIRECT_URI = f"{PUBLIC_BASE_URL}/v1/watchletic/callback"
 
 
 def secrets(data_dir: Path) -> dict:

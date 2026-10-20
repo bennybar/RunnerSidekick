@@ -87,6 +87,12 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
     fun deleteAccount() = launchIo { repo.deleteAccount() }
     // Disconnecting on purpose: Connect Garmin doesn't then open by itself (Settings → Garmin → Connect still does)
     fun disconnectGarmin() = launchIo { repo.disconnectGarmin(); repo.settings.setGarminPromptSkipped(true); message.value = "Garmin disconnected" }
+    val watchletic = repo.watchletic.state(null)
+    fun connectWatchletic(ctx: android.content.Context) = launchIo {
+        val url = repo.watchleticAuthorizeUrl()
+        androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(ctx, android.net.Uri.parse(url))
+    }
+    fun disconnectWatchletic() = launchIo { repo.disconnectWatchletic(); message.value = "Watchletic disconnected" }
     fun connectGarmin(ctx: android.content.Context) = launchIo {
         val url = repo.garminAuthorizeUrl()
         androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(ctx, android.net.Uri.parse(url))
@@ -94,7 +100,7 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
     val remote = MutableStateFlow<SettingsDto?>(null)
     val message = MutableStateFlow<String?>(null)
 
-    init { loadRemote() }
+    init { loadRemote(); launchIo { runCatching { repo.refreshWatchletic() } } }
 
     fun loadRemote() = launchIo { remote.value = repo.remoteSettings() }
 
@@ -214,6 +220,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
     val samsungProblem by vm.samsungProblem.collectAsStateWithLifecycle()
     val fitFolder by vm.fitFolder.collectAsStateWithLifecycle()
+    val wl by vm.watchletic.collectAsStateWithLifecycle()
     val fitProblem by vm.fitProblem.collectAsStateWithLifecycle()
     val pickFitFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(vm::setFitFolder) }
     var watchDialog by remember { mutableStateOf(false) }
@@ -301,6 +308,12 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
                             else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                         })
+                    row("Watchletic", supporting = when {
+                        wl?.connected == true -> "Connected, read-only" + (wl?.lastSync?.let { t -> " · last checked ${Format.ago(runCatching { Instant.parse(t) }.getOrNull())}" } ?: "") +
+                            (wl?.problem?.let { "\n$it" } ?: "")
+                        else -> "Connect to bring in what Watchletic records (needs Watchletic Club)"
+                    }, trailing = if (s?.synthetic == true) null else if (wl?.connected == true) ({ TextButton(onClick = { confirm = "watchletic" }) { Text("Disconnect") } })
+                        else ({ FilledTonalButton(onClick = { vm.connectWatchletic(ctx) }) { Text("Connect") } }))
                     row("Samsung Health check", supporting = "What the app can read from a Galaxy Watch on this phone. Read only, a test for now",
                         onClick = onSamsungCheck)
                 }
@@ -488,13 +501,14 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     confirm?.let { scope ->
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; "garmin" -> "Disconnect Garmin?"; else -> "Delete data?" }) },
+            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; "garmin" -> "Disconnect Garmin?"; "watchletic" -> "Disconnect Watchletic?"; else -> "Delete data?" }) },
             text = {
                 Text(when (scope) {
                     "local" -> "Removes cached reports and runs from this phone. Unsent check-ins are kept."
                     "raw" -> "Removes stored Garmin source payloads. Normalised records and reports stay."
                     "signout" -> "You can sign in again any time. Unsent check-ins stay on this phone."
                     "garmin" -> "Syncing stops and the server forgets this Garmin connection. Data already downloaded stays. You can connect again any time."
+                    "watchletic" -> "Runner Sidekick stops reading from Watchletic and the server forgets the connection. Data already brought in stays."
                     "account" -> "Permanently deletes all your health data, reports and check-ins on the server, and disconnects Garmin. This can't be undone."
                     else -> "Removes all records, reports, check-ins and settings from the backend and this phone. Garmin sign-in tokens aren't affected. This can't be undone."
                 })
@@ -506,10 +520,11 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                         "signout" -> vm.signOut()
                         "account" -> vm.deleteAccount()
                         "garmin" -> vm.disconnectGarmin()
+                        "watchletic" -> vm.disconnectWatchletic()
                         else -> vm.deleteRemote(scope)
                     }
                     confirm = null
-                }) { Text(when (scope) { "signout" -> "Sign out"; "garmin" -> "Disconnect"; else -> "Delete" }) }
+                }) { Text(when (scope) { "signout" -> "Sign out"; "garmin", "watchletic" -> "Disconnect"; else -> "Delete" }) }
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
