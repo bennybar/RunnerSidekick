@@ -737,7 +737,7 @@ private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwe
             Text(s.label ?: "Not known yet", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.End,
                 modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
         }
-        s.score?.let { ProgressBar(it / 100f, Brush.horizontalGradient(listOf(Color(0xFF3FD08A), Color(0xFF19B3A6)))) }
+        s.score?.let { ProgressBar(it / 100f, Brush.horizontalGradient(listOf(Tint.GREEN.hue, Tint.GREEN.hue))) }
         s.headline?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
         // What decided it: the reason for "easy only" when there is one, else the weakest part
         (s.holdReason?.let { (if (s.allows == "rest") "Rest: " else "Easy only: ") + it }

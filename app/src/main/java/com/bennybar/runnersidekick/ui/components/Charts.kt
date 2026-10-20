@@ -80,7 +80,7 @@ fun Sparkline(
                     lineTo(pts.last().x, pts.last().y)
                 }
                 val area = Path().apply { addPath(line); lineTo(pts.last().x, size.height); lineTo(pts[0].x, size.height); close() }
-                drawPath(area, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(color.copy(alpha = 0.36f), color.copy(alpha = 0f))))
+                drawPath(area, color.copy(alpha = 0.16f))
                 drawPath(line, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }

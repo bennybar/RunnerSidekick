@@ -1041,3 +1041,7 @@ After the round-4 review:
 - Fixes found on the way: text outside a Surface was black in dark mode (sign-in title); status/navigation bar icons now
   follow the app's light/dark choice (they followed the phone's), also on detail pages; the refresh progress label sits
   above the tab bar instead of over the header buttons.
+
+## Flat tile colours (2026-10-20, v0.70.1)
+- Tiles are an even wash of their colour (no gradient fading to white); the readiness bar and the fill under sparklines
+  are flat too. The fade behind the floating tab bar stays (it keeps the bar readable over tiles).

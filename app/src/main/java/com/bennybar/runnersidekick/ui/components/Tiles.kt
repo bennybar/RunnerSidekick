@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.Role
@@ -44,15 +45,13 @@ import com.bennybar.runnersidekick.ui.theme.Tint
 
 val TileShape = RoundedCornerShape(26.dp)
 
-/** The tile's fill: its hue fading diagonally across the card, over the plain card colour (opaque, so it reads the
- *  same over anything). Neutral is the plain card. */
+/** The tile's fill: an even wash of its hue over the plain card colour (opaque, so it reads the same over anything).
+ *  Neutral is the plain card. */
 @Composable
 fun tileBrush(tint: Tint): Brush {
-    val dark = LocalDark.current
     val card = MaterialTheme.colorScheme.surfaceContainer
-    if (tint == Tint.NEUTRAL) return Brush.linearGradient(listOf(card, card))
-    val (a, b) = if (dark) 0.26f to 0.06f else 0.30f to 0.08f
-    return Brush.linearGradient(listOf(tint.hue.copy(alpha = a).compositeOver(card), tint.hue.copy(alpha = b).compositeOver(card)))
+    if (tint == Tint.NEUTRAL) return SolidColor(card)
+    return SolidColor(tint.hue.copy(alpha = if (LocalDark.current) 0.18f else 0.20f).compositeOver(card))
 }
 
 /** A card: rounded, with a soft tint for its kind of data, a thin bright edge and, in light mode, a faint glow of
