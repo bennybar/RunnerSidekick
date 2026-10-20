@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Bolt
@@ -14,21 +12,20 @@ import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Landscape
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bennybar.runnersidekick.data.remote.NumberItem
 import com.bennybar.runnersidekick.data.remote.TrainingNumbers
 import com.bennybar.runnersidekick.ui.Format
+import com.bennybar.runnersidekick.ui.components.DetailPage
 import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.components.Sparkline
+import com.bennybar.runnersidekick.ui.components.Tile
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 private fun iconOf(id: String) = when (id) {
@@ -54,31 +51,31 @@ fun NumbersCard(n: TrainingNumbers, onOpen: (String) -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NumberSheet(item: NumberItem, onOpenRun: (String) -> Unit, onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(item.title, style = MaterialTheme.typography.headlineSmall)
-            item.value?.let { Text(it, style = MaterialTheme.typography.headlineMedium, color = cs.primary) }
+    DetailPage(item.title, onDismiss) {
+        Column(Modifier.padding(horizontal = 12.dp).padding(top = 4.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            item.value?.let { Text(it, style = MaterialTheme.typography.displaySmall) }
             item.headline?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-            item.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            if (item.series.size >= 2) {
+            item.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
+        }
+        if (item.series.size >= 2) {
+            Tile {
+                Text("Over time" + if (item.lowerIsBetter) " · better is up" else "", style = MaterialTheme.typography.titleSmall)
                 // Faster paces and times are drawn upward; the load balance has no better or worse direction
                 Sparkline(item.series.map { if (item.lowerIsBetter) -it.v else it.v }, Modifier.fillMaxWidth().height(80.dp),
                     description = "${item.title} from ${item.series.first().date} to ${item.series.last().date}")
-                Text("${Format.shortDate(item.series.first().date)} – ${Format.shortDate(item.series.last().date)}" +
-                    if (item.lowerIsBetter) " · better is up" else "", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                Group {
-                    item.series.takeLast(6).reversed().forEach { p ->
-                        row(p.label ?: p.v.toString(), supporting = Format.shortDate(p.date),
-                            onClick = p.sourceId?.let { id -> { onOpenRun(id) } })
-                    }
+                Text("${Format.shortDate(item.series.first().date)} – ${Format.shortDate(item.series.last().date)}",
+                    style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+            Group {
+                item.series.takeLast(6).reversed().forEach { p ->
+                    row(p.label ?: p.v.toString(), supporting = Format.shortDate(p.date),
+                        onClick = p.sourceId?.let { id -> { onOpenRun(id) } })
                 }
             }
-            Text(item.basis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
+        Text(item.basis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
     }
 }

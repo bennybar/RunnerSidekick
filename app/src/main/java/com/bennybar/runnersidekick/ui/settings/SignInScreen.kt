@@ -1,6 +1,7 @@
 package com.bennybar.runnersidekick.ui.settings
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -43,6 +44,10 @@ import com.bennybar.runnersidekick.BuildConfig
 import com.bennybar.runnersidekick.RunnerApp
 import com.bennybar.runnersidekick.data.remote.ApiException
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.LocalDark
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
@@ -75,73 +80,79 @@ fun SignInScreen() {
     val googleReady = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
 
     Column(
-        Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp),
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).systemBarsPadding().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(72.dp))
         ShapeBadge(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided, Modifier.size(96.dp),
-            container = MaterialTheme.colorScheme.primaryContainer, content = MaterialTheme.colorScheme.onPrimaryContainer, iconSize = 48.dp)
-        Text("Runner Sidekick", style = MaterialTheme.typography.displaySmall, textAlign = TextAlign.Center)
+            container = Tint.ORANGE.hue.copy(alpha = if (LocalDark.current) 0.26f else 0.20f), content = ink(Tint.ORANGE), iconSize = 48.dp)
+        Text("Runner Sidekick", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
         Text("Your watch's data (Garmin or Samsung Galaxy Watch), turned into a daily briefing, run analysis and insights you can check.",
-            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(24.dp))
-        if (busy) LoadingIndicator(Modifier.size(56.dp))
-        Button(
-            enabled = googleReady && !busy, modifier = Modifier.fillMaxWidth().height(56.dp),
-            onClick = {
-                scope.launch {
-                    busy = true; error = null
-                    try {
-                        val id = googleIdToken(ctx)
-                        if (id != null) error = repo.signInWithGoogle(id, BuildConfig.DEFAULT_BACKEND_URL)
-                    } catch (e: GetCredentialException) {
-                        error = "Google sign-in didn't complete (${e.type.substringAfterLast('.')})."
-                    } catch (e: ApiException) {
-                        error = e.message
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {  // anything else: a message, never a crash
-                        android.util.Log.e("RunnerSidekick", "Sign-in failed", e)
-                        error = "Sign-in didn't complete. Please try again."
-                    } finally {
-                        busy = false
-                    }
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 12.dp))
+        Spacer(Modifier.height(16.dp))
+        Tile(contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (busy) LoadingIndicator(Modifier.size(56.dp))
+                Button(
+                    enabled = googleReady && !busy, modifier = Modifier.fillMaxWidth().height(56.dp),
+                    onClick = {
+                        scope.launch {
+                            busy = true; error = null
+                            try {
+                                val id = googleIdToken(ctx)
+                                if (id != null) error = repo.signInWithGoogle(id, BuildConfig.DEFAULT_BACKEND_URL)
+                            } catch (e: GetCredentialException) {
+                                error = "Google sign-in didn't complete (${e.type.substringAfterLast('.')})."
+                            } catch (e: ApiException) {
+                                error = e.message
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {  // anything else: a message, never a crash
+                                android.util.Log.e("RunnerSidekick", "Sign-in failed", e)
+                                error = "Sign-in didn't complete. Please try again."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
+                ) { Text("Sign in with Google") }
+                if (!googleReady) Text("Google sign-in isn't set up in this build yet. Use a device token below.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                Text("Invite-only for now. Ask the owner to add your Google email.", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
+                TextButton(onClick = { manual = !manual }) { Text(if (manual) "Hide device token" else "Use a device token instead") }
+                if (manual) {
+                    // Token keyboard: no autocorrect (it mangles tokens)
+                    OutlinedTextField(token, { token = it.trim() }, label = { Text("Device token (rsk_…)") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                            autoCorrectEnabled = false))
+                    Button(enabled = !busy && token.startsWith("rsk_"), modifier = Modifier.fillMaxWidth(), onClick = {
+                        scope.launch {
+                            busy = true; error = null
+                            try {
+                                // Checked before it's saved: a token the server rejects is never stored
+                                error = repo.checkToken(url, token)
+                                // Saving the token opens the app; Today loads everything itself (a refresh started here would be
+                                // cancelled as this screen closes, and Today's own would wait on it)
+                                if (error == null) repo.settings.setBackend(url, token)
+                            } catch (e: ApiException) {
+                                error = e.message
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                android.util.Log.e("RunnerSidekick", "Connect failed", e)
+                                error = "Couldn't connect. Check the address and token."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    }) { Text("Connect") }
                 }
-            },
-        ) { Text("Sign in with Google") }
-        if (!googleReady) Text("Google sign-in isn't set up in this build yet. Use a device token below.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        Text("Invite-only for now. Ask the owner to add your Google email.", style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center) }
-        TextButton(onClick = { manual = !manual }) { Text(if (manual) "Hide device token" else "Use a device token instead") }
-        if (manual) {
-            // Token keyboard: no autocorrect (it mangles tokens)
-            OutlinedTextField(token, { token = it.trim() }, label = { Text("Device token (rsk_…)") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-                    autoCorrectEnabled = false))
-            Button(enabled = !busy && token.startsWith("rsk_"), modifier = Modifier.fillMaxWidth(), onClick = {
-                scope.launch {
-                    busy = true; error = null
-                    try {
-                        // Checked before it's saved: a token the server rejects is never stored
-                        error = repo.checkToken(url, token)
-                        // Saving the token opens the app; Today loads everything itself (a refresh started here would be
-                        // cancelled as this screen closes, and Today's own would wait on it)
-                        if (error == null) repo.settings.setBackend(url, token)
-                    } catch (e: ApiException) {
-                        error = e.message
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        android.util.Log.e("RunnerSidekick", "Connect failed", e)
-                        error = "Couldn't connect. Check the address and token."
-                    } finally {
-                        busy = false
-                    }
-                }
-            }) { Text("Connect") }
+            }
         }
         Spacer(Modifier.height(32.dp))
     }

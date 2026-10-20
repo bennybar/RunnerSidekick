@@ -7,6 +7,20 @@ import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -18,24 +32,19 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Insights
-import androidx.compose.material.icons.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -70,7 +79,19 @@ class MainActivity : ComponentActivity() {
         val progress = repo.progress
         setContent {
             val local by repo.settings.settings.collectAsStateWithLifecycle(initialValue = null)
-            RunnerTheme(com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(local?.theme), com.bennybar.runnersidekick.ui.theme.Appearance.of(local?.appearance)) {
+            val appearance = com.bennybar.runnersidekick.ui.theme.Appearance.of(local?.appearance)
+            val dark = when (appearance) {
+                com.bennybar.runnersidekick.ui.theme.Appearance.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+                com.bennybar.runnersidekick.ui.theme.Appearance.LIGHT -> false
+                com.bennybar.runnersidekick.ui.theme.Appearance.DARK -> true
+            }
+            // Status and navigation bar icons follow the app's light/dark choice, not only the phone's
+            androidx.compose.runtime.LaunchedEffect(dark) {
+                val style = if (dark) androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else androidx.activity.SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            RunnerTheme(appearance) {
                 androidx.compose.runtime.CompositionLocalProvider(com.bennybar.runnersidekick.ui.components.LocalProgress provides progress) { App(openRun) }
             }
         }
@@ -116,13 +137,85 @@ private fun Page(content: @Composable () -> Unit) {
 
 private data class Tab(val route: String, val label: String, val selected: ImageVector, val unselected: ImageVector)
 
+// Four tabs: Today; Runs (the activities); Trends (insights, comparisons, charts); Me (settings, with the reports
+// that were the Journal tab)
 private val TABS = listOf(
-    Tab("today", "Today", Icons.Filled.WbSunny, Icons.Outlined.WbSunny),
-    Tab("insights", "Insights", Icons.Filled.Insights, Icons.Outlined.Insights),
-    Tab("activities", "Activities", Icons.AutoMirrored.Filled.DirectionsRun, Icons.AutoMirrored.Outlined.DirectionsRun),
-    Tab("journal", "Journal", Icons.Filled.MenuBook, Icons.Outlined.MenuBook),
-    Tab("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+    Tab("today", "Today", Icons.Filled.Home, Icons.Outlined.Home),
+    Tab("activities", "Runs", Icons.AutoMirrored.Filled.DirectionsRun, Icons.AutoMirrored.Outlined.DirectionsRun),
+    Tab("insights", "Trends", Icons.Filled.Insights, Icons.Outlined.Insights),
+    Tab("settings", "Me", Icons.Filled.Person, Icons.Outlined.Person),
 )
+
+/** The tab bar: a centred pill of tabs; the current one fills in with its label (with a little bounce). Outlined and
+ *  lifted so it reads apart from the tiles behind it. Sliding a finger along it moves from tab to tab. */
+@Composable
+private fun FloatingNav(selected: Int, onSelected: (Int) -> Unit) {
+    val cs = androidx.compose.material3.MaterialTheme.colorScheme
+    val dark = com.bennybar.runnersidekick.ui.theme.LocalDark.current
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // Each tab's horizontal span in the row, for drag hit-testing
+    val spans = androidx.compose.runtime.remember { arrayOfNulls<ClosedFloatingPointRange<Float>>(TABS.size) }
+    val current by androidx.compose.runtime.rememberUpdatedState(selected)
+    val select by androidx.compose.runtime.rememberUpdatedState(onSelected)
+    androidx.compose.foundation.layout.Box(Modifier.navigationBarsPadding().padding(top = 28.dp, bottom = 16.dp)) {
+        androidx.compose.material3.Surface(
+            Modifier.height(64.dp).shadow(14.dp, shape, ambientColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.25f),
+                spotColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.25f)),
+            shape = shape, color = if (dark) cs.surfaceContainerHigh else cs.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant),
+        ) {
+            androidx.compose.foundation.layout.Row(
+                Modifier.pointerInput(Unit) {
+                    // Only switch once the finger is inside another tab, so a tab growing under it can't bounce back
+                    fun pick(x: Float) {
+                        val i = spans.indexOfFirst { it != null && x in it }
+                        if (i >= 0 && i != current) {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick)
+                            select(i)
+                        }
+                    }
+                    detectHorizontalDragGestures(onDragStart = { pick(it.x) },
+                        onHorizontalDrag = { change, _ -> pick(change.position.x) })
+                }.padding(horizontal = 8.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                TABS.forEachIndexed { i, tab ->
+                    NavButton(tab, selected == i, onClick = { onSelected(i) }, modifier = Modifier.onPlaced { c ->
+                        val x = c.positionInParent().x
+                        spans[i] = x..(x + c.size.width)
+                    })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavButton(tab: Tab, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val cs = androidx.compose.material3.MaterialTheme.colorScheme
+    val fg by androidx.compose.animation.animateColorAsState(if (selected) cs.onPrimary else cs.onSurfaceVariant,
+        androidx.compose.animation.core.tween(250), label = "navFg")
+    val bg by androidx.compose.animation.animateColorAsState(if (selected) cs.primary else cs.primary.copy(alpha = 0f),
+        androidx.compose.animation.core.tween(250), label = "navBg")
+    androidx.compose.foundation.layout.Row(
+        modifier.height(48.dp).clip(androidx.compose.foundation.shape.CircleShape).background(bg)
+            .clickable(onClickLabel = tab.label, role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
+            .semantics { this.selected = selected }
+            // The selected pill grows to fit its label with a little bounce
+            .animateContentSize(androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioLowBouncy,
+                stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow))
+            .padding(horizontal = if (selected) 18.dp else 12.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Icon(if (selected) tab.selected else tab.unselected, tab.label, Modifier.size(24.dp), tint = fg)
+        if (selected) {
+            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+            Text(tab.label, style = androidx.compose.material3.MaterialTheme.typography.labelLarge, color = fg, maxLines = 1)
+        }
+    }
+}
 
 @Composable
 private fun App(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) {
@@ -168,21 +261,13 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            // A floating, rounded bar over the page background
-            // Transparent around the pill, so the page shows (and scrolls) underneath it
-            if (onTab) androidx.compose.foundation.layout.Box(Modifier.navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
-                androidx.compose.material3.Surface(shape = androidx.compose.material3.MaterialTheme.shapes.large,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer, shadowElevation = 2.dp) {
-                    ShortNavigationBar(containerColor = androidx.compose.ui.graphics.Color.Transparent, windowInsets = WindowInsets(0, 0, 0, 0)) {
-                        TABS.forEach { t ->
-                            val sel = dest?.hierarchy?.any { it.route == t.route } == true
-                            ShortNavigationBarItem(
-                                selected = sel, onClick = { go(t.route) },
-                                icon = { Icon(if (sel) t.selected else t.unselected, null) }, label = { Text(t.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) },
-                            )
-                        }
-                    }
-                }
+            // A floating pill (as in Ilay for Reddit), over a soft fade from the page colour so it never sits on a tile
+            // of the same tone; the page scrolls underneath it
+            if (onTab) androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
+                val scrim = androidx.compose.material3.MaterialTheme.colorScheme.background
+                androidx.compose.foundation.layout.Box(Modifier.matchParentSize().background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(listOf(scrim.copy(alpha = 0f), scrim.copy(alpha = 0.92f)))))
+                FloatingNav(selected = TABS.indexOfFirst { t -> dest?.hierarchy?.any { it.route == t.route } == true }, onSelected = { go(TABS[it].route) })
             }
         },
     ) { padding ->
@@ -208,9 +293,9 @@ private fun MainNav(openRun: kotlinx.coroutines.flow.MutableStateFlow<String?>) 
             composable("activities") { Page { ActivitiesScreen(onOpen = { nav.navigate("activity/$it") }, onTrophies = { nav.navigate("trophies") }) } }
             composable("trophies") { Page { com.bennybar.runnersidekick.ui.activities.TrophiesScreen(onBack = { nav.popBackStack() },
                 onOpenRun = { nav.navigate("activity/$it") }) } }
-            composable("journal") { Page { JournalScreen(onOpenReport = { nav.navigate("report/$it") }) } }
+            composable("journal") { Page { JournalScreen(onOpenReport = { nav.navigate("report/$it") }, onBack = { nav.popBackStack() }) } }
             composable("settings") { Page { SettingsScreen(onConnectGarmin = { nav.navigate("garmin") },
-                onSamsungCheck = { nav.navigate("samsung-check") }) } }
+                onSamsungCheck = { nav.navigate("samsung-check") }, onOpenReports = { nav.navigate("journal") }) } }
             composable("samsung-check") { Page { com.bennybar.runnersidekick.ui.settings.SamsungCheckScreen(onBack = { nav.popBackStack() }) } }
             composable("garmin") {
                 Page {

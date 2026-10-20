@@ -33,6 +33,8 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
 import com.samsung.android.sdk.health.data.HealthDataService
 import com.samsung.android.sdk.health.data.HealthDataStore
 import com.samsung.android.sdk.health.data.data.HealthDataPoint
@@ -103,16 +105,16 @@ fun SamsungCheckScreen(onBack: () -> Unit) {
         TopAppBar(title = { Text("Samsung Health check") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } })
     }) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
-                Text("Shows what Samsung Health lets this app read from your Galaxy Watch, mostly over the last 30 days. Read only; " +
+                Tile { Text("Shows what Samsung Health lets this app read from your Galaxy Watch, mostly over the last 30 days. Read only; " +
                     "nothing is sent anywhere unless you copy the report. For now Samsung Health needs developer mode: ⋮ › Settings › " +
                     "About Samsung Health, tap the version 10 times, then turn on Developer Mode for Data Read.",
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
                         val a = activity ?: return@Button
                         scope.launch { runCatching { store.requestPermissions(PERMISSIONS, a) }.onFailure(::failed); round++ }
@@ -124,7 +126,7 @@ fun SamsungCheckScreen(onBack: () -> Unit) {
             }
             problem?.let { p ->
                 item {
-                    Group {
+                    Group(tint = Tint.ORANGE) {
                         row("Something's in the way", supporting = p + (fix?.let { "\nTap to let Samsung Health fix it." } ?: ""),
                             onClick = fix?.let { e -> { activity?.let { e.resolve(it) }; Unit } })
                     }

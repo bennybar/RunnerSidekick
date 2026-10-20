@@ -1,61 +1,38 @@
 package com.bennybar.runnersidekick.ui.settings
 
 import android.Manifest
-import androidx.compose.ui.Alignment
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.EmojiEvents
-import androidx.compose.material.icons.outlined.EventNote
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.WbSunny
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.border
-import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material3.Icon
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Watch
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.FileDownload
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material.icons.outlined.Straighten
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -66,16 +43,18 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -89,7 +68,11 @@ import com.bennybar.runnersidekick.ui.BaseVm
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.components.DemoBadge
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.theme.Appearance
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -183,9 +166,7 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
     private fun keep(key: String, v: kotlinx.serialization.json.JsonPrimitive) = viewModelScope.launch { repo.savePreference(key, v) }
     fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }.also {
         keep("units", kotlinx.serialization.json.JsonPrimitive(if (u == Units.IMPERIAL) "imperial" else "metric")) }
-    fun setTheme(t: com.bennybar.runnersidekick.ui.theme.ThemeChoice) = viewModelScope.launch { repo.settings.setTheme(t.name) }.also {
-        keep("theme", kotlinx.serialization.json.JsonPrimitive(t.name)) }
-    fun setAppearance(a: com.bennybar.runnersidekick.ui.theme.Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }.also {
+    fun setAppearance(a: Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }.also {
         keep("appearance", kotlinx.serialization.json.JsonPrimitive(a.name)) }
     fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }.also {
         keep("notifications", kotlinx.serialization.json.JsonPrimitive(on)) }
@@ -209,7 +190,8 @@ private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 360
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit = {}, vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
+fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit = {}, onOpenReports: () -> Unit = {},
+                   vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
     val local by vm.settings.collectAsStateWithLifecycle()
     val me by vm.me.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
@@ -230,7 +212,6 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     val sheetError by vm.sheetError.collectAsStateWithLifecycle()
     val close = vm::closeSheet
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val samsungProblem by vm.samsungProblem.collectAsStateWithLifecycle()
     val fitFolder by vm.fitFolder.collectAsStateWithLifecycle()
     val fitProblem by vm.fitProblem.collectAsStateWithLifecycle()
@@ -239,16 +220,20 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     val activity = androidx.activity.compose.LocalActivity.current
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { LargeTopAppBar(title = { Text("Settings") }, scrollBehavior = scroll, actions = { if (status?.value?.synthetic == true) DemoBadge() }) },
         snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
     ) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
-            verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 40.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Me", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                    if (status?.value?.synthetic == true) DemoBadge()
+                }
+            }
             // Only a Garmin problem is shown up here; everything else lives in its own section
             status?.value?.takeIf { it.watch != "samsung" }?.connection?.state?.takeIf { it == "reauth_required" || it == "not_configured" || it == "error" }?.let { st ->
                 item {
-                    Group {
+                    Group(tint = Tint.ORANGE) {
                         row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
                             supporting = when (st) {
                                 "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
@@ -262,19 +247,42 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
             item {
                 val m = me?.value
                 val s = status?.value
+                val name = m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in"
+                Tile(tint = Tint.GREEN) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f), CircleShape),
+                            contentAlignment = Alignment.Center) {
+                            Text(name.first().uppercase(), style = MaterialTheme.typography.titleMedium, color = ink(Tint.GREEN))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(name, style = MaterialTheme.typography.titleMedium)
+                            listOfNotNull(
+                                when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
+                                when { s == null -> null; s.synthetic -> "Demo data"; s.watch == "samsung" -> "Samsung Galaxy Watch"; else -> "Garmin" },
+                            ).joinToString(" · ").ifEmpty { null }?.let {
+                                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Group(title = "Reports", tint = Tint.PURPLE) {
+                    row("Morning briefings, run reports, weekly reviews", supporting = "By month, with every version", onClick = onOpenReports)
+                }
+            }
+            item {
+                val s = status?.value
                 val g = s?.garminOfficial
-                Group(title = "Account") {
-                    row(m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in",
-                        supporting = when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
-                        icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle)
+                Group(title = "Watch and data sources") {
                     if (s?.synthetic != true) row("Your watch", supporting = when (s?.watch) {
                         "samsung" -> "Samsung Galaxy Watch · this phone sends its data" + (samsungProblem?.let { "\n$it" } ?: "")
                         else -> "Garmin"
-                    }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided, onClick = { watchDialog = true })
+                    }, onClick = { watchDialog = true })
                     if (s?.watch == "samsung") row("GTII runs", supporting = (fitFolder?.let { u ->
                             "Folder: " + (Uri.parse(u).lastPathSegment?.substringAfterLast(':')?.ifBlank { null } ?: "picked") + " · sent with every refresh"
                         } ?: "Runs recorded with GTII: pick the folder GTII exports FIT files to") + (fitProblem?.let { "\n$it" } ?: ""),
-                        icon = Icons.Outlined.FileDownload, iconShape = MaterialShapes.Cookie9Sided, onClick = { pickFitFolder.launch(null) })
+                        onClick = { pickFitFolder.launch(null) })
                     row("Garmin", supporting = when {
                         s?.synthetic == true -> "Demo data source"
                         s?.watch == "samsung" && s.garminLinked -> "Paused while your watch is the Samsung one. Your Garmin history stays."
@@ -284,7 +292,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             (s.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
                         g?.available == true -> "Not connected"
                         else -> "Garmin sign-in for members opens once Garmin approves this app"
-                    }, icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie9Sided,
+                    },
                         trailing = when {
                             s == null || s.synthetic -> null
                             // Garmin ended the connection: Connect again (it replaces the old one)
@@ -293,26 +301,8 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
                             else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                         })
-                    row("Sign out", supporting = "Removes the token and cached data from this phone", icon = Icons.AutoMirrored.Outlined.Logout,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "signout" })
-                    if (m?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
-                        icon = Icons.Outlined.DeleteOutline, iconShape = MaterialShapes.Burst, onClick = { confirm = "account" })
-                }
-            }
-            item {
-                Group(title = "Appearance") {
-                    row("Theme", supporting = com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(local?.theme).label + " · " +
-                        com.bennybar.runnersidekick.ui.theme.Appearance.of(local?.appearance).label,
-                        icon = Icons.Outlined.Palette, iconShape = MaterialShapes.Flower, onClick = { vm.openSheet("theme") })
-                    custom {
-                        Text("Units", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            Units.entries.forEachIndexed { i, u ->
-                                SegmentedButton(local?.units == u, { vm.setUnits(u) }, SegmentedButtonDefaults.itemShape(i, 2),
-                                    icon = {}) { Text(if (u == Units.METRIC) "Metric (km)" else "Imperial (mi)") }
-                            }
-                        }
-                    }
+                    row("Samsung Health check", supporting = "What the app can read from a Galaxy Watch on this phone. Read only, a test for now",
+                        onClick = onSamsungCheck)
                 }
             }
             remote?.let { r ->
@@ -322,34 +312,32 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                                 r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
                                 GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
                                 r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
-                            icon = Icons.Outlined.EventNote, iconShape = MaterialShapes.Cookie9Sided, onClick = { vm.openSheet("training") })
+                            onClick = { vm.openSheet("training") })
                         row("Race", supporting = r.raceDate?.let { d ->
                                 listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
                                     r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
-                            icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny, onClick = { vm.openSheet("race") })
+                            onClick = { vm.openSheet("race") })
                         row("About you", supporting = listOfNotNull(
                                 (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
                                 (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
                                 if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
-                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("about") })
+                            onClick = { vm.openSheet("about") })
                         row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
                                 "Your watch's estimate" else "Runner Sidekick's experimental estimate, from your steady runs on any watch (needs 3 in 60 days)",
-                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
-                                androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("watch" to "Watch", "sidekick" to "Sidekick").forEach { (k, l) ->
-                                        androidx.compose.material3.FilterChip(r.vo2Source == k, enabled = !busy,
+                                        FilterChip(r.vo2Source == k, enabled = !busy,
                                             onClick = { if (r.vo2Source != k) vm.saveRemote(r.copy(vo2Source = k)) }, label = { Text(l) })
                                     }
                                 }
                             })
                         row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
                                 "Runner Sidekick's: the age your VO₂ max (as chosen above) is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
-                            icon = Icons.Outlined.AccountCircle, iconShape = MaterialShapes.Circle,
                             trailing = {
-                                androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("garmin" to "Garmin", "sidekick" to "Sidekick").forEach { (k, l) ->
-                                        androidx.compose.material3.FilterChip(r.fitnessAgeSource == k, enabled = !busy,
+                                        FilterChip(r.fitnessAgeSource == k, enabled = !busy,
                                             onClick = { if (r.fitnessAgeSource != k) vm.saveRemote(r.copy(fitnessAgeSource = k)) }, label = { Text(l) })
                                     }
                                 }
@@ -358,9 +346,30 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                 }
             }
             item {
+                Group(title = "Appearance") {
+                    custom {
+                        Text("Appearance", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
+                        val now = Appearance.of(local?.appearance)
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            Appearance.entries.forEachIndexed { i, a ->
+                                SegmentedButton(now == a, { vm.setAppearance(a) }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(a.label) }
+                            }
+                        }
+                    }
+                    custom {
+                        Text("Units", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            Units.entries.forEachIndexed { i, u ->
+                                SegmentedButton(local?.units == u, { vm.setUnits(u) }, SegmentedButtonDefaults.itemShape(i, 2),
+                                    icon = {}) { Text(if (u == Units.METRIC) "Metric (km)" else "Imperial (mi)") }
+                            }
+                        }
+                    }
+                }
+            }
+            item {
                 Group(title = "Notifications") {
                     row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
-                        icon = Icons.Outlined.Notifications, iconShape = MaterialShapes.Sunny,
                         trailing = {
                             Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
                                 if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
@@ -370,15 +379,13 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             "Already on with notifications (about hourly)."
                         else "Keeps today's briefing and your runs ready offline, about every 3 hours. " +
                             if (status?.value?.watch == "samsung") "It's also when this phone sends your Samsung watch's new data." else "Garmin itself syncs on the server either way.",
-                        icon = Icons.Outlined.Sync, iconShape = MaterialShapes.Cookie9Sided,
                         trailing = {
                             Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
                                 enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
                         })
                     remote?.let { r ->
                         row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
-                            "or at the end of the window as provisional", icon = Icons.Outlined.Schedule, iconShape = MaterialShapes.Cookie4Sided,
-                            onClick = { vm.openSheet("window") })
+                            "or at the end of the window as provisional", onClick = { vm.openSheet("window") })
                     }
                 }
             }
@@ -386,7 +393,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                 item {
                     val ownKey = local?.hasOwnAiKey == true
                     Group(title = "AI coach (optional)") {
-                        row("AI coach and summaries", icon = Icons.Outlined.AutoAwesome, iconShape = MaterialShapes.Flower,
+                        row("AI coach and summaries",
                             supporting = when {
                                 ownKey -> "Uses OpenAI with your own key."
                                 r.aiAvailable -> "Uses OpenAI. Off by default."
@@ -395,15 +402,14 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             trailing = { Switch(checked = r.aiEnabled, enabled = !busy && (r.aiAvailable || ownKey || r.aiEnabled),
                                 onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it)) }) })
                         row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone · runs gpt-6.1-sol" else "Optional: the server's key is used otherwise",
-                            icon = Icons.Outlined.Key,
-                            iconShape = MaterialShapes.Cookie4Sided, onClick = { vm.openSheet("key") })
+                            onClick = { vm.openSheet("key") })
                         row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
-                            icon = Icons.Outlined.Info, iconShape = MaterialShapes.Circle, onClick = { vm.openSheet("ai_info") })
+                            onClick = { vm.openSheet("ai_info") })
                     }
                 }
                 item {
                     Group(title = "Weather") {
-                        row("Weather for your runs", icon = Icons.Outlined.WbSunny, iconShape = MaterialShapes.Sunny,
+                        row("Weather for your runs",
                             supporting = "Temperature and humidity, so hot, humid runs are read fairly. Sends each outdoor run's start area " +
                                 "(rounded to about 1 km) and time to Open-Meteo, nothing else. Off: nothing is sent; estimates already kept stay.",
                             trailing = { Switch(checked = r.weatherEnabled, enabled = !busy, onCheckedChange = { vm.saveRemote(r.copy(weatherEnabled = it)) }) })
@@ -412,16 +418,11 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
             }
             item {
                 Group(title = "Your data") {
-                    row("Export all data", supporting = "JSON file with records, check-ins and reports", icon = Icons.Outlined.FileDownload,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { exporter.launch("runner-sidekick-export.json") })
-                    row("Clear this phone's cache", supporting = "Unsent check-ins are kept", icon = Icons.Outlined.History,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "local" })
-                    row("Delete raw Garmin payloads", supporting = "On the backend. Records and reports stay.", icon = Icons.Outlined.DeleteOutline,
-                        iconShape = MaterialShapes.Cookie4Sided, onClick = { confirm = "raw" })
-                    row("Samsung Health check", supporting = "What the app can read from a Galaxy Watch on this phone. Read only, a test for now",
-                        icon = Icons.Outlined.Watch, iconShape = MaterialShapes.Cookie4Sided, onClick = onSamsungCheck)
-                    row("Delete everything on the backend", supporting = "Records, reports, check-ins and settings", icon = Icons.Outlined.DeleteOutline,
-                        iconShape = MaterialShapes.Burst, onClick = { confirm = "all" })
+                    row("Export all data", supporting = "JSON file with records, check-ins and reports",
+                        onClick = { exporter.launch("runner-sidekick-export.json") })
+                    row("Clear this phone's cache", supporting = "Unsent check-ins are kept", onClick = { confirm = "local" })
+                    row("Delete raw Garmin payloads", supporting = "On the backend. Records and reports stay.", onClick = { confirm = "raw" })
+                    row("Delete everything on the backend", supporting = "Records, reports, check-ins and settings", onClick = { confirm = "all" })
                     custom {
                         Text("Health data lives on your backend and in this phone's cache. Android backup and device transfer are turned off for this app; " +
                             "your server's own backups may still include its data folder.",
@@ -430,17 +431,21 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                 }
             }
             item {
+                Group(title = "Account") {
+                    row("Sign out", supporting = "Removes the token and cached data from this phone", onClick = { confirm = "signout" })
+                    if (me?.value?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
+                        onClick = { confirm = "account" })
+                }
+            }
+            item {
                 Group(title = "About") {
-                    row("Runner Sidekick", supporting = "Guidance only, not medical advice. Garmin data via an unofficial, read-only connector; Samsung data read from Samsung Health on this phone.",
-                        icon = Icons.Outlined.Straighten, iconShape = MaterialShapes.Circle)
+                    row("Runner Sidekick", supporting = "Guidance only, not medical advice. Garmin data via an unofficial, read-only connector; Samsung data read from Samsung Health on this phone.")
                 }
             }
         }
     }
     val r = remote
     when (open) {
-        "theme" -> SectionSheet("Theme", dirty = false, canSave = false, onSave = {}, onClose = close) {
-            ThemePicker(local?.theme, local?.appearance, vm::setTheme, vm::setAppearance) }
         "training" -> r?.let { TrainingSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "training") } }
         "race" -> r?.let { RaceSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "race") } }
         "about" -> r?.let { AboutYouSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "about") } }
@@ -511,43 +516,6 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
     }
 }
 
-
-/** Colour theme as swatches (each drawn from its own scheme), and light, dark or system. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun ThemePicker(theme: String?, appearance: String?, onTheme: (com.bennybar.runnersidekick.ui.theme.ThemeChoice) -> Unit,
-                        onAppearance: (com.bennybar.runnersidekick.ui.theme.Appearance) -> Unit) {
-    val current = com.bennybar.runnersidekick.ui.theme.ThemeChoice.of(theme)
-    val cs = MaterialTheme.colorScheme
-    Text("Theme", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 10.dp))
-    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        com.bennybar.runnersidekick.ui.theme.ThemeChoice.entries.forEach { c ->
-            val selected = c == current
-            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                modifier = Modifier.width(56.dp).selectable(selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onTheme(c) }) {
-                androidx.compose.foundation.layout.Box(Modifier.size(52.dp)
-                    .border(if (selected) 3.dp else 0.dp, if (selected) cs.onSurface else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.CircleShape)
-                    .padding(5.dp)
-                    .background(c.seed?.let { androidx.compose.ui.graphics.Brush.linearGradient(listOf(it, it.copy(alpha = 0.55f))) }
-                        ?: androidx.compose.ui.graphics.Brush.sweepGradient(listOf(cs.primary, cs.tertiary, cs.secondary, cs.primary)),
-                        androidx.compose.foundation.shape.CircleShape),
-                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                    if (selected) Icon(Icons.Outlined.Check, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(22.dp))
-                }
-                Text(c.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-    }
-    if (current == com.bennybar.runnersidekick.ui.theme.ThemeChoice.DYNAMIC) Text("Uses your wallpaper's colours (Material You).",
-        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-    Text("Appearance", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
-    val now = com.bennybar.runnersidekick.ui.theme.Appearance.of(appearance)
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        com.bennybar.runnersidekick.ui.theme.Appearance.entries.forEachIndexed { i, a ->
-            SegmentedButton(now == a, { onAppearance(a) }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(a.label) }
-        }
-    }
-}
 
 
 /** One section's sheet with its own Save. Closing it with unsaved edits asks first, so nothing is lost silently. */

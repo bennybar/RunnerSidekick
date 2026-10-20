@@ -12,16 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
-import androidx.compose.material.icons.outlined.Cake
-import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.MonitorHeart
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,17 +26,16 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.graphics.shapes.RoundedPolygon
 import com.bennybar.runnersidekick.data.remote.AgeGradeRow
 import com.bennybar.runnersidekick.data.remote.CompareItem
 import com.bennybar.runnersidekick.data.remote.CompareReport
-import com.bennybar.runnersidekick.ui.components.ShapeBadge
-import com.bennybar.runnersidekick.ui.theme.accentFor
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
@@ -60,13 +50,13 @@ private fun clock(s: Double): String {
     return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, (t % 3600) / 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-private fun style(id: String): Triple<ImageVector, RoundedPolygon, String> = when (id) {
-    "vo2max" -> Triple(Icons.Outlined.Speed, MaterialShapes.Cookie9Sided, "fitness")
-    "fitness_age" -> Triple(Icons.Outlined.Cake, MaterialShapes.Sunny, "habits")
-    "resting_hr" -> Triple(Icons.Outlined.Favorite, MaterialShapes.SoftBurst, "recovery")
-    "age_grade" -> Triple(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie6Sided, "running")
-    else -> Triple(Icons.Outlined.MonitorHeart, MaterialShapes.Clover4Leaf, "sleep")
+/** Each comparison's tile colour, by its kind of data. */
+private fun tintOf(id: String) = when (id) {
+    "vo2max" -> Tint.TEAL
+    "fitness_age" -> Tint.BLUE
+    "resting_hr", "hrv" -> Tint.PINK
+    "age_grade" -> Tint.AMBER
+    else -> Tint.NEUTRAL
 }
 
 /** You against people of your sex and age. Every card says which reference it uses and what limits the comparison. */
@@ -74,21 +64,19 @@ private fun style(id: String): Triple<ImageVector, RoundedPolygon, String> = whe
 fun CompareSection(r: CompareReport?, onOpenSettings: () -> Unit, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     if (r == null) return
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val p = r.profile
         if (r.missing.isNotEmpty()) {
-            Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Comparisons need your ${r.missing.joinToString(" and ")}", style = MaterialTheme.typography.titleMedium)
-                    Text("Garmin didn't provide ${if (r.missing.size > 1) "them" else "it"}. Add it in Settings; nothing is guessed.",
-                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                    TextButton(onClick = onOpenSettings) { Text("Open Settings") }
-                }
+            Tile {
+                Text("Comparisons need your ${r.missing.joinToString(" and ")}", style = MaterialTheme.typography.titleMedium)
+                Text("Garmin didn't provide ${if (r.missing.size > 1) "them" else "it"}. Add it in Settings; nothing is guessed.",
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                TextButton(onClick = onOpenSettings) { Text("Open Settings") }
             }
             return
         }
         ScreenSummaryCard(r.aiSummary)
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Compared with ${if (p.sex == "female") "women" else "men"} of your age (${p.age})" +
                 if (p.source == "settings") " · your settings" else " · from Garmin",
                 style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
@@ -96,58 +84,51 @@ fun CompareSection(r: CompareReport?, onOpenSettings: () -> Unit, onOpenRun: (St
         }
         r.items.forEach { CompareCard(it, onOpenRun) }
         Text("Population comparisons describe where you sit among others; they aren't health assessments or medical advice.",
-            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CompareCard(i: CompareItem, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val (icon, shape, cat) = style(i.id)
-    val accent = accentFor(cat)
+    val tint = tintOf(i.id)
+    // Charts draw in the tile's own ink (neutral tiles in plain text colour)
+    val accent = ink(tint)
     var more by remember { mutableStateOf(false) }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.animateContentSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(icon, shape, Modifier.size(40.dp), container = accent?.container ?: cs.secondaryContainer,
-                    content = accent?.content ?: cs.onSecondaryContainer)
-                Spacer(Modifier.width(12.dp))
-                Text(i.title, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+    Tile(Modifier.animateContentSize(), tint = tint, spacing = 10.dp) {
+        Text(i.title, style = MaterialTheme.typography.titleSmall)
+        i.headline?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
+        i.chart?.let { c ->
+            when (c["type"]?.jsonPrimitive?.content) {
+                "bands" -> BandsChart(c, accent)
+                "ages" -> AgesChart(c, accent)
+                "distribution" -> DistributionChart(c, accent)
+                "age_grade" -> AgeGradeChart(i.rows, accent, onOpenRun)
+                "weekly_dots" -> com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
+                    c.list("points").mapNotNull { it.obj() }.mapNotNull { p ->
+                        val week = p["week"]?.str()?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return@mapNotNull null
+                        com.bennybar.runnersidekick.ui.components.WeekPoint(week, p.num("value") ?: 0.0, p["new_watch"]?.str() == "true")
+                    },
+                    decimals = c.num("decimals")?.toInt() ?: 0, step = c.num("step") ?: 5.0, caption = "Weekly median (${c["unit"]?.jsonPrimitive?.content})",
+                    description = i.title,
+                    band = c.list("band").mapNotNull { it.dbl() }.takeIf { it.size == 2 }?.let { it[0] to it[1] })
             }
-            i.headline?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
-            i.chart?.let { c ->
-                when (c["type"]?.jsonPrimitive?.content) {
-                    "bands" -> BandsChart(c)
-                    "ages" -> AgesChart(c)
-                    "distribution" -> DistributionChart(c)
-                    "age_grade" -> AgeGradeChart(i.rows, onOpenRun)
-                    "weekly_dots" -> com.bennybar.runnersidekick.ui.components.WeeklyDotChart(
-                        c.list("points").mapNotNull { it.obj() }.mapNotNull { p ->
-                            val week = p["week"]?.str()?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return@mapNotNull null
-                            com.bennybar.runnersidekick.ui.components.WeekPoint(week, p.num("value") ?: 0.0, p["new_watch"]?.str() == "true")
-                        },
-                        decimals = c.num("decimals")?.toInt() ?: 0, step = c.num("step") ?: 5.0, caption = "Weekly median (${c["unit"]?.jsonPrimitive?.content})",
-                        description = i.title,
-                        band = c.list("band").mapNotNull { it.dbl() }.takeIf { it.size == 2 }?.let { it[0] to it[1] })
-                }
+        }
+        if (i.detail != null || i.method != null || i.caveats.isNotEmpty()) {
+            if (more) {
+                i.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                i.method?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+                i.caveats.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+                i.source?.let { Text("Reference: $it", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
             }
-            if (i.detail != null || i.method != null || i.caveats.isNotEmpty()) {
-                if (more) {
-                    i.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                    i.method?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                    i.caveats.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                    i.source?.let { Text("Reference: $it", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
-                }
-                TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "Details") }
-            }
+            TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "Details") }
         }
     }
 }
 
 /** VO2 max: the rating bands for your group with your value marked. */
 @Composable
-private fun BandsChart(c: JsonObject) {
+private fun BandsChart(c: JsonObject, accent: Color) {
     val cs = MaterialTheme.colorScheme
     // Only well-formed bands (a label, from and to); nothing drawn without them
     val bands = c.list("bands").mapNotNull { it.obj() }.filter { it["label"]?.str() != null && it.num("from") != null && it.num("to") != null }
@@ -156,8 +137,8 @@ private fun BandsChart(c: JsonObject) {
     val lo = bands.first().num("from")!!
     val hi = bands.last().num("to")!!
     if (hi <= lo) return
-    val colors = listOf(cs.surfaceContainerHighest, cs.primary.copy(alpha = 0.25f), cs.primary.copy(alpha = 0.45f),
-        cs.primary.copy(alpha = 0.7f), cs.primary)
+    val colors = listOf(cs.onSurface.copy(alpha = 0.08f), accent.copy(alpha = 0.25f), accent.copy(alpha = 0.45f),
+        accent.copy(alpha = 0.7f), accent)
     Column {
         Canvas(Modifier.fillMaxWidth().height(36.dp).semantics {
             contentDescription = "Your value ${"%.1f".format(value)} on the rating scale " + bands.joinToString { it["label"]?.str().orEmpty() }
@@ -183,13 +164,13 @@ private fun BandsChart(c: JsonObject) {
 
 /** Fitness age: your real age, Garmin's fitness age, what Garmin says is achievable, and the age your VO2 max is typical for. */
 @Composable
-private fun AgesChart(c: JsonObject) {
+private fun AgesChart(c: JsonObject, accent: Color) {
     val cs = MaterialTheme.colorScheme
     val marks = listOfNotNull(
         c.num("age")?.let { Triple("Your age", it, cs.onSurfaceVariant) },
-        c.num("fitness_age")?.let { Triple("Fitness age", it, cs.primary) },
-        c.num("achievable")?.let { Triple("Achievable", it, cs.tertiary) },
-        c.num("vo2_age")?.let { Triple("VO₂ max typical for", it, cs.secondary) },
+        c.num("fitness_age")?.let { Triple("Fitness age", it, accent) },
+        c.num("achievable")?.let { Triple("Achievable", it, ink(Tint.GREEN)) },
+        c.num("vo2_age")?.let { Triple("VO₂ max typical for", it, ink(Tint.TEAL)) },
     )
     if (marks.size < 2) return
     val lo = marks.minOf { it.second } - 3
@@ -197,7 +178,7 @@ private fun AgesChart(c: JsonObject) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Canvas(Modifier.fillMaxWidth().height(28.dp).semantics { contentDescription = marks.joinToString { "${it.first} ${"%.1f".format(it.second)}" } }) {
             fun x(v: Double) = ((v - lo) / (hi - lo) * size.width).toFloat()
-            drawRoundRect(cs.surfaceContainerHighest, Offset(0f, size.height / 2 - 4f), Size(size.width, 8f), CornerRadius(4f, 4f))
+            drawRoundRect(cs.onSurface.copy(alpha = 0.08f), Offset(0f, size.height / 2 - 4f), Size(size.width, 8f), CornerRadius(4f, 4f))
             marks.forEach { (_, v, col) -> drawCircle(col, 8.dp.toPx(), Offset(x(v), size.height / 2)) }
         }
         marks.forEach { (label, v, col) ->
@@ -213,7 +194,7 @@ private fun AgesChart(c: JsonObject) {
 
 /** Resting heart rate: the population's spread (2.5th–97.5th, middle half darker, median tick) with your value. */
 @Composable
-private fun DistributionChart(c: JsonObject) {
+private fun DistributionChart(c: JsonObject, accent: Color) {
     val cs = MaterialTheme.colorScheme
     val pts = c.nums("points")
     val value = c.num("value") ?: return
@@ -226,16 +207,16 @@ private fun DistributionChart(c: JsonObject) {
         }) {
             fun x(v: Double) = ((v - lo) / (hi - lo) * size.width).toFloat()
             val mid = size.height / 2
-            drawRoundRect(cs.primary.copy(alpha = 0.18f), Offset(x(pts[0]), mid - 10f), Size(x(pts[8]) - x(pts[0]), 20f), CornerRadius(10f, 10f))
-            drawRoundRect(cs.primary.copy(alpha = 0.4f), Offset(x(pts[3]), mid - 10f), Size(x(pts[5]) - x(pts[3]), 20f), CornerRadius(10f, 10f))
-            drawLine(cs.primary, Offset(x(pts[4]), mid - 16f), Offset(x(pts[4]), mid + 16f), strokeWidth = 3.dp.toPx())
+            drawRoundRect(accent.copy(alpha = 0.18f), Offset(x(pts[0]), mid - 10f), Size(x(pts[8]) - x(pts[0]), 20f), CornerRadius(10f, 10f))
+            drawRoundRect(accent.copy(alpha = 0.4f), Offset(x(pts[3]), mid - 10f), Size(x(pts[5]) - x(pts[3]), 20f), CornerRadius(10f, 10f))
+            drawLine(accent, Offset(x(pts[4]), mid - 16f), Offset(x(pts[4]), mid + 16f), strokeWidth = 3.dp.toPx())
             drawCircle(cs.onSurface, 9.dp.toPx(), Offset(x(value), mid))
             drawCircle(cs.surface, 5.dp.toPx(), Offset(x(value), mid))
         }
         Row(Modifier.fillMaxWidth()) {
             Text("${pts[0].toInt()} bpm", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
-            Text("middle ${pts[4].toInt()}", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+            Text("middle ${pts[4].toInt()}", style = MaterialTheme.typography.labelSmall, color = accent)
             Spacer(Modifier.weight(1f))
             Text("${pts[8].toInt()} bpm", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         }
@@ -246,7 +227,7 @@ private fun DistributionChart(c: JsonObject) {
 
 /** Age grade per distance on a 40–100% scale with the class thresholds marked. */
 @Composable
-private fun AgeGradeChart(rows: List<AgeGradeRow>, onOpenRun: (String) -> Unit) {
+private fun AgeGradeChart(rows: List<AgeGradeRow>, accent: Color, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val lo = 40.0
     val hi = 100.0
@@ -263,11 +244,11 @@ private fun AgeGradeChart(rows: List<AgeGradeRow>, onOpenRun: (String) -> Unit) 
                         contentDescription = "${r.label} ${"%.0f".format(r.ageGradePct)} percent age grade, ${r.gradeClass}"
                     }) {
                         fun x(v: Double) = ((v.coerceIn(lo, hi) - lo) / (hi - lo) * size.width).toFloat()
-                        drawRoundRect(cs.surfaceContainerHighest, Offset.Zero, size, CornerRadius(6f, 6f))
-                        drawRoundRect(if (r.kind == "best") cs.primary else cs.primary.copy(alpha = 0.45f), Offset.Zero,
+                        drawRoundRect(cs.onSurface.copy(alpha = 0.08f), Offset.Zero, size, CornerRadius(6f, 6f))
+                        drawRoundRect(if (r.kind == "best") accent else accent.copy(alpha = 0.45f), Offset.Zero,
                             Size(x(r.ageGradePct), size.height), CornerRadius(6f, 6f))
                         listOf(60.0, 70.0, 80.0, 90.0).forEach { t ->
-                            drawLine(Color.Black.copy(alpha = 0.25f), Offset(x(t), 0f), Offset(x(t), size.height), strokeWidth = 1.dp.toPx())
+                            drawLine(cs.onSurface.copy(alpha = 0.25f), Offset(x(t), 0f), Offset(x(t), size.height), strokeWidth = 1.dp.toPx())
                         }
                     }
                 }

@@ -5,7 +5,6 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.bennybar.runnersidekick.RunnerApp
 import com.bennybar.runnersidekick.data.remote.ApiException
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
 import kotlinx.coroutines.launch
 
 /** Garmin's own sign-in page, asked for a ticket for this service (as Garmin's sign-in widget does). */
@@ -106,14 +107,13 @@ fun GarminConnectScreen(onDone: () -> Unit, onSkip: (() -> Unit)?, onClose: () -
         Column(Modifier.padding(padding).fillMaxSize()) {
             Text("Sign in on Garmin's page below. Your password goes only to Garmin; Runner Sidekick gets read access to your " +
                 "Garmin data and downloads your history.", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             when {
-                linking -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally) {
+                linking -> Tile(Modifier.padding(12.dp), spacing = 12.dp) {
+                    Text("Connecting to Garmin…", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text("Connecting to Garmin…", style = MaterialTheme.typography.titleMedium)
                 }
-                error != null -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                error != null -> Tile(Modifier.padding(12.dp), tint = Tint.ORANGE, spacing = 16.dp) {
                     Text(error!!, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
                     Button(onClick = { error = null; sent = false; attempt++ }) { Text("Try again") }
                 }

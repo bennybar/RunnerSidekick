@@ -1025,3 +1025,19 @@ After the round-4 review:
   ago, and the change over that period. It follows Settings › VO₂ max for scores (Runner Sidekick's estimate as it
   stood after each qualifying run, or the watch's readings). `/v1/fitness` now sends a year of VO₂ history (was 120
   days).
+
+## Redesign: clean tiles, four tabs, full-page details (2026-10-20, v0.70.0)
+- New look throughout: a neutral base (light grey / true black) with rounded tiles, each softly tinted for its kind of
+  data (`Tint`, ui/theme/Theme.kt; `Tile`, ui/components/Tiles.kt): readiness green, next run orange, fitness blue,
+  healthy habits purple, VO₂ teal, heart rate pink, sleep indigo, focus/race/records amber. Google Sans (OFL, bundled,
+  subset to Latin + the symbols used; licence in assets/licenses). Colour themes removed (Light/Dark/System stay).
+- Four tabs in a floating pill (as in Ilay for Reddit; slide along it to switch): Today, Runs (was Activities), Trends
+  (was Insights: Summary / Compare / Charts), Me (was Settings, with Reports — the old Journal tab — as a page).
+- Detail sheets are full pages with a back arrow (`DetailPage`): readiness, full briefing, scores, VO₂ max, race week,
+  weekly focus, cardio fitness, training numbers, patterns, records, routes. "Show why", the run-type form and the
+  settings edit forms stay bottom sheets.
+- Nothing dropped: every data item, state and control in the pre-redesign inventory has a place (mockups:
+  claude.ai/artifact/6uCRtx3eoHyYgj9F6ix7fD).
+- Fixes found on the way: text outside a Surface was black in dark mode (sign-in title); status/navigation bar icons now
+  follow the app's light/dark choice (they followed the phone's), also on detail pages; the refresh progress label sits
+  above the tab bar instead of over the header buttons.

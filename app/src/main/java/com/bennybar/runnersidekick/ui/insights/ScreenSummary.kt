@@ -1,6 +1,5 @@
 package com.bennybar.runnersidekick.ui.insights
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,9 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,7 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bennybar.runnersidekick.data.remote.ScreenSummary
 import com.bennybar.runnersidekick.ui.Format
-import com.bennybar.runnersidekick.ui.components.ShapeBadge
+import com.bennybar.runnersidekick.ui.components.Tile
 
 /** Today's AI summary of a screen (Compare, Trends). Hidden when AI is off; earlier summaries are labelled as such. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -41,24 +39,22 @@ fun ScreenSummaryCard(s: ScreenSummary?) {
         }
         return
     }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(Icons.Outlined.AutoAwesome, MaterialShapes.Flower, Modifier.size(36.dp), container = cs.secondary, content = cs.onSecondary)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Today's summary", style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer)
-                    Text(if (shown !== s) "From ${shown.localDate?.let { Format.shortDate(it) } ?: "earlier"} · updating…"
-                        else "Written by AI from this screen · numbers come from the app",
-                        style = MaterialTheme.typography.labelSmall, color = cs.onSecondaryContainer.copy(alpha = 0.75f))
-                }
-                if (s.status == "pending") LoadingIndicator(Modifier.size(24.dp))
+    Tile {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Today's summary · AI", style = MaterialTheme.typography.titleSmall)
+                Text(if (shown !== s) "From ${shown.localDate?.let { Format.shortDate(it) } ?: "earlier"} · updating…"
+                    else "Written by AI from this screen · numbers come from the app",
+                    style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             }
-            // The takeaway on its own; the rest on tap
-            var more by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
-            val lines = if (more) shown.sentences else shown.sentences.take(1)
-            Text(lines.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge, color = cs.onSecondaryContainer)
-            if (shown.sentences.size > 1) androidx.compose.material3.TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
+            if (s.status == "pending") LoadingIndicator(Modifier.size(24.dp))
         }
+        // The takeaway on its own; the rest on tap
+        var more by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+        val lines = if (more) shown.sentences else shown.sentences.take(1)
+        Text(lines.joinToString(" ") { it.text }, style = MaterialTheme.typography.bodyLarge)
+        if (shown.sentences.size > 1) androidx.compose.material3.TextButton(onClick = { more = !more }) { Text(if (more) "Less" else "More") }
     }
 }

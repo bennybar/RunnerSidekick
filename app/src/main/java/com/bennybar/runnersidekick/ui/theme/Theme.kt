@@ -2,86 +2,74 @@ package com.bennybar.runnersidekick.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bennybar.runnersidekick.R
-import androidx.compose.ui.unit.dp
 
-// Design B ("Expressive Tonal"): deep green and coral on a sage ground, white cards, tonal chips
+// A clean, neutral base (light grey / true black) with plain cards; colour lives on the tiles, one hue per kind of
+// data (see Tint), never on the background
 private val Light = lightColorScheme(
-    primary = Color(0xFF1F5F4A), onPrimary = Color.White, primaryContainer = Color(0xFFC4E8D6), onPrimaryContainer = Color(0xFF002116),
-    secondary = Color(0xFF4C5A52), onSecondary = Color.White, secondaryContainer = Color(0xFFDDE6DC), onSecondaryContainer = Color(0xFF18201C),
-    tertiary = Color(0xFFB8432A), onTertiary = Color.White, tertiaryContainer = Color(0xFFFFE1D6), onTertiaryContainer = Color(0xFF4A1606),
-    background = Color(0xFFF2F4EE), onBackground = Color(0xFF18201C), surface = Color(0xFFF2F4EE), onSurface = Color(0xFF18201C),
-    onSurfaceVariant = Color(0xFF4C5A52), surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF8FAF5),
-    surfaceContainer = Color.White, surfaceContainerHigh = Color.White, surfaceContainerHighest = Color(0xFFE6EBE3),
-    outline = Color(0xFF76837B), outlineVariant = Color(0xFFC4CCC5),
+    primary = Color(0xFF1C1C1E), onPrimary = Color.White, primaryContainer = Color(0xFFE6E6EB), onPrimaryContainer = Color(0xFF1C1C1E),
+    secondary = Color(0xFF55555C), onSecondary = Color.White, secondaryContainer = Color(0xFFE6E6EB), onSecondaryContainer = Color(0xFF1C1C1E),
+    tertiary = Color(0xFFB4501A), onTertiary = Color.White, tertiaryContainer = Color(0xFFFFE3D1), onTertiaryContainer = Color(0xFF6B2A05),
+    background = Color(0xFFF3F4F7), onBackground = Color(0xFF1C1C1E), surface = Color(0xFFF3F4F7), onSurface = Color(0xFF1C1C1E),
+    onSurfaceVariant = Color(0xFF55555C), surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF8F8FA),
+    surfaceContainer = Color.White, surfaceContainerHigh = Color.White, surfaceContainerHighest = Color(0xFFE9E9EE),
+    outline = Color(0xFF8E8E95), outlineVariant = Color(0xFFD4D4DA),
 )
 private val Dark = darkColorScheme(
-    primary = Color(0xFF8FD5B5), onPrimary = Color(0xFF003826), primaryContainer = Color(0xFF1F5F4A), onPrimaryContainer = Color(0xFFC4E8D6),
-    secondary = Color(0xFFBFC9C0), onSecondary = Color(0xFF29332D), secondaryContainer = Color(0xFF34413A), onSecondaryContainer = Color(0xFFDDE6DC),
-    tertiary = Color(0xFFFFB59F), onTertiary = Color(0xFF5E1A07), tertiaryContainer = Color(0xFF7A2B14), onTertiaryContainer = Color(0xFFFFE1D6),
-    background = Color(0xFF101512), onBackground = Color(0xFFE0E4DE), surface = Color(0xFF101512), onSurface = Color(0xFFE0E4DE),
-    onSurfaceVariant = Color(0xFFC0C9C1), surfaceContainerLowest = Color(0xFF0B0F0D), surfaceContainerLow = Color(0xFF161B18),
-    surfaceContainer = Color(0xFF1B211E), surfaceContainerHigh = Color(0xFF1F2622), surfaceContainerHighest = Color(0xFF2A312D),
-    outline = Color(0xFF8A948C), outlineVariant = Color(0xFF404943),
+    primary = Color(0xFFF2F2F4), onPrimary = Color.Black, primaryContainer = Color(0xFF2C2C30), onPrimaryContainer = Color(0xFFF2F2F4),
+    secondary = Color(0xFFA1A1A8), onSecondary = Color.Black, secondaryContainer = Color(0xFF2C2C30), onSecondaryContainer = Color(0xFFF2F2F4),
+    tertiary = Color(0xFFFF9A5C), onTertiary = Color(0xFF3A1600), tertiaryContainer = Color(0xFF42230F), onTertiaryContainer = Color(0xFFFFC6A3),
+    background = Color.Black, onBackground = Color(0xFFF2F2F4), surface = Color.Black, onSurface = Color(0xFFF2F2F4),
+    onSurfaceVariant = Color(0xFFA1A1A8), surfaceContainerLowest = Color(0xFF0B0B0C), surfaceContainerLow = Color(0xFF111113),
+    surfaceContainer = Color(0xFF1C1C1E), surfaceContainerHigh = Color(0xFF232326), surfaceContainerHighest = Color(0xFF2C2C30),
+    outline = Color(0xFF7C7C84), outlineVariant = Color(0xFF3A3A3F),
 )
-
-/** The colour themes in Settings: Forest (design B, hand-tuned), four seeds expanded into full Material 3 schemes, and
- *  the phone's own wallpaper colours (Material You). */
-enum class ThemeChoice(val label: String, val seed: Color?) {
-    FOREST("Forest", Color(0xFF1F5F4A)), OCEAN("Ocean", Color(0xFF1F5C8A)), PLUM("Plum", Color(0xFF6A3FA0)),
-    CORAL("Coral", Color(0xFFB8432A)), GRAPHITE("Graphite", Color(0xFF4A5560)), DYNAMIC("Dynamic", null);
-
-    companion object {
-        fun of(name: String?) = entries.firstOrNull { it.name == name } ?: FOREST
-    }
-}
 
 /** Light, dark, or following the phone. */
 enum class Appearance(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark");
     companion object { fun of(name: String?) = entries.firstOrNull { it.name == name } ?: SYSTEM }
 }
 
-/** A seeded or wallpaper scheme laid out like design B: white cards on a tinted ground in light, as Material in dark. */
-private fun asB(s: ColorScheme, dark: Boolean): ColorScheme = if (dark) s else s.copy(
-    background = s.surfaceContainer, surface = s.surfaceContainer, surfaceContainerLow = s.surfaceContainerLowest,
-    surfaceContainer = s.surfaceContainerLowest, surfaceContainerHigh = s.surfaceContainerLowest, surfaceContainerHighest = s.surfaceContainerHigh,
-)
+/** The tile colours, one per kind of data: [hue] tints the tile, [light]/[dark] is the readable ink for text and
+ *  icons on it in each mode. Colour is never the only signal; text always says it too. */
+enum class Tint(val hue: Color, val light: Color, val dark: Color) {
+    NEUTRAL(Color(0xFF8E8E95), Color(0xFF1C1C1E), Color(0xFFF2F2F4)),
+    GREEN(Color(0xFF34C778), Color(0xFF1E7A45), Color(0xFF5BD68E)),   // readiness, recovery, good
+    ORANGE(Color(0xFFFF8C46), Color(0xFF9A4310), Color(0xFFFF9A5C)),  // runs, training, the next run
+    BLUE(Color(0xFF4678FA), Color(0xFF2A56C9), Color(0xFF8AAEFF)),    // fitness
+    PURPLE(Color(0xFF9664F5), Color(0xFF6A3FC2), Color(0xFFC0A2FF)),  // healthy habits, reports
+    TEAL(Color(0xFF1EB4AA), Color(0xFF136B5F), Color(0xFF52D6C8)),    // VO2 max, cardio
+    PINK(Color(0xFFF0506E), Color(0xFFB4233F), Color(0xFFFF8AA0)),    // heart rate, attention
+    INDIGO(Color(0xFF5F5AE6), Color(0xFF3F3AB8), Color(0xFFA6A2FF)),  // sleep, overnight
+    AMBER(Color(0xFFF0AA28), Color(0xFF8A5A00), Color(0xFFFFCB66)),   // focus, records, race
+}
 
-/** The two score tiles' colours: Health and Fitness. */
-@Immutable
-data class ScoreColors(val health: Accent, val fitness: Accent)
+/** Whether the app is drawing dark right now (for tiles and anything else that differs by mode). */
+val LocalDark = staticCompositionLocalOf { false }
 
-val LocalScoreColors = staticCompositionLocalOf { ScoreColors(Accent(Color(0xFFE0E0FF), Color(0xFF2F3A8C)), Accent(Color(0xFFFFE1D6), Color(0xFF4A1606))) }
-
-/** The deep green hero cards (readiness, the run's header) and their content: the same in light and dark. */
-@Immutable
-data class Hero(val container: Color, val content: Color, val tile: Color)
-
-val LocalHero = staticCompositionLocalOf { Hero(Color(0xFF1F5F4A), Color.White, Color.White.copy(alpha = 0.14f)) }
-private val LightHero = Hero(Color(0xFF1F5F4A), Color.White, Color.White.copy(alpha = 0.14f))
-private val DarkHero = Hero(Color(0xFF1A4D3C), Color(0xFFF1F7F2), Color.White.copy(alpha = 0.10f))
+/** Readable text/icon colour for [t] in the current mode. */
+@Composable
+@ReadOnlyComposable
+fun ink(t: Tint): Color = if (LocalDark.current) t.dark else t.light
 
 /** Semantic colours for data viz. Always paired with text/icons so meaning never relies on colour alone. */
 @Immutable
@@ -89,112 +77,72 @@ data class DataColors(val heartRate: Color, val pace: Color, val attention: Colo
 
 val LocalDataColors = staticCompositionLocalOf { DataColors(Color.Red, Color.Blue, Color.Red, Color.Gray, Color.LightGray) }
 
-private fun dataColors(cs: ColorScheme, dark: Boolean) = DataColors(
-    heartRate = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
-    pace = cs.primary,
-    attention = cs.tertiary,
-    neutral = cs.outline,
-    band = cs.primary.copy(alpha = 0.12f),
+private fun dataColors(dark: Boolean) = DataColors(
+    heartRate = if (dark) Tint.PINK.dark else Tint.PINK.light,
+    pace = if (dark) Tint.ORANGE.dark else Color(0xFFE7742E),
+    attention = if (dark) Tint.ORANGE.dark else Tint.ORANGE.light,
+    neutral = if (dark) Color(0xFF7C7C84) else Color(0xFF8E8E95),
+    band = (if (dark) Tint.TEAL.dark else Tint.TEAL.hue).copy(alpha = 0.14f),
 )
 
 /** A container/on-container pair for a small accent (icon badges). */
 @Immutable
 data class Accent(val container: Color, val content: Color)
 
-/** A few soft accent hues so categories are easy to tell apart at a glance. Used sparingly, on icon badges only. */
-@Immutable
-data class Accents(val training: Accent, val sleep: Accent, val recovery: Accent, val running: Accent, val fitness: Accent, val habits: Accent)
-
-private val LightAccents = Accents(
-    training = Accent(Color(0xFFFFDCC2), Color(0xFF6E3900)),
-    sleep = Accent(Color(0xFFE0E0FF), Color(0xFF2F3A8C)),
-    recovery = Accent(Color(0xFFFFD9E0), Color(0xFF7A2941)),
-    running = Accent(Color(0xFFB8F0E6), Color(0xFF00504A)),
-    fitness = Accent(Color(0xFFD4EDB0), Color(0xFF2D4F00)),
-    habits = Accent(Color(0xFFF6E1A6), Color(0xFF574500)),
-)
-private val DarkAccents = Accents(
-    training = Accent(Color(0xFF5A3010), Color(0xFFFFDCC2)),
-    sleep = Accent(Color(0xFF353F7A), Color(0xFFE0E0FF)),
-    recovery = Accent(Color(0xFF5E2335), Color(0xFFFFD9E0)),
-    running = Accent(Color(0xFF00433D), Color(0xFFB8F0E6)),
-    fitness = Accent(Color(0xFF2E4513), Color(0xFFD4EDB0)),
-    habits = Accent(Color(0xFF4D3F00), Color(0xFFF6E1A6)),
-)
-
-val LocalAccents = staticCompositionLocalOf { LightAccents }
-
-/** Accent for an insight/coach category; unknown categories get null (callers fall back to the theme's own colours). */
+/** Badge colours by insight/coach category, from the tile hues. */
 @Composable
-fun accentFor(category: String): Accent? = LocalAccents.current.let { a ->
-    when (category) {
-        "training", "intensity", "pacing" -> a.training
-        "sleep" -> a.sleep
-        "recovery" -> a.recovery
-        "running" -> a.running
-        "fitness" -> a.fitness
-        "habits" -> a.habits
-        else -> null
+fun accentFor(category: String): Accent? {
+    val t = when (category) {
+        "training", "intensity", "pacing" -> Tint.ORANGE
+        "sleep" -> Tint.INDIGO
+        "recovery" -> Tint.PINK
+        "running" -> Tint.TEAL
+        "fitness" -> Tint.BLUE
+        "habits" -> Tint.PURPLE
+        else -> return null
     }
+    return Accent(t.hue.copy(alpha = if (LocalDark.current) 0.26f else 0.18f), ink(t))
 }
 
-private val base = Typography()
-
 @OptIn(ExperimentalTextApi::class)
-private fun variable(res: Int, w: FontWeight) = Font(res, w, variationSettings = FontVariation.Settings(FontVariation.weight(w.weight)))
+private fun gs(w: FontWeight) = Font(R.font.google_sans, w, variationSettings = FontVariation.Settings(FontVariation.weight(w.weight)))
 
-/** Unbounded (wide display face) for numbers and headlines; Plus Jakarta Sans for everything else. Both variable fonts. */
-private val Display = FontFamily(variable(R.font.unbounded, FontWeight.Medium), variable(R.font.unbounded, FontWeight.SemiBold),
-    variable(R.font.unbounded, FontWeight.Bold))
-private val Body = FontFamily(variable(R.font.plus_jakarta_sans, FontWeight.Normal), variable(R.font.plus_jakarta_sans, FontWeight.Medium),
-    variable(R.font.plus_jakarta_sans, FontWeight.SemiBold), variable(R.font.plus_jakarta_sans, FontWeight.Bold))
+/** Google Sans throughout (a variable font, 400–700). */
+private val Sans = FontFamily(gs(FontWeight.Normal), gs(FontWeight.Medium), gs(FontWeight.SemiBold), gs(FontWeight.Bold))
 
-// Unbounded runs wide, so display and headline sizes step down a little from the Material defaults
+private val base = Typography()
 private val AppTypography = base.copy(
-    displayLarge = base.displayLarge.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 52.sp, lineHeight = 56.sp),
-    displayMedium = base.displayMedium.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 40.sp, lineHeight = 46.sp),
-    displaySmall = base.displaySmall.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp),
-    headlineLarge = base.headlineLarge.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 26.sp, lineHeight = 32.sp),
-    headlineMedium = base.headlineMedium.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 28.sp),
-    headlineSmall = base.headlineSmall.copy(fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 26.sp),
-    titleLarge = base.titleLarge.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
-    titleMedium = base.titleMedium.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
-    titleSmall = base.titleSmall.copy(fontFamily = Body, fontWeight = FontWeight.Bold),
-    bodyLarge = base.bodyLarge.copy(fontFamily = Body),
-    bodyMedium = base.bodyMedium.copy(fontFamily = Body),
-    bodySmall = base.bodySmall.copy(fontFamily = Body),
-    labelLarge = base.labelLarge.copy(fontFamily = Body, fontWeight = FontWeight.SemiBold),
-    labelMedium = base.labelMedium.copy(fontFamily = Body, fontWeight = FontWeight.SemiBold),
-    labelSmall = base.labelSmall.copy(fontFamily = Body, fontWeight = FontWeight.Medium),
+    displayLarge = base.displayLarge.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 52.sp, lineHeight = 56.sp, letterSpacing = (-1).sp),
+    displayMedium = base.displayMedium.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 44.sp, lineHeight = 48.sp, letterSpacing = (-1).sp),
+    displaySmall = base.displaySmall.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 40.sp, letterSpacing = (-0.5).sp),
+    headlineLarge = base.headlineLarge.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp, letterSpacing = (-0.4).sp),
+    headlineMedium = base.headlineMedium.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp),
+    headlineSmall = base.headlineSmall.copy(fontFamily = Sans, fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp),
+    titleLarge = base.titleLarge.copy(fontFamily = Sans, fontWeight = FontWeight.Bold),
+    titleMedium = base.titleMedium.copy(fontFamily = Sans, fontWeight = FontWeight.SemiBold),
+    titleSmall = base.titleSmall.copy(fontFamily = Sans, fontWeight = FontWeight.SemiBold),
+    bodyLarge = base.bodyLarge.copy(fontFamily = Sans),
+    bodyMedium = base.bodyMedium.copy(fontFamily = Sans),
+    bodySmall = base.bodySmall.copy(fontFamily = Sans),
+    labelLarge = base.labelLarge.copy(fontFamily = Sans, fontWeight = FontWeight.SemiBold),
+    labelMedium = base.labelMedium.copy(fontFamily = Sans, fontWeight = FontWeight.SemiBold),
+    labelSmall = base.labelSmall.copy(fontFamily = Sans, fontWeight = FontWeight.Medium),
 )
 
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(28.dp), extraLarge = RoundedCornerShape(36.dp),
+    large = RoundedCornerShape(26.dp), extraLarge = RoundedCornerShape(32.dp),
 )
 
 @Composable
-fun RunnerTheme(theme: ThemeChoice = ThemeChoice.FOREST, appearance: Appearance = Appearance.SYSTEM, content: @Composable () -> Unit) {
-    val ctx = LocalContext.current
+fun RunnerTheme(appearance: Appearance = Appearance.SYSTEM, content: @Composable () -> Unit) {
     val dark = when (appearance) { Appearance.SYSTEM -> isSystemInDarkTheme(); Appearance.LIGHT -> false; Appearance.DARK -> true }
-    val cs = when (theme) {
-        ThemeChoice.FOREST -> if (dark) Dark else Light
-        ThemeChoice.DYNAMIC -> asB(if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx), dark)
-        else -> asB(com.materialkolor.dynamicColorScheme(seedColor = theme.seed!!, isDark = dark, style = com.materialkolor.PaletteStyle.TonalSpot), dark)
-    }
-    // Forest keeps its own hero green and the blue/coral score tiles; other themes take them from their scheme
-    val hero = when {
-        theme == ThemeChoice.FOREST -> if (dark) DarkHero else LightHero
-        dark -> Hero(cs.primaryContainer, cs.onPrimaryContainer, cs.onPrimaryContainer.copy(alpha = 0.12f))
-        else -> Hero(cs.primary, cs.onPrimary, cs.onPrimary.copy(alpha = 0.14f))
-    }
-    val accents = if (dark) DarkAccents else LightAccents
-    val scores = if (theme == ThemeChoice.FOREST) ScoreColors(accents.sleep, Accent(cs.tertiaryContainer, cs.onTertiaryContainer))
-        else ScoreColors(Accent(cs.primaryContainer, cs.onPrimaryContainer), Accent(cs.tertiaryContainer, cs.onTertiaryContainer))
-    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(cs, dark), LocalAccents provides accents,
-        LocalHero provides hero, LocalScoreColors provides scores) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalDataColors provides dataColors(dark), LocalDark provides dark) {
         @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-        MaterialExpressiveTheme(colorScheme = cs, typography = AppTypography, shapes = AppShapes,
-            motionScheme = MotionScheme.expressive(), content = content)
+        val cs = if (dark) Dark else Light
+        MaterialExpressiveTheme(colorScheme = cs, typography = AppTypography, shapes = AppShapes, motionScheme = MotionScheme.expressive()) {
+            // Text outside any Surface (sign-in, plain pages) takes the theme's colour, not black
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cs.onBackground, content = content)
+        }
     }
 }

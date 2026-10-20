@@ -3,28 +3,31 @@ package com.bennybar.runnersidekick.ui.insights
 import androidx.compose.material.icons.outlined.Psychology
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Bedtime
-import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.Favorite
@@ -34,16 +37,13 @@ import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,15 +52,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,17 +73,20 @@ import com.bennybar.runnersidekick.data.remote.Insight
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.InsightsVm
 import com.bennybar.runnersidekick.ui.components.DemoBadge
+import com.bennybar.runnersidekick.ui.components.DetailPage
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.SectionLabel
+import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.components.animatedItem
-import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.theme.LocalDark
+import com.bennybar.runnersidekick.ui.theme.Tint
 import com.bennybar.runnersidekick.ui.theme.accentFor
+import com.bennybar.runnersidekick.ui.theme.ink
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 private val REPEATED_ELSEWHERE = setOf("intensity", "efficiency")
@@ -94,7 +101,7 @@ fun categoryStyle(category: String): Pair<ImageVector, RoundedPolygon> = when (c
     else -> Icons.Outlined.Insights to MaterialShapes.Circle
 }
 
-/** Set by links elsewhere (e.g. Today) to open a specific Insights tab: 0 Insights, 1 Compare, 2 Trends. */
+/** Set by links elsewhere (e.g. Today) to open a specific Trends tab: 0 Summary, 1 Compare, 2 Charts. */
 object InsightsTab {
     val requested = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
 }
@@ -130,21 +137,17 @@ fun InsightsScreen(
     val requestedTab by InsightsTab.requested.collectAsStateWithLifecycle()
     LaunchedEffect(requestedTab) { requestedTab?.let { tab = it; InsightsTab.requested.value = null } }
     var method by remember { mutableStateOf<Insight?>(null) }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { LargeTopAppBar(title = { Text("Insights") }, scrollBehavior = scroll, actions = { if (data?.value?.synthetic == true) DemoBadge() }) },
-    ) { padding ->
+    Scaffold { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
             val items = data?.value?.insights.orEmpty()
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                animatedItem(key = "tabs") {
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        listOf("Insights", "Compare", "Trends").forEachIndexed { i, l ->
-                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(l) }
-                        }
+            LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item(key = "title") {
+                    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 40.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Trends", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                        if (data?.value?.synthetic == true) DemoBadge()
                     }
                 }
+                animatedItem(key = "tabs") { TabSwitch(listOf("Summary", "Compare", "Charts"), tab) { tab = it } }
                 if (tab == 1) {
                     animatedItem(key = "compare") { CompareSection(compare?.value, onOpenSettings = onOpenSettings, onOpenRun = onOpenRun) }
                     return@LazyColumn
@@ -173,10 +176,11 @@ fun InsightsScreen(
                 cardio?.value?.let { c -> animatedItem(key = "cardio") { CardioCard(c) { vm.loadAnswers(); cardioOpen = true } } }
                 weekly?.value?.let { w -> animatedItem(key = "weekly") { WeeklyCard(w) { onOpenReport(w.id) } } }
                 if (items.isEmpty()) animatedItem(key = "empty") { EmptyState(Icons.Outlined.Insights, "No insights yet", "Pull down to load them after your first sync.") }
-                // Hard-running share is in the stats grid and the coach; pace at the same heart rate is charted in Trends
+                // Hard-running share is in the stats grid and the coach; pace at the same heart rate is charted in Charts
                 val patterns = items.filter { it.verdict == "pattern" && it.id !in REPEATED_ELSEWHERE }
                 val nulls = items.filter { it.verdict == "no_clear_pattern" }
                 val waiting = items.filter { it.verdict == "not_enough_data" }
+                if (patterns.isNotEmpty()) animatedItem(key = "patterns") { SectionLabel("Patterns") }
                 patterns.forEach { i -> animatedItem(key = i.id) { InsightCard(i, emphasised = i.userState == null, onMethod = { method = i }) } }
                 if (nulls.isNotEmpty()) animatedItem(key = "nulls") {
                     Group(title = "Checked, nothing notable") {
@@ -206,20 +210,31 @@ fun InsightsScreen(
     method?.let { m -> MethodSheet(data?.value?.insights?.firstOrNull { it.id == m.id } ?: m, onState = { st -> vm.setInsightState(m.id, st) }) { method = null } }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** The screen's three tabs as one rounded track; the chosen one is a raised pill. */
+@Composable
+private fun TabSwitch(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val raised = if (LocalDark.current) cs.surfaceContainerHighest else cs.surfaceContainer
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cs.onSurface.copy(alpha = 0.05f)).padding(3.dp).selectableGroup()) {
+        labels.forEachIndexed { i, l ->
+            val on = selected == i
+            Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp)).background(if (on) raised else Color.Transparent)
+                .selectable(on, role = Role.Tab) { onSelect(i) }, contentAlignment = Alignment.Center) {
+                Text(l, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (on) cs.onSurface else cs.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 @Composable
 fun WeeklyCard(w: com.bennybar.runnersidekick.data.remote.WeeklyReport, onOpen: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.extraLarge, color = cs.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(Icons.Outlined.CalendarMonth, MaterialShapes.Cookie12Sided, Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
-                Spacer(Modifier.width(12.dp))
-                Text("Weekly review · ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}", style = MaterialTheme.typography.labelLarge,
-                    color = cs.onPrimaryContainer)
-            }
-            Text(w.headline, style = MaterialTheme.typography.headlineSmall, color = cs.onPrimaryContainer)
-            Text("Next week's focus and details", style = MaterialTheme.typography.labelLarge, color = cs.primary)
+    Tile(tint = Tint.PURPLE, onClick = onOpen) {
+        Text("Weekly review · ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}", style = MaterialTheme.typography.titleSmall)
+        Text(w.headline, style = MaterialTheme.typography.titleLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Next week's focus and details", style = MaterialTheme.typography.labelLarge, color = ink(Tint.PURPLE), modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = ink(Tint.PURPLE))
         }
     }
 }
@@ -227,68 +242,69 @@ fun WeeklyCard(w: com.bennybar.runnersidekick.data.remote.WeeklyReport, onOpen: 
 @Composable
 fun InsightCard(i: Insight, emphasised: Boolean, onMethod: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val container = if (emphasised) cs.surfaceContainerHigh else cs.surfaceContainer
-    val (icon, shape) = categoryStyle(i.category)
-    val accent = accentFor(i.category)
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = container, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(icon, shape, Modifier.size(44.dp),
-                    container = if (emphasised) accent?.container ?: cs.primary else cs.secondaryContainer,
-                    content = if (emphasised) accent?.content ?: cs.onPrimary else cs.onSecondaryContainer)
-                Spacer(Modifier.width(12.dp))
-                Text(i.question, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
-                if (i.verdict == "pattern" && i.novelty in setOf("new", "changed")) {
-                    Surface(shape = MaterialTheme.shapes.small, color = cs.tertiaryContainer) {
-                        Text(if (i.novelty == "new") "New" else "Changed", style = MaterialTheme.typography.labelMedium,
-                            color = cs.onTertiaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                    }
+    val (icon, _) = categoryStyle(i.category)
+    val accent = accentFor(i.category).takeIf { emphasised }
+    Tile(spacing = 10.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(shape = RoundedCornerShape(12.dp), color = accent?.container ?: cs.surfaceContainerHighest) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, Modifier.size(16.dp), tint = accent?.content ?: cs.onSurface)
+                    Spacer(Modifier.width(6.dp))
+                    Text(i.category.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelMedium, color = accent?.content ?: cs.onSurface)
                 }
             }
-            Text(i.headline, style = if (emphasised) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge)
-            i.chart?.let { InsightChart(it, Modifier.fillMaxWidth()) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(listOfNotNull(i.sampleSize?.let { "$it runs" },
-                    when (i.confidence) { "consistent" -> "held on newer data"; "emerging" -> "emerging"; else -> null })
-                    .joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
-                TextButton(onClick = onMethod) { Text("Details") }
+            if (i.verdict == "pattern" && i.novelty in setOf("new", "changed")) {
+                Surface(shape = RoundedCornerShape(12.dp), color = cs.surfaceContainerHighest) {
+                    Text(if (i.novelty == "new") "New" else "Changed", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                }
             }
+        }
+        Text(i.question, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+        Text(i.headline, style = if (emphasised) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
+        i.chart?.let { InsightChart(it, Modifier.fillMaxWidth()) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(listOfNotNull(i.sampleSize?.let { "$it runs" },
+                when (i.confidence) { "consistent" -> "held on newer data"; "emerging" -> "emerging"; else -> null })
+                .joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, modifier = Modifier.weight(1f))
+            TextButton(onClick = onMethod) { Text("Details") }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MethodSheet(i: Insight, onState: (String?) -> Unit, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val cs = MaterialTheme.colorScheme
+    DetailPage(if (i.verdict == "pattern") "Pattern" else "Details", onDismiss) {
+        Column(Modifier.padding(horizontal = 12.dp).padding(top = 4.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(i.question, style = MaterialTheme.typography.headlineSmall)
-            Text(i.headline, style = MaterialTheme.typography.titleMedium)
-            if (i.detail.isNotBlank()) Text(i.detail, style = MaterialTheme.typography.bodyMedium)
-            i.practical?.let {
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.secondaryContainer) {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(14.dp))
-                }
-            }
-            Group(title = "Method") { custom { Text(i.method, style = MaterialTheme.typography.bodyMedium) } }
-            if (i.confounders.isNotEmpty()) Group(title = "What else could explain it") {
-                i.confounders.forEach { c -> row(c) }
-            }
-            // Marking a pattern lives here, not on the card
-            if (i.verdict == "pattern") Row(verticalAlignment = Alignment.CenterVertically) {
-                if (i.userState == null) {
-                    TextButton(onClick = { onState("working_on") }) { Text("I'm working on it") }
-                    TextButton(onClick = { onState("dismissed"); onDismiss() }) { Text("Dismiss") }
-                } else {
-                    Text(if (i.userState == "working_on") "You're working on this" else "Dismissed", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp))
-                    TextButton(onClick = { onState(null) }) { Text("Undo") }
-                }
-            }
-            Text(listOfNotNull(i.sampleSize?.let { "Sample size $it" }, i.evidence.dateRange.takeIf { it.size == 2 }?.let { "${it[0]} – ${it[1]}" },
-                i.algorithmVersion, "Associations only, not causes or medical advice").joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(i.headline, style = MaterialTheme.typography.bodyLarge)
+            if (i.detail.isNotBlank()) Text(i.detail, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
         }
+        i.practical?.let {
+            Tile(tint = Tint.GREEN) {
+                Text("Try this", style = MaterialTheme.typography.titleSmall)
+                Text(it, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Group(title = "Method") { custom { Text(i.method, style = MaterialTheme.typography.bodyMedium) } }
+        if (i.confounders.isNotEmpty()) Group(title = "What else could explain it") {
+            i.confounders.forEach { c -> row(c) }
+        }
+        // Marking a pattern lives here, not on the card
+        if (i.verdict == "pattern") Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (i.userState == null) {
+                OutlinedButton(onClick = { onState("working_on") }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("I'm working on it") }
+                OutlinedButton(onClick = { onState("dismissed"); onDismiss() }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Dismiss") }
+            } else {
+                Text(if (i.userState == "working_on") "You're working on this" else "Dismissed", style = MaterialTheme.typography.labelLarge,
+                    color = cs.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 12.dp))
+                OutlinedButton(onClick = { onState(null) }, Modifier.heightIn(min = 48.dp)) { Text("Undo") }
+            }
+        }
+        Text(listOfNotNull(i.sampleSize?.let { "Sample size $it" }, i.evidence.dateRange.takeIf { it.size == 2 }?.let { "${it[0]} – ${it[1]}" },
+            i.algorithmVersion, "Associations only, not causes or medical advice").joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
     }
 }
 
@@ -379,26 +395,32 @@ fun InsightChart(chart: JsonObject, modifier: Modifier = Modifier) {
     }
 }
 
+/** Each stat's tile colour, by its kind of data: running volume and intensity orange, pace blue, heart rate pink. */
+private fun statTint(id: String) = when (id) {
+    "pace_s_per_km" -> Tint.BLUE
+    "avg_hr" -> Tint.PINK
+    else -> Tint.ORANGE
+}
 
 /** The key numbers of the last 4 weeks, each with its change against the 4 weeks before. */
 @Composable
 private fun StatsGrid(st: com.bennybar.runnersidekick.data.remote.Stats) {
     val cs = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Last 4 weeks", style = MaterialTheme.typography.titleSmall, color = cs.primary, modifier = Modifier.padding(start = 4.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel("Last 4 weeks")
         st.items.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 pair.forEach { s ->
-                    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.weight(1f)) {
-                        Column(Modifier.padding(14.dp)) {
-                            Text(s.label, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                            Text(s.value, style = MaterialTheme.typography.titleLarge)
-                            s.change?.let { c ->
-                                // Green when the change is in the better direction (lower pace/HR/hard share), neutral otherwise
-                                val good = when (s.higherIs) { "lower" -> c < 0; "higher" -> c > 0; else -> null }
-                                Text((if (c > 0) "+" else "") + "$c% vs before", style = MaterialTheme.typography.labelMedium,
-                                    color = when (good) { true -> com.bennybar.runnersidekick.ui.theme.LocalDataColors.current.pace; false -> cs.tertiary; else -> cs.onSurfaceVariant })
-                            }
+                    Tile(Modifier.weight(1f).fillMaxHeight(), tint = statTint(s.id), spacing = 2.dp) {
+                        Text(s.label, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                        Text(s.value, style = MaterialTheme.typography.headlineSmall, maxLines = 1)
+                        s.change?.let { c ->
+                            // Said in words and coloured: green in the better direction (lower pace/HR/hard share), orange the other way
+                            val good = if (c == 0) null else when (s.higherIs) { "lower" -> c < 0; "higher" -> c > 0; else -> null }
+                            Text(if (c == 0) "Same as before" else (if (c > 0) "+" else "") + "$c% vs before" +
+                                when (good) { true -> " · better"; false -> " · worse"; else -> "" },
+                                style = MaterialTheme.typography.labelMedium, fontWeight = if (good != null) FontWeight.SemiBold else null,
+                                color = when (good) { true -> ink(Tint.GREEN); false -> ink(Tint.ORANGE); else -> cs.onSurfaceVariant })
                         }
                     }
                 }

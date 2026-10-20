@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,7 +33,11 @@ import com.bennybar.runnersidekick.data.remote.Fitness
 import com.bennybar.runnersidekick.data.remote.TrainingStatus
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.components.Group
-import com.bennybar.runnersidekick.ui.components.ShapeBadge
+import com.bennybar.runnersidekick.ui.components.SectionLabel
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.LocalDataColors
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 
 /** Garmin's training-status phrases (e.g. "OVERREACHING_3") as Garmin names them in its app. */
 fun trainingStatusLabel(phrase: String?): String? = phrase?.substringBefore('_')?.let {
@@ -68,44 +74,47 @@ private fun clock(s: Double?): String {
 fun FitnessSection(f: Fitness, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val g = f.garmin
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val recs = listOf("1k", "5k", "10k", "half").mapNotNull { k -> f.records[k]?.takeIf { it.best != null } }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (g != null || recs.isNotEmpty()) SectionLabel("Fitness")
         if (g != null) {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        ShapeBadge(Icons.Outlined.MonitorHeart, MaterialShapes.Cookie9Sided, Modifier.size(44.dp), container = cs.primary, content = cs.onPrimary)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Garmin training status", style = MaterialTheme.typography.titleLarge)
-                            Text("Calculated by Garmin", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                        }
+            Tile(tint = Tint.BLUE, spacing = 14.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.MonitorHeart, null, Modifier.size(22.dp), tint = ink(Tint.BLUE))
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("Garmin training status", style = MaterialTheme.typography.titleSmall)
+                        Text("Calculated by Garmin", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     }
-                    // VO2 max lives on Today and in Compare; this card is Garmin's view of your training
-                    g.trainingStatus?.let { st -> StatusBlock(st, Modifier.fillMaxWidth()) }
-                    g.trainingStatus?.let { st -> LoadBar(st) }
-                    g.racePredictions?.let { r ->
-                        Text("Garmin race predictions", style = MaterialTheme.typography.titleSmall)
-                        Row {
-                            listOf("5K" to r.k5, "10K" to r.k10, "Half" to r.half, "Marathon" to r.marathon).forEach { (l, v) ->
-                                Column(Modifier.weight(1f)) {
-                                    Text(clock(v), style = MaterialTheme.typography.titleLarge)
-                                    Text(l, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                                }
+                }
+                // VO2 max lives on Today and in Compare; this card is Garmin's view of your training
+                g.trainingStatus?.let { st -> StatusBlock(st, Modifier.fillMaxWidth()) }
+                g.trainingStatus?.let { st -> LoadBar(st) }
+                g.racePredictions?.let { r ->
+                    Text("Garmin race predictions", style = MaterialTheme.typography.titleSmall)
+                    Row {
+                        listOf("5K" to r.k5, "10K" to r.k10, "Half" to r.half, "Marathon" to r.marathon).forEach { (l, v) ->
+                            Column(Modifier.weight(1f)) {
+                                Text(l, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                                Text(clock(v), style = MaterialTheme.typography.titleLarge)
                             }
                         }
                     }
-                    listOfNotNull(
-                        loadBalanceLabel(g.loadBalance?.phrase)?.let { "Load balance: $it" },
-                        g.heatAcclimationPct?.let { "Heat acclimation: ${it.toInt()}%" },
-                    ).takeIf { it.isNotEmpty() }?.let {
-                        Text(it.joinToString(" · ") + " (Garmin)", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                    }
+                }
+                listOfNotNull(
+                    loadBalanceLabel(g.loadBalance?.phrase)?.let { "Load balance: $it" },
+                    g.heatAcclimationPct?.let { "Heat acclimation: ${it.toInt()}%" },
+                ).takeIf { it.isNotEmpty() }?.let {
+                    Text(it.joinToString(" · ") + " (Garmin)", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 }
             }
         }
-        val recs = listOf("1k", "5k", "10k", "half").mapNotNull { k -> f.records[k]?.takeIf { it.best != null } }
         if (recs.isNotEmpty()) {
-            Group(title = "Personal records · fastest segment inside any synced run") {
+            Group(tint = Tint.AMBER) {
+                custom {
+                    Text("Personal records", style = MaterialTheme.typography.titleSmall)
+                    Text("Fastest segment inside any synced run", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                }
                 recs.forEach { r ->
                     val b = r.best!!
                     row("${r.label}: ${clock(b.elapsedS)}", supporting = "Set ${Format.shortDate(b.date)} · improved ${r.progression.size - 1} times",
@@ -121,13 +130,17 @@ private fun StatusBlock(st: TrainingStatus, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val label = trainingStatusLabel(st.phrase) ?: return
     val warn = label in setOf("Overreaching", "Strained", "Unproductive", "Detraining")
-    Column(modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Training status", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-        Surface(shape = MaterialTheme.shapes.small, color = if (warn) cs.errorContainer else cs.primaryContainer) {
-            Text(label, style = MaterialTheme.typography.titleLarge, color = if (warn) cs.onErrorContainer else cs.onPrimaryContainer,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(12.dp),
+                color = if (warn) Tint.ORANGE.hue.copy(alpha = 0.28f) else cs.surfaceContainer.copy(alpha = 0.75f)) {
+                Text(label, style = MaterialTheme.typography.titleLarge, color = if (warn) ink(Tint.ORANGE) else cs.onSurface,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            st.since?.let { Text("since ${Format.shortDate(it)}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant) }
         }
-        st.since?.let { Text("since ${Format.shortDate(it)}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
     }
 }
 
@@ -138,6 +151,8 @@ private fun LoadBar(st: TrainingStatus) {
     val lo = st.chronicMin ?: return
     val hi = st.chronicMax ?: return
     val cs = MaterialTheme.colorScheme
+    val accent = ink(Tint.BLUE)
+    val attention = LocalDataColors.current.attention
     val top = maxOf(acute, hi) * 1.15
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Acute load ${acute.toInt()} · Garmin's optimal range ${lo.toInt()}–${hi.toInt()}",
@@ -146,11 +161,11 @@ private fun LoadBar(st: TrainingStatus) {
             contentDescription = "Acute load ${acute.toInt()}, Garmin optimal range ${lo.toInt()} to ${hi.toInt()}"
         }) {
             fun x(v: Double) = (v / top * size.width).toFloat()
-            drawRoundRect(cs.surfaceVariant, Offset.Zero, size, CornerRadius(20f, 20f))
-            drawRoundRect(cs.primary.copy(alpha = 0.35f), Offset(x(lo), 0f), Size(x(hi) - x(lo), size.height), CornerRadius(20f, 20f))
-            drawCircle(if (acute > hi) cs.error else cs.primary, size.height * 0.7f, Offset(x(acute), size.height / 2))
+            drawRoundRect(cs.onSurface.copy(alpha = 0.08f), Offset.Zero, size, CornerRadius(20f, 20f))
+            drawRoundRect(accent.copy(alpha = 0.35f), Offset(x(lo), 0f), Size(x(hi) - x(lo), size.height), CornerRadius(20f, 20f))
+            drawCircle(if (acute > hi) attention else accent, size.height * 0.7f, Offset(x(acute), size.height / 2))
         }
         Text(if (acute > hi) "Above Garmin's optimal range" else if (acute < lo) "Below Garmin's optimal range" else "Inside Garmin's optimal range",
-            style = MaterialTheme.typography.labelMedium, color = if (acute > hi) cs.error else cs.onSurfaceVariant)
+            style = MaterialTheme.typography.labelMedium, color = if (acute > hi) attention else cs.onSurfaceVariant)
     }
 }

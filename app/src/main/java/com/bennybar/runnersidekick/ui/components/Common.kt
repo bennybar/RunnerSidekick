@@ -18,7 +18,6 @@ import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -103,8 +102,7 @@ fun EvidenceSheet(finding: Finding, note: com.bennybar.runnersidekick.data.remot
             note?.let { NoteBlock(it) }
             Text(finding.statement, style = MaterialTheme.typography.bodyLarge)
             finding.interpretation?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            HorizontalDivider()
-            EvidenceRows {
+            Tile(spacing = 6.dp) { EvidenceRows {
                 finding.observed?.value?.let { Row("Observed", Format.metricValue(finding.metric, it) + (finding.observed.date?.let { d -> " on ${Format.shortDate(d)}" } ?: "")) }
                 finding.observed?.label?.let { Row("Garmin status", "$it (Garmin)") }
                 finding.comparison?.let { c ->
@@ -119,7 +117,7 @@ fun EvidenceSheet(finding: Finding, note: com.bennybar.runnersidekick.data.remot
                 finding.sampleSize?.let { Row("Sample size", "$it ${if (finding.category == "running") "records" else "days"}") }
                 Row("Derived", if (finding.derived) "Yes — calculated by Runner Sidekick" else "No — as reported by the source")
                 Row("Algorithm", finding.algorithmVersion)
-            }
+            } }
             if (finding.limitations.isNotEmpty()) {
                 Text("Limitations", style = MaterialTheme.typography.titleSmall)
                 finding.limitations.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -148,12 +146,9 @@ fun EvidenceRows(content: @Composable EvidenceRowsScope.() -> Unit) {
 /** The plain verdict for a reading (how good it is) and what it means. */
 @Composable
 fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
-    val cs = MaterialTheme.colorScheme
-    Surface(shape = MaterialTheme.shapes.large, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(n.verdict, style = MaterialTheme.typography.titleMedium, color = cs.onSecondaryContainer)
-            Text(n.meaning, style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer)
-        }
+    Tile(tint = com.bennybar.runnersidekick.ui.theme.Tint.TEAL, spacing = 6.dp) {
+        Text(n.verdict, style = MaterialTheme.typography.titleMedium)
+        Text(n.meaning, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -161,10 +156,12 @@ fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
 @Composable
 fun VerdictChip(verdict: String?, label: String? = null) {
     val cs = MaterialTheme.colorScheme
+    val dark = com.bennybar.runnersidekick.ui.theme.LocalDark.current
+    fun of(t: com.bennybar.runnersidekick.ui.theme.Tint) = t.hue.copy(alpha = if (dark) 0.28f else 0.20f)
     val (text, bg, fg) = when (verdict) {
-        "good" -> Triple("Good", cs.primaryContainer, cs.onPrimaryContainer)
-        "ok" -> Triple("OK", cs.secondaryContainer, cs.onSecondaryContainer)
-        "low" -> Triple("Low", cs.tertiaryContainer, cs.onTertiaryContainer)
+        "good" -> Triple("Good", of(com.bennybar.runnersidekick.ui.theme.Tint.GREEN), cs.onSurface)
+        "ok" -> Triple("OK", of(com.bennybar.runnersidekick.ui.theme.Tint.AMBER), cs.onSurface)
+        "low" -> Triple("Low", of(com.bennybar.runnersidekick.ui.theme.Tint.PINK), cs.onSurface)
         "info" -> Triple("Info", cs.surfaceContainerHighest, cs.onSurfaceVariant)
         else -> Triple("—", cs.surfaceContainerHighest, cs.onSurfaceVariant)
     }
@@ -205,16 +202,19 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
         if (isRefreshing && p != null) {
             // A real share of the work, with what's being done and the percentage
             val shown by androidx.compose.animation.core.animateFloatAsState(p.fraction, label = "progress")
-            Column(Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth()) {
-                androidx.compose.material3.LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(3.dp))
+            androidx.compose.material3.LinearProgressIndicator(progress = { shown },
+                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))
+            // What's being done, just above the floating tab bar (the page's own header buttons sit at the top)
+            Column(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = LocalNavBarPadding.current + 8.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                 androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier.align(androidx.compose.ui.Alignment.End).padding(top = 4.dp, end = 12.dp)) {
+                    modifier = Modifier.padding(top = 4.dp)) {
                     Text("${p.label} · ${(shown * 100).toInt()}%", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
                 }
                 p.hint?.let {
                     androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.End).padding(top = 4.dp, start = 48.dp, end = 12.dp)) {
+                        modifier = Modifier.padding(top = 4.dp, start = 48.dp, end = 48.dp)) {
                         Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                     }

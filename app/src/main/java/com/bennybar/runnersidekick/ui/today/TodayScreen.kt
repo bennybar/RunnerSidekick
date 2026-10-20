@@ -3,13 +3,12 @@ package com.bennybar.runnersidekick.ui.today
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
-import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.toShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -20,15 +19,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.TrendingDown
 import androidx.compose.material.icons.automirrored.outlined.TrendingFlat
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
@@ -38,28 +38,24 @@ import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LinkOff
-import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -67,11 +63,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,21 +81,29 @@ import com.bennybar.runnersidekick.data.remote.MorningReport
 import com.bennybar.runnersidekick.data.remote.Status
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.TodayVm
+import com.bennybar.runnersidekick.ui.components.BigValue
 import com.bennybar.runnersidekick.ui.components.DemoBadge
+import com.bennybar.runnersidekick.ui.components.DetailPage
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.EvidenceSheet
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.SectionLabel
+import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.components.animatedItem
 import com.bennybar.runnersidekick.ui.components.MetricTile
 import com.bennybar.runnersidekick.ui.components.OfflineBanner
 import com.bennybar.runnersidekick.ui.components.Sparkline
 import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
 private val TILE_METRICS = listOf("sleep_duration", "resting_hr", "hrv_overnight_avg", "running_moving_time_7d")
+private val TILE_TINTS = mapOf("sleep_duration" to Tint.INDIGO, "resting_hr" to Tint.PINK, "hrv_overnight_avg" to Tint.PINK,
+    "running_moving_time_7d" to Tint.ORANGE)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -112,8 +119,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val units = settings?.units ?: Units.METRIC
     val snackbar = remember { SnackbarHostState() }
     var evidence by remember { mutableStateOf<Finding?>(null) }
-    var sheet by rememberSaveable { mutableStateOf<String?>(null) } // checkin | why | briefing
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var sheet by rememberSaveable { mutableStateOf<String?>(null) } // the open detail page: readiness | briefing | health | fitness | vo2 | race | focus
     val listState = rememberLazyListState()
     val coach by vm.coach.collectAsStateWithLifecycle()
     val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
@@ -123,37 +129,26 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
     val report = today?.value
     val unwellPending by vm.unwellPending.collectAsStateWithLifecycle()
-    /** One readiness as shown, for the card and its sheet alike: rest while "not feeling well" isn't in the briefing yet */
+    /** One readiness as shown, for the card and its page alike: rest while "not feeling well" isn't in the briefing yet */
     fun shownReadiness(r: com.bennybar.runnersidekick.data.remote.Score) =
         if (unwellPending) r.copy(score = null, label = "Low", headline = "Take it easy or rest", holdReason = "you're not feeling well", allows = "rest") else r
 
+    // The big title with the sync button above it; it scrolls with the tiles
+    val header: @Composable () -> Unit = {
+        Header(report, status?.value, today?.fetchedAt, offline, busy) { vm.syncNow() }
+    }
+
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = {
-            LargeTopAppBar(
-                title = { Text(report?.localDate?.let { Format.longDate(it) } ?: "Today", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                actions = {
-                    if (status?.value?.synthetic == true) DemoBadge()
-                    // Garmin syncs at most every 15 minutes (the server's cooldown); the button says when the next one can run
-                    val wait = com.bennybar.runnersidekick.ui.components.syncWait(status?.value?.syncNextAllowedAt)
-                    androidx.compose.material3.TextButton(onClick = vm::syncNow, enabled = !busy && wait == null) {
-                        Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
-                        Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: if (status?.value?.watch == "samsung") "Sync watch" else "Sync Garmin")
-                    }
-                },
-                scrollBehavior = scroll,
-            )
-        },
         snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
     ) { padding ->
         com.bennybar.runnersidekick.ui.components.RefreshBox(isRefreshing = busy && report != null, onRefresh = vm::refresh, modifier = Modifier.padding(padding).fillMaxSize()) {
             if (report == null) {
-                NoReport(busy, settings?.hasToken == false, onOpenSettings)
+                NoReport(busy, settings?.hasToken == false, onOpenSettings, header)
                 return@RefreshBox
             }
-            LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                animatedItem(key = "fresh") { Freshness(status?.value, today?.fetchedAt, report, offline) }
+            LazyColumn(state = listState, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                animatedItem(key = "header") { header() }
                 status?.value?.connection?.let { c -> if (c.state != "connected") animatedItem(key = "connection") { ConnectionNotice(c.state, c.detail, onOpenSettings) } }
                 // A simple overview: scores, the day's call, the AI's one line, what stands out, readings, the latest run
                 // "How am I and what do I do today" first (readiness, then the next run), then the slower health and fitness scores
@@ -169,7 +164,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                     NextRunCard(if (pending) n.copy(date = todayDate, dayLabel = "Today", kind = "rest", title = "Rest or a short walk", distanceKm = null,
                         minutes = null, hr = null, pace = null, paceSPerKm = null, optional = false, caution = null,
                         why = listOf("you're not feeling well")) else n, units) } }
-                // This week: the race week (with a race goal) and the weekly focus, compact; the full cards open in a sheet
+                // This week: the race week (with a race goal) and the weekly focus, compact; the full cards open as pages
                 report.race?.let { r -> r.week?.let { w -> animatedItem(key = "raceweek") { RaceWeekStrip(r, w) { sheet = "race" } } } }
                 focus?.value?.let { f -> animatedItem(key = "focus") { FocusLine(f) { sheet = "focus" } } }
                 report.scores?.takeIf { it.status == "ok" }?.let { sc -> animatedItem(key = "scores") { ScoresCard(sc) { which -> sheet = which } } }
@@ -199,33 +194,64 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
             }
         }
     }
+    // Detail pages; one that leads to another screen closes first, so back from there comes to Today
     when (sheet) {
         "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
-            ScoreSheet(if (sheet == "health") "Healthy habits" else "Fitness", sc.scope[sheet!!], it, sc.basis, onDismiss = { sheet = null }) } }
-        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessSheet(shownReadiness(it), r.changes, onDismiss = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
+            ScorePage(if (sheet == "health") "Healthy habits" else "Fitness", if (sheet == "health") Tint.PURPLE else Tint.BLUE,
+                sc.scope[sheet!!], it, sc.basis, onBack = { sheet = null }) } }
+        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessPage(shownReadiness(it), r.changes, onBack = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
-            SheetColumn(onDismiss = { sheet = null }) {
-                Text("VO₂ max", style = MaterialTheme.typography.headlineSmall)
+            DetailPage("VO₂ max", onBack = { sheet = null }) {
+                fitness?.value?.let { f -> chosenVo2(f)?.let { v ->
+                    PageHead("%.1f".format(v), "ml/kg/min",
+                        if (f.vo2Maker == "Runner Sidekick") "Runner Sidekick's estimate" else "${f.vo2Maker}'s latest reading")
+                } }
+                fitness?.value?.let { f -> Tile(tint = Tint.TEAL, spacing = 12.dp) { Vo2Progress(f.vo2maxSeries, f.vo2Maker, r.localDate) } }
                 r.readingNotes["vo2max"]?.let { com.bennybar.runnersidekick.ui.components.NoteBlock(it) }
-                TextButton(onClick = { sheet = null; com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() }) {
-                    Text("Compare with your age group")
-                }
-                fitness?.value?.let { f -> Vo2Progress(f.vo2maxSeries, f.vo2Maker, r.localDate) }
+                OutlinedButton(onClick = { sheet = null; com.bennybar.runnersidekick.ui.insights.InsightsTab.requested.value = 1; onOpenInsights() },
+                    modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Compare with your age group") }
             }
         }
-        "briefing" -> report?.let { BriefingSheet(it, onDismiss = { sheet = null }) { f -> sheet = null; evidence = f } }
-        "race" -> report?.race?.let { r -> r.week?.let { w -> SheetColumn(onDismiss = { sheet = null }) {
+        // Back from the full briefing returns to readiness, where it opens from; a finding's "Show why" opens over it
+        "briefing" -> report?.let { BriefingPage(it, onBack = { sheet = "readiness" }) { f -> evidence = f } }
+        "race" -> report?.race?.let { r -> r.week?.let { w -> DetailPage("Race week", onBack = { sheet = null }) {
             RaceWeekCard(r, w) { id -> sheet = null; onOpenRun(id) } } } }
-        "focus" -> focus?.value?.let { f -> SheetColumn(onDismiss = { sheet = null }) {
+        "focus" -> focus?.value?.let { f -> DetailPage("This week's focus", onBack = { sheet = null }) {
             FocusCard(f, onChoose = { k -> vm.chooseFocus(k) }, onOpenRun = { id -> sheet = null; onOpenRun(id) }) } }
     }
     evidence?.let { f -> EvidenceSheet(f, today?.value?.readingNotes?.get(f.metric)) { evidence = null } }
 }
 
+/** "Today", the briefing's date and when the watch last synced, with the sync button top right. */
+@Composable
+private fun Header(report: MorningReport?, status: Status?, fetchedAt: Instant?, offline: Boolean, busy: Boolean, onSync: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (status?.synthetic == true) DemoBadge()
+            // Garmin syncs at most every 15 minutes (the server's cooldown); the button says when the next one can run
+            val wait = com.bennybar.runnersidekick.ui.components.syncWait(status?.syncNextAllowedAt)
+            FilledTonalButton(onClick = onSync, enabled = !busy && wait == null,
+                colors = ButtonDefaults.filledTonalButtonColors(containerColor = cs.surfaceContainer, contentColor = cs.onSurface)) {
+                Icon(Icons.Outlined.Sync, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (busy) "Syncing…" else wait?.let { "Next sync $it" } ?: if (status?.watch == "samsung") "Sync watch" else "Sync Garmin")
+            }
+        }
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 22.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Today", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            report?.localDate?.let { Text(Format.longDate(it), style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant) }
+            report?.let { Freshness(status, it) }
+        }
+        if (offline) OfflineBanner("Offline: showing the briefing saved ${Format.ago(fetchedAt)}.")
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun NoReport(busy: Boolean, notConnected: Boolean, onOpenSettings: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize()) {
+private fun NoReport(busy: Boolean, notConnected: Boolean, onOpenSettings: () -> Unit, header: @Composable () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp)) {
+        item { header() }
         item {
             when {
                 notConnected -> EmptyState(Icons.Outlined.LinkOff, "Not signed in", "Sign in to load your data.") {
@@ -242,34 +268,47 @@ private fun NoReport(busy: Boolean, notConnected: Boolean, onOpenSettings: () ->
     }
 }
 
+/** A small rounded label on a tile: a distance, a status, a day. */
 @Composable
-private fun Pill(icon: ImageVector, text: String, attention: Boolean = false) {
-    val bg = if (attention) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
-    val fg = if (attention) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(shape = MaterialTheme.shapes.small, color = bg) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, Modifier.size(16.dp), tint = fg)
-            Spacer(Modifier.width(6.dp))
-            Text(text, style = MaterialTheme.typography.labelLarge, color = fg)
-        }
+internal fun TagChip(text: String, modifier: Modifier = Modifier, container: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                     content: Color = MaterialTheme.colorScheme.onSurface) {
+    Surface(shape = RoundedCornerShape(12.dp), color = container, contentColor = content, modifier = modifier) {
+        Text(text, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
     }
 }
 
+/** A thin rounded progress bar. */
 @Composable
-private fun Freshness(status: Status?, fetchedAt: Instant?, report: MorningReport, offline: Boolean) {
+private fun ProgressBar(fraction: Float, fill: Brush, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(6.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), CircleShape)) {
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(6.dp).background(fill, CircleShape))
+    }
+}
+
+/** The headline number of a detail page, with a line or two under it. */
+@Composable
+private fun PageHead(value: String, unit: String?, vararg lines: String?) {
+    Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        BigValue(value, unit, style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Bold))
+        lines.filterNotNull().forEach { Text(it, style = MaterialTheme.typography.bodyLarge) }
+    }
+}
+
+/** The sync line under the date: "Samsung synced 2 h ago", flagged in words and with a warning icon after 12 h. */
+@Composable
+private fun Freshness(status: Status?, report: MorningReport) {
     val lastSource = status?.connection?.lastSuccessAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
     val stale = lastSource == null || Duration.between(lastSource, Instant.now()).toHours() >= 12
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Pill(if (stale) Icons.Outlined.WarningAmber else Icons.Outlined.CheckCircle,
-                (if (status?.synthetic == true) "Demo source synced " else if (status?.watch == "samsung") "Samsung synced " else "Garmin synced ") + Format.ago(lastSource) +
-                    (if (report.provisional) " · last night not in yet" else ""), attention = stale)
-        }
-        if (offline) OfflineBanner("Offline: showing the briefing saved ${Format.ago(fetchedAt)}.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (stale) Icons.Outlined.WarningAmber else Icons.Outlined.CheckCircle, null, Modifier.size(16.dp),
+            tint = if (stale) ink(Tint.ORANGE) else ink(Tint.GREEN))
+        Spacer(Modifier.width(6.dp))
+        Text((if (status?.synthetic == true) "Demo source synced " else if (status?.watch == "samsung") "Samsung synced " else "Garmin synced ") + Format.ago(lastSource) +
+            (if (report.provisional) " · last night not in yet" else ""), style = MaterialTheme.typography.bodyMedium,
+            color = if (stale) ink(Tint.ORANGE) else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ConnectionNotice(state: String, detail: String?, onOpenSettings: () -> Unit) {
     val (title, body) = when (state) {
@@ -278,10 +317,21 @@ private fun ConnectionNotice(state: String, detail: String?, onOpenSettings: () 
         "not_configured" -> "Garmin isn't connected" to "Tap to connect Garmin in Settings and download your runs, sleep and health data."
         else -> "Last sync failed" to (detail ?: "Will retry later.")
     }
-    Group { row(title, supporting = body, icon = Icons.Outlined.LinkOff, iconShape = MaterialShapes.Burst, onClick = onOpenSettings) }
+    Tile(tint = Tint.ORANGE, onClick = onOpenSettings) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.LinkOff, null, tint = ink(Tint.ORANGE))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
-private val TONE_ACCENT = mapOf("attention" to "recovery", "positive" to "fitness", "info" to "sleep")
+// Attention reads orange, as everywhere else; the icon says the tone too
+private val TONE_ACCENT = mapOf("attention" to "training", "positive" to "fitness", "info" to "sleep")
 
 /** What stands out today: Garmin's verdict, load, new bests, VO2 max movement, focus, comparisons. Attention first. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -306,11 +356,15 @@ private fun StandsOut(items: List<com.bennybar.runnersidekick.data.remote.Highli
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CoachTeaser(summary: String, note: String, onOpen: () -> Unit) {
-    Group {
-        row("From your AI coach", overline = note, supporting = summary, icon = Icons.Outlined.Psychology, iconShape = MaterialShapes.Flower, onClick = onOpen)
+    Tile(onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("From your AI coach", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End,
+                modifier = Modifier.padding(start = 8.dp))
+        }
+        Text(summary, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -339,18 +393,30 @@ private fun dailySeries(f: Finding, endDate: String): List<Double?> {
     return (13 downTo 0).map { byDate[end.minusDays(it.toLong()).toString()] }
 }
 
-/** VO2 max progress in the VO2 max sheet: the chosen source's readings since 3 months, 6 months or a year ago. */
+/** The VO2 max chosen in Settings: Runner Sidekick's (its series), else Garmin's current one, or the Samsung watch's latest */
+private fun chosenVo2(fitness: com.bennybar.runnersidekick.data.remote.Fitness?): Double? {
+    val maker = fitness?.vo2Maker ?: "Garmin"
+    return (if (maker == "Runner Sidekick") null else fitness?.garmin?.vo2max?.value) ?: fitness?.vo2maxSeries?.lastOrNull()?.value
+}
+
+/** VO2 max progress on the VO2 max page: the chosen source's readings since 3 months, 6 months or a year ago. */
 @Composable
 private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Point>, maker: String, today: String) {
     val cs = MaterialTheme.colorScheme
     var months by rememberSaveable { mutableStateOf(3) }
     val from = java.time.LocalDate.parse(today).minusMonths(months.toLong())
     val pts = series.filter { !java.time.LocalDate.parse(it.date).isBefore(from) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Progress", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Progress", style = MaterialTheme.typography.titleSmall)
+        // The range as one segmented control
+        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest, CircleShape).padding(3.dp)) {
             listOf(3 to "3 months", 6 to "6 months", 12 to "1 year").forEach { (m, l) ->
-                androidx.compose.material3.FilterChip(months == m, onClick = { months = m }, label = { Text(l) })
+                Surface(selected = months == m, onClick = { months = m }, shape = CircleShape,
+                    color = if (months == m) cs.surface else Color.Transparent, modifier = Modifier.weight(1f).height(40.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(l, style = MaterialTheme.typography.labelLarge, color = if (months == m) cs.onSurface else cs.onSurfaceVariant)
+                    }
+                }
             }
         }
         if (pts.size < 2) {
@@ -365,7 +431,7 @@ private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Poi
         val hi = kotlin.math.ceil(pts.maxOf { it.value } + 0.5)
         val d0 = java.time.LocalDate.parse(pts.first().date).toEpochDay().toDouble()
         val span = (java.time.LocalDate.parse(pts.last().date).toEpochDay() - d0).coerceAtLeast(1.0)
-        val line = cs.primary
+        val line = ink(Tint.TEAL)
         val grid = cs.outlineVariant
         Row {
             Column(Modifier.width(36.dp).height(140.dp)) {
@@ -384,7 +450,7 @@ private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Poi
                 drawLine(grid, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), pathEffect = dash)
                 val path = androidx.compose.ui.graphics.Path()
                 pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p), y(p.value)) else path.lineTo(x(p), y(p.value)) }
-                drawPath(path, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+                drawPath(path, line, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 pts.forEach { p -> drawCircle(line, 3.dp.toPx(), androidx.compose.ui.geometry.Offset(x(p), y(p.value))) }
             }
         }
@@ -401,16 +467,15 @@ private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Poi
 @Composable
 private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
                      onTap: (Finding) -> Unit) {
-    // The VO2 max chosen in Settings: Runner Sidekick's (its series), else Garmin's current one, or the Samsung watch's latest
     val maker = fitness?.vo2Maker ?: "Garmin"
-    val vo2 = (if (maker == "Runner Sidekick") null else fitness?.garmin?.vo2max?.value) ?: fitness?.vo2maxSeries?.lastOrNull()?.value
+    val vo2 = chosenVo2(fitness)
     // null marks the VO2 max tile's slot, right after the overnight readings
     val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Readings", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel("Readings")
         tiles.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // An odd last tile (usually VO2 max) takes the whole row
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 pair.forEach { f ->
                     if (f == null) {
                         // The chosen VO2 max (one decimal), with the change over about four weeks
@@ -420,12 +485,12 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
                         MetricTile(label = "VO₂ max", value = "%.1f".format(vo2!!), unit = null,
                             status = ch?.let { if (kotlin.math.abs(it) < 0.05) "Same as 4 weeks ago" else "%+.1f in 4 weeks".format(it) } ?: maker,
                             statusIcon = ch?.let { if (it > 0.05) Icons.AutoMirrored.Outlined.TrendingUp else if (it < -0.05) Icons.AutoMirrored.Outlined.TrendingDown
-                                else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false,
+                                else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false, tint = Tint.TEAL,
                             modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, %s".format(vo2, maker) },
                             onClick = onOpenFitness,
                             chart = if (series.size >= 2) {
                                 { Sparkline(series.takeLast(14).map { it.value }, Modifier.fillMaxWidth().height(32.dp),
-                                    color = MaterialTheme.colorScheme.primary, description = "VO2 max, recent $maker readings") }
+                                    color = ink(Tint.TEAL), description = "VO2 max, recent $maker readings") }
                             } else null)
                         return@forEach
                     }
@@ -439,10 +504,11 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
                         else -> Icons.AutoMirrored.Outlined.TrendingFlat
                     }
                     val band = f.comparison?.let { c -> if (c.q1 != null && c.q3 != null) c.q1 to c.q3 else null }
-                    val lineColor = if (flagged) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                    val tint = TILE_TINTS[f.metric] ?: Tint.NEUTRAL
+                    val lineColor = if (flagged) ink(Tint.ORANGE) else ink(tint)
                     MetricTile(
                         label = if (f.metric == "running_moving_time_7d") "Running, 7 days" else f.title,
-                        value = value, unit = unit, status = tileStatus(f), statusIcon = icon, flagged = flagged,
+                        value = value, unit = unit, status = tileStatus(f), statusIcon = icon, flagged = flagged, tint = tint,
                         modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "${f.title}. ${f.statement}" },
                         onClick = { onTap(f) },
                         chart = if (!f.sparkline.isNullOrEmpty()) {
@@ -451,38 +517,29 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
                         } else null,
                     )
                 }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SheetColumn(onDismiss: () -> Unit, content: @Composable () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) { content() }
-    }
-}
-
-@Composable
-private fun BriefingSheet(r: MorningReport, onDismiss: () -> Unit, onFinding: (Finding) -> Unit) {
-    SheetColumn(onDismiss) {
-        Text("Full briefing", style = MaterialTheme.typography.headlineSmall)
-        Group(title = "Findings") { r.findings.forEach { f -> row(f.title, supporting = f.statement, onClick = { onFinding(f) }) } }
+private fun BriefingPage(r: MorningReport, onBack: () -> Unit, onFinding: (Finding) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    DetailPage("Full briefing", onBack) {
+        Group(title = "Findings", tint = Tint.GREEN) { r.findings.forEach { f -> row(f.title, supporting = f.statement, onClick = { onFinding(f) }) } }
         if (r.garminContext.isNotEmpty()) {
             val origins = r.garminContext.map { it.origin }.distinct()
             Group(title = "From " + (origins.singleOrNull() ?: "your watches")) {
-                r.garminContext.forEach { g -> row(garminName(g.metric), supporting = "${g.value.roundToInt()}" + (g.label?.let { " · $it" } ?: "")) }
+                r.garminContext.forEach { g -> row(garminName(g.metric), trailing = {
+                    Text("${g.value.roundToInt()}" + (g.label?.let { " · $it" } ?: ""), style = MaterialTheme.typography.titleSmall)
+                }) }
             }
             Text("The watch's own scores, shown for context. They don't feed the suggestion, which avoids counting sleep and HRV twice.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
         }
-        HorizontalDivider()
         Text("Revision ${r.revision} · generated ${Format.ago(runCatching { Instant.parse(r.generatedAt) }.getOrNull())} · " +
             "rules ${r.recommendation.rulesVersion} (${r.recommendation.ruleId})", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp))
     }
 }
 
@@ -500,22 +557,26 @@ private fun garminName(metric: String) = when (metric) {
 private val SESSION_NAMES = mapOf("easy" to "Easy run", "long" to "Long run", "tempo" to "Tempo", "intervals" to "Intervals",
     "race_pace" to "Race pace", "strides" to "Easy + strides", "race" to "Race day", "rest" to "Rest")
 
+private fun daysToGo(d: Int) = if (d > 0) "$d days" else if (d == 0) "Today" else "Done"
+
 /** The week toward the race: each day's session, ticked off as runs come in. Recomputed daily from what was run. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
                          onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Group(title = "This week toward ${race.title ?: race.headline} · ${w.phase.replace('_', ' ')}") {
-        custom {
-            Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
-                style = MaterialTheme.typography.titleMedium)
-            w.targetMinutes?.takeIf { it > 0 }?.let { t ->  // a zero target would be a NaN progress
-                androidx.compose.material3.LinearProgressIndicator(progress = { (w.doneMinutes.toFloat() / t).coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            }
-            w.guardrail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.tertiary, modifier = Modifier.padding(top = 8.dp)) }
+    Tile(tint = Tint.AMBER) {
+        Text("This week toward ${race.title ?: race.headline}", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+        Text("${w.phase.replace('_', ' ').replaceFirstChar(Char::uppercase)} · ${daysToGo(race.daysToGo)}" + if (race.daysToGo > 0) " to go" else "",
+            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(w.targetMinutes?.let { "About $it min this week · ${w.doneMinutes} min done" } ?: "${w.doneMinutes} min done this week",
+            style = MaterialTheme.typography.bodyLarge)
+        w.targetMinutes?.takeIf { it > 0 }?.let { t ->  // a zero target would be a NaN progress
+            ProgressBar(w.doneMinutes.toFloat() / t, Brush.linearGradient(listOf(Tint.AMBER.hue, Tint.AMBER.hue)))
         }
+        w.guardrail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+    }
+    Group {
         w.sessions.forEach { s ->
             val day = LocalDate.parse(s.date).let { "${it.dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase)} ${it.dayOfMonth}" }
             val status = when (s.status) {
@@ -531,94 +592,103 @@ fun RaceWeekCard(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: co
             row("$day · $name" + (s.minutes?.let { " · ~$it min" } ?: "") + if (s.optional) " (optional)" else "",
                 supporting = listOfNotNull(s.text.takeIf { s.kind in setOf("tempo", "intervals", "race_pace", "strides") }, status).joinToString(" · ")
                     .ifBlank { null }, icon = when (s.status) {
-                    "done" -> Icons.Outlined.CheckCircle
+                    "done", "extra" -> Icons.Outlined.CheckCircle
                     "today" -> Icons.AutoMirrored.Outlined.DirectionsRun
+                    "moved" -> Icons.AutoMirrored.Outlined.ArrowForward
+                    "missed" -> Icons.Outlined.Close
                     else -> Icons.Outlined.EventNote
-                }, iconShape = MaterialShapes.Cookie4Sided,
-                accent = when (s.status) { "done" -> "fitness"; "missed" -> "recovery"; "today" -> "running"; else -> null },
+                }, iconShape = MaterialShapes.Circle,
+                accent = when (s.status) { "done", "extra" -> "running"; "moved" -> "fitness"; "missed" -> "recovery"; "today" -> "training"; else -> null },
                 onClick = s.sourceId?.let { id -> { onOpenRun(id) } })
         }
-        custom { w.basis?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) } }
     }
+    w.basis?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp)) }
 }
 
 
-/** Health and fitness out of 100, as two tonal tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
+/** Fitness and healthy habits out of 100, as two tinted tiles side by side, each with how it moved in 4 weeks. Tap one for its parts. */
 @Composable
 private fun ScoresCard(s: com.bennybar.runnersidekick.data.remote.Scores, onOpen: (String) -> Unit) {
-    val sc = com.bennybar.runnersidekick.ui.theme.LocalScoreColors.current
-    // Equal heights, and a fixed two-line subtitle, so both numbers and bars line up
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-        ScoreTile("Healthy habits", s.scope["health"], s.horizon["health"], s.health, sc.health.container, sc.health.content,
-            androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 28.dp, 8.dp), Modifier.weight(1f)) { onOpen("health") }
-        ScoreTile("Fitness", s.scope["fitness"], s.horizon["fitness"], s.fitness, sc.fitness.container, sc.fitness.content,
-            androidx.compose.foundation.shape.RoundedCornerShape(28.dp, 28.dp, 8.dp, 28.dp), Modifier.weight(1f)) { onOpen("fitness") }
+    // Equal heights, and a fixed two-line subtitle, so both numbers and rings line up
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+        ScoreTile("Fitness", s.scope["fitness"], s.horizon["fitness"], s.fitness, Tint.BLUE, Modifier.weight(1f)) { onOpen("fitness") }
+        ScoreTile("Healthy habits", s.scope["health"], s.horizon["health"], s.health, Tint.PURPLE, Modifier.weight(1f)) { onOpen("health") }
     }
 }
 
 @Composable
-private fun ScoreTile(title: String, scope: String?, horizon: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, container: androidx.compose.ui.graphics.Color,
-                      content: androidx.compose.ui.graphics.Color, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
+private fun ScoreTile(title: String, scope: String?, horizon: String?, sc: com.bennybar.runnersidekick.data.remote.Score?, tint: Tint,
+                      modifier: Modifier, onOpen: () -> Unit) {
     val v = sc?.score
-    Surface(onClick = onOpen, shape = shape, color = container, contentColor = content, modifier = modifier.fillMaxHeight()
-        .semantics(mergeDescendants = true) { contentDescription = "$title score ${v ?: "not available"} out of 100" }) {
-        Column(Modifier.fillMaxHeight().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            // The time it looks at, so it's clear why Health, Fitness and readiness move differently
-            horizon?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.75f)) }
-            // What the number covers, so Health isn't read as a medical verdict
-            Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = content.copy(alpha = 0.75f),
-                minLines = 2, maxLines = 2)
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(v?.toString() ?: "—", style = MaterialTheme.typography.displaySmall)
-                Spacer(Modifier.width(8.dp))
-                Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(bottom = 6.dp))
+    val sub = MaterialTheme.colorScheme.onSurfaceVariant
+    Tile(modifier.fillMaxHeight().semantics(mergeDescendants = true) { contentDescription = "$title score ${v ?: "not available"} out of 100" },
+        tint = tint, onClick = onOpen, spacing = 6.dp) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        // The time it looks at, so it's clear why Health, Fitness and readiness move differently
+        horizon?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = sub) }
+        // What the number covers, so Health isn't read as a medical verdict
+        Text(scope?.substringBefore(",") ?: "", style = MaterialTheme.typography.labelSmall, color = sub, minLines = 2, maxLines = 2)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // The score as a ring
+            val track = tint.hue.copy(alpha = 0.18f)
+            val arc = tint.hue
+            androidx.compose.foundation.Canvas(Modifier.size(44.dp)) {
+                val w = 6.dp.toPx()
+                val inset = androidx.compose.ui.geometry.Size(size.width - w, size.height - w)
+                val tl = androidx.compose.ui.geometry.Offset(w / 2, w / 2)
+                drawArc(track, 0f, 360f, false, tl, inset, style = Stroke(w))
+                drawArc(arc, -90f, 360f * ((v ?: 0) / 100f).coerceIn(0f, 1f), false, tl, inset, style = Stroke(w, cap = StrokeCap.Round))
             }
-            // The score as a bar on a white track
-            Box(Modifier.fillMaxWidth().height(10.dp).background(MaterialTheme.colorScheme.surfaceContainerLowest, CircleShape)) {
-                Box(Modifier.fillMaxWidth(((v ?: 0) / 100f).coerceIn(0f, 1f)).height(10.dp).background(content, CircleShape))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(v?.toString() ?: "—", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(sc?.label ?: "Not enough data", style = MaterialTheme.typography.labelMedium, color = sub)
             }
-            val t = sc?.trend
-            // Completeness is shown on its own, never hidden behind the trend
-            Text(listOfNotNull(
-                when {
-                    t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
-                    // A lower Fitness number comes from Garmin's VO2 estimate: labelled as such, not as lost fitness
-                    t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks" + if (t.note != null) " · estimate" else ""
-                    t != null -> "Same as 4 weeks ago"
-                    else -> null
-                },
-                if (sc?.status == "partial") "partial" else null,
-                if (sc?.stale == true) "stale" else null,
-            ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
-                style = MaterialTheme.typography.labelMedium)
-            sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
-                Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = content.copy(alpha = 0.8f))
-            }
+        }
+        Spacer(Modifier.weight(1f))
+        val t = sc?.trend
+        // Completeness is shown on its own, never hidden behind the trend
+        Text(listOfNotNull(
+            when {
+                t != null && t.delta > 0 -> "↑ ${t.delta} in 4 weeks"
+                // A lower Fitness number comes from Garmin's VO2 estimate: labelled as such, not as lost fitness
+                t != null && t.delta < 0 -> "↓ ${-t.delta} in 4 weeks" + if (t.note != null) " · estimate" else ""
+                t != null -> "Same as 4 weeks ago"
+                else -> null
+            },
+            if (sc?.status == "partial") "partial" else null,
+            if (sc?.stale == true) "stale" else null,
+        ).joinToString(" · ").ifEmpty { if (sc?.status == "unavailable") "Tap for what's needed" else "Tap for details" },
+            style = MaterialTheme.typography.labelMedium)
+        sc?.progress?.takeIf { it.verdict != "insufficient" }?.let { p ->
+            Text("Progress: ${p.verdict}", style = MaterialTheme.typography.labelMedium, color = sub)
         }
     }
 }
 
 @Composable
-private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onDismiss: () -> Unit) {
+private fun ScorePage(title: String, tint: Tint, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onBack: () -> Unit) {
     var how by remember { mutableStateOf(false) }
-    SheetColumn(onDismiss) {
-        Text("$title" + (sc.score?.let { " · $it" } ?: ""), style = MaterialTheme.typography.headlineSmall)
-        scope?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Text(listOfNotNull(sc.label, sc.trend?.let { t -> (if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta)) +
-                (t.detail?.let { " ($it)" } ?: "") }, if (sc.stale) "based on an old VO₂ max" else null)
-            .joinToString(" · "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        sc.trend?.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        sc.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-        Group {
+    val cs = MaterialTheme.colorScheme
+    DetailPage(title, onBack) {
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BigValue(sc.score?.toString() ?: "—", "/100", style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Bold))
+            Text(listOfNotNull(sc.label, sc.trend?.let { t -> (if (t.delta == 0) "same as 4 weeks ago" else "%+d in 4 weeks".format(t.delta)) +
+                    (t.detail?.let { " ($it)" } ?: "") }, if (sc.stale) "based on an old VO₂ max" else null)
+                .joinToString(" · "), style = MaterialTheme.typography.titleMedium)
+            scope?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
+            sc.trend?.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+            sc.detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        }
+        Group(title = "What goes into it", tint = tint) {
             sc.components.filter { !it.context }.forEach { c ->
                 // "How it's calculated" adds each part's rule and its share of the score under its reading
                 row(c.title, supporting = (c.say ?: c.value ?: c.note ?: "") +
                     if (how) "\n" + listOfNotNull(c.note, if (c.weightPct > 0) "${c.weightPct}% of the score" else null).joinToString(" · ") else "",
-                    trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) })
+                    trailing = { VerdictChip(c.verdict) })
             }
         }
-        TextButton(onClick = { how = !how }) { Text(if (how) "Hide how it's calculated" else "How it's calculated") }
+        OutlinedButton(onClick = { how = !how }, modifier = Modifier.height(48.dp)) { Text(if (how) "Hide how it's calculated" else "How it's calculated") }
         sc.progress?.let { p ->
             // Is it improving? Separate signals from different data, with how much they agree
             Group(title = "Progress · " + when (p.verdict) { "insufficient" -> "not enough evidence yet"; else -> p.verdict } +
@@ -627,75 +697,70 @@ private fun ScoreSheet(title: String, scope: String?, sc: com.bennybar.runnersid
                 p.signals.forEach { g -> row(g.title, supporting = g.say + if (how) "\n" + (g.note ?: "") else "", trailing = {
                     // Garmin's VO2 max is a device estimate: a dip is an estimate trend, not a decline
                     val dip = g.id == "vo2" && g.direction == "declining"
-                    com.bennybar.runnersidekick.ui.components.VerdictChip(if (dip) "ok" else when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
+                    VerdictChip(if (dip) "ok" else when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
                         label = if (dip) "Estimate dipped" else when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; else -> null })
                 }) }
             }
         }
         sc.components.filter { it.context }.takeIf { it.isNotEmpty() }?.let { ctx ->
             Group(title = "Context · not counted") {
-                ctx.forEach { c -> row(c.title, supporting = c.say ?: c.note, trailing = { com.bennybar.runnersidekick.ui.components.VerdictChip(c.verdict) }) }
+                ctx.forEach { c -> row(c.title, supporting = c.say ?: c.note, trailing = { VerdictChip(c.verdict) }) }
             }
         }
         if (sc.improve.isNotEmpty()) Group(title = "Potential score changes") {
             sc.improve.forEach { x -> row(x.part, supporting = x.text + (x.horizon?.let { " · $it" } ?: ""), trailing = {
-                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("+${x.gain}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                }
+                TagChip("+${x.gain}", container = Tint.GREEN.hue.copy(alpha = 0.22f), content = ink(Tint.GREEN))
             }) }
         }
-        if (sc.improve.isNotEmpty()) Text("What the score would show if that part reached its target; not a prediction of how much effort it takes.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (sc.missing.isNotEmpty() && sc.score != null) Text("Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        basis?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        val notes = listOfNotNull(
+            if (sc.improve.isNotEmpty()) "What the score would show if that part reached its target; not a prediction of how much effort it takes." else null,
+            if (sc.missing.isNotEmpty() && sc.score != null) "Partial: ${sc.missing.joinToString(", ").lowercase()} not available yet, so the score uses the other parts." else null,
+            basis)
+        notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp)) }
     }
 }
 
-/** Our own training readiness out of 100, in the green hero card: the number in a scalloped badge, what it means and
- *  what holds it back. Tap for the breakdown. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** Our own training readiness out of 100, in the green tile: the number, what it means and what holds it back.
+ *  Tap for the breakdown. */
 @Composable
 private fun ReadinessCard(s: com.bennybar.runnersidekick.data.remote.Score, unwell: Boolean, pending: Boolean, onUnwell: () -> Unit, onOpen: () -> Unit) {
-    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
-    Surface(onClick = onOpen, shape = RoundedCornerShape(36.dp), color = hero.container, contentColor = hero.content, modifier = Modifier.fillMaxWidth()
-        .semantics(mergeDescendants = true) { contentDescription = "Training readiness ${s.score ?: "not available"}. ${s.headline ?: s.label ?: ""}" }) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(120.dp).background(hero.tile, MaterialShapes.Cookie9Sided.toShape()), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(s.score?.toString() ?: "—", style = MaterialTheme.typography.displayMedium)
-                    Text("readiness", style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.85f))
-                }
-            }
-            Spacer(Modifier.width(18.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Today", style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.75f))
-                Text(s.label ?: "Not known yet", style = MaterialTheme.typography.titleLarge)
-                s.headline?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = hero.content.copy(alpha = 0.9f)) }
-                // What decided it: the reason for "easy only" when there is one, else the weakest part
-                Text((s.holdReason?.let { (if (s.allows == "rest") "Rest: " else "Easy only: ") + "$it · " }
-                    ?: s.heldBackBy?.let { "Held back by ${it.lowercase()} · " } ?: "") + "tap for details",
-                    style = MaterialTheme.typography.labelMedium, color = hero.content.copy(alpha = 0.75f))
-                // Context the watch can't see; one tap for the day, tap again to undo. Never asked for.
-                Surface(onClick = onUnwell, shape = CircleShape, color = if (unwell) hero.content else hero.tile,
-                    contentColor = if (unwell) hero.container else hero.content, modifier = Modifier.padding(top = 4.dp)) {
-                    Text(if (unwell) "Not feeling well today · undo" else "Not feeling well?", style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                }
-                if (pending) Text("Saved on your phone; the score updates once it syncs.", style = MaterialTheme.typography.labelSmall,
-                    color = hero.content.copy(alpha = 0.75f))
+    val cs = MaterialTheme.colorScheme
+    Tile(Modifier.semantics(mergeDescendants = true) { contentDescription = "Training readiness ${s.score ?: "not available"}. ${s.headline ?: s.label ?: ""}" },
+        tint = Tint.GREEN, onClick = onOpen, spacing = 10.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Readiness", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text("Tap for details", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            BigValue(s.score?.toString() ?: "—", "/100", style = MaterialTheme.typography.displayMedium.copy(fontWeight = FontWeight.Bold))
+            Spacer(Modifier.weight(1f))
+            Text(s.label ?: "Not known yet", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.End,
+                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
+        }
+        s.score?.let { ProgressBar(it / 100f, Brush.horizontalGradient(listOf(Color(0xFF3FD08A), Color(0xFF19B3A6)))) }
+        s.headline?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+        // What decided it: the reason for "easy only" when there is one, else the weakest part
+        (s.holdReason?.let { (if (s.allows == "rest") "Rest: " else "Easy only: ") + it }
+            ?: s.heldBackBy?.let { "Held back by ${it.lowercase()}" })?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+        }
+        // Context the watch can't see; one tap for the day, tap again to undo. Never asked for.
+        Surface(onClick = onUnwell, shape = CircleShape, color = if (unwell) cs.primary else cs.surface.copy(alpha = 0.8f),
+            contentColor = if (unwell) cs.onPrimary else cs.onSurface) {
+            Box(Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                Text(if (unwell) "Not feeling well today · undo" else "Not feeling well?", style = MaterialTheme.typography.labelLarge)
             }
         }
+        if (pending) Text("Saved on your phone; the score updates once it syncs.", style = MaterialTheme.typography.labelMedium,
+            color = cs.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, changes: List<String>, onDismiss: () -> Unit, onBriefing: () -> Unit) {
-    SheetColumn(onDismiss) {
-        Text("Training readiness" + (s.score?.let { " · $it" } ?: ""), style = MaterialTheme.typography.headlineSmall)
-        s.headline?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
-        Group {
+private fun ReadinessPage(s: com.bennybar.runnersidekick.data.remote.Score, changes: List<String>, onBack: () -> Unit, onBriefing: () -> Unit) {
+    DetailPage("Training readiness", onBack) {
+        PageHead(s.score?.toString() ?: "—", "/100" + (s.label?.let { " · $it" } ?: ""), s.headline)
+        Group(title = "What goes into it", tint = Tint.GREEN) {
             s.components.forEach { c -> row(c.title, supporting = c.say ?: c.value, trailing = { VerdictChip(c.verdict) }) }
         }
         // Garmin's own number, side by side: it weighs its recovery timer much more heavily than ours does
@@ -707,9 +772,9 @@ private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, cha
             }
         }
         if (changes.isNotEmpty()) Group(title = "Since yesterday") { changes.forEach { c -> row(c) } }
+        OutlinedButton(onClick = onBriefing, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("All readings and Garmin scores") }
         Text("Calculated from your own data, not Garmin's. A guide, not medical advice.", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = onBriefing) { Text("All readings and Garmin scores") }
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
     }
 }
 
@@ -719,61 +784,48 @@ private fun ReadinessSheet(s: com.bennybar.runnersidekick.data.remote.Score, cha
 private fun NextRunCard(n: com.bennybar.runnersidekick.data.remote.NextRun, units: Units) {
     val cs = MaterialTheme.colorScheme
     val dist = n.distanceKm?.let { if (units == Units.IMPERIAL) "%.1f mi".format(it / 1.609344) else "%.1f km".format(it) }
-    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Next run", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (n.optional) Surface(shape = CircleShape, color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer,
-                    modifier = Modifier.padding(end = 8.dp)) {
-                    Text("Optional", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                }
-                Surface(shape = CircleShape, color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
-                    Text(n.dayLabel, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                }
-            }
-            Text(n.title, style = MaterialTheme.typography.headlineSmall)
-            // The pace in the runner's units (the backend's text is per km)
-            val pace = n.paceSPerKm?.let { p -> if (n.paceWay == "around") "around ${Format.pace(p, units)}" else "about ${Format.pace(p, units)} or slower" } ?: n.pace
-            val chips = listOfNotNull(dist, n.hr?.text, pace, n.minutes?.let { "about $it min" })
-            if (chips.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                chips.forEach { c ->
-                    Surface(shape = RoundedCornerShape(16.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
-                        Text(c, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
-                    }
-                }
-            }
-            n.caution?.let {
-                Surface(shape = RoundedCornerShape(16.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
-                }
-            }
-            if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+    val orange = Tint.ORANGE.hue.copy(alpha = 0.30f)
+    Tile(tint = Tint.ORANGE, spacing = 10.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Next run", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (n.optional) TagChip("Optional")
+            TagChip(n.dayLabel, container = orange, content = ink(Tint.ORANGE))
         }
+        Text(n.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        // The pace in the runner's units (the backend's text is per km)
+        val pace = n.paceSPerKm?.let { p -> if (n.paceWay == "around") "around ${Format.pace(p, units)}" else "about ${Format.pace(p, units)} or slower" } ?: n.pace
+        val chips = listOfNotNull(dist, n.hr?.text, pace, n.minutes?.let { "about $it min" })
+        if (chips.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            chips.forEach { TagChip(it) }
+        }
+        n.caution?.let {
+            Surface(shape = RoundedCornerShape(16.dp), color = cs.surface.copy(alpha = 0.75f)) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.WarningAmber, null, Modifier.size(18.dp), tint = ink(Tint.ORANGE))
+                    Spacer(Modifier.width(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        if (n.why.isNotEmpty()) Text(n.why.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
     }
 }
 
-/** The latest run as one card: a green badge, when, and distance at pace. */
+/** The latest run as one tile: when, how long, and distance at pace. */
 @Composable
 private fun LastRunCard(run: com.bennybar.runnersidekick.data.remote.RecentRun, units: Units, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
     val pace = Format.pace(if (run.distanceM != null && run.movingS != null && run.distanceM > 0) run.movingS / (run.distanceM / 1000) else null, units)
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(48.dp).background(hero.container, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Outlined.DirectionsRun, null, tint = hero.content)
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Latest run · ${Format.shortDate(run.localDate)} · ${Format.duration(run.movingS)}", style = MaterialTheme.typography.labelMedium,
-                    color = cs.onSurfaceVariant)
-                Text("${Format.distance(run.distanceM, units)} at $pace", style = MaterialTheme.typography.titleMedium)
-            }
-            run.avgHr?.let {
-                Surface(shape = RoundedCornerShape(12.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer) {
-                    Text("${it.roundToInt()} bpm", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel("Latest run")
+        Tile(onClick = onOpen) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("${Format.shortDate(run.localDate)} · ${Format.duration(run.movingS)}", style = MaterialTheme.typography.labelLarge,
+                        color = cs.onSurfaceVariant)
+                    Text("${Format.distance(run.distanceM, units)} at $pace", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
+                run.avgHr?.let { TagChip("${it.roundToInt()} bpm", container = Tint.PINK.hue.copy(alpha = 0.16f)) }
             }
         }
     }
@@ -786,75 +838,67 @@ private fun LastRunCard(run: com.bennybar.runnersidekick.data.remote.RecentRun, 
 private fun RaceWeekStrip(race: com.bennybar.runnersidekick.data.remote.RaceStatus, w: com.bennybar.runnersidekick.data.remote.RaceWeek,
                           onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()
-        .semantics(mergeDescendants = true) { contentDescription = "This week toward ${race.title ?: race.headline}: ${w.doneMinutes} minutes done. Tap for the sessions." }) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("This week · ${w.phase.replace('_', ' ')}", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                    Text(race.title ?: race.headline, style = MaterialTheme.typography.titleMedium)
-                }
-                Text(race.daysToGo.let { if (it > 0) "$it days" else if (it == 0) "Today" else "Done" }, style = MaterialTheme.typography.labelLarge,
-                    color = cs.primary)
+    Tile(Modifier.semantics(mergeDescendants = true) { contentDescription = "This week toward ${race.title ?: race.headline}: ${w.doneMinutes} minutes done. Tap for the sessions." },
+        tint = Tint.AMBER, onClick = onOpen, spacing = 10.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("This week · ${w.phase.replace('_', ' ')}", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                Text(race.title ?: race.headline, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                w.sessions.forEach { s ->
-                    val day = LocalDate.parse(s.date).dayOfWeek.name.take(1)
-                    val done = s.status in setOf("done", "moved", "extra")
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Box(Modifier.size(32.dp).then(
-                            when {
-                                done -> Modifier.background(cs.primary, CircleShape)
-                                s.status == "today" -> Modifier.border(2.dp, cs.primary, CircleShape)
-                                s.status == "missed" -> Modifier.background(cs.tertiaryContainer, CircleShape)
-                                s.kind == "rest" -> Modifier
-                                else -> Modifier.background(cs.secondaryContainer, CircleShape)
-                            }), contentAlignment = Alignment.Center) {
-                            when {
-                                done -> Icon(Icons.Outlined.Check, null, tint = cs.onPrimary, modifier = Modifier.size(18.dp))
-                                s.kind == "rest" -> Box(Modifier.size(6.dp).background(cs.outlineVariant, CircleShape))
-                                s.kind == "race" -> Icon(Icons.Outlined.EmojiEvents, null, tint = cs.primary, modifier = Modifier.size(18.dp))
-                                else -> Unit
-                            }
+            TagChip(daysToGo(race.daysToGo))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            w.sessions.forEach { s ->
+                val day = LocalDate.parse(s.date).dayOfWeek.name.take(1)
+                val done = s.status in setOf("done", "moved", "extra")
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(Modifier.size(32.dp).then(
+                        when {
+                            done -> Modifier.background(cs.primary, CircleShape)
+                            s.status == "today" -> Modifier.border(2.dp, cs.primary, CircleShape)
+                            s.status == "missed" -> Modifier.background(Tint.PINK.hue.copy(alpha = 0.18f), CircleShape)
+                            s.kind == "rest" -> Modifier
+                            else -> Modifier.background(cs.surface.copy(alpha = 0.75f), CircleShape)
+                        }), contentAlignment = Alignment.Center) {
+                        when {
+                            done -> Icon(Icons.Outlined.Check, null, tint = cs.onPrimary, modifier = Modifier.size(18.dp))
+                            s.status == "missed" -> Icon(Icons.Outlined.Close, null, tint = ink(Tint.PINK), modifier = Modifier.size(16.dp))
+                            s.kind == "rest" -> Box(Modifier.size(6.dp).background(cs.outlineVariant, CircleShape))
+                            s.kind == "race" -> Icon(Icons.Outlined.EmojiEvents, null, tint = ink(Tint.AMBER), modifier = Modifier.size(18.dp))
+                            else -> Unit
                         }
-                        Text(day, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     }
+                    Text(day, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
             }
-            w.targetMinutes?.takeIf { it > 0 }?.let { t ->
-                Text("${w.doneMinutes} of $t min this week", style = MaterialTheme.typography.bodyMedium)
-                Box(Modifier.fillMaxWidth().height(8.dp).background(cs.secondaryContainer, CircleShape)) {
-                    Box(Modifier.fillMaxWidth((w.doneMinutes.toFloat() / t).coerceIn(0f, 1f)).height(8.dp).background(cs.primary, CircleShape))
-                }
-            }
+        }
+        w.targetMinutes?.takeIf { it > 0 }?.let { t ->
+            ProgressBar(w.doneMinutes.toFloat() / t, Brush.linearGradient(listOf(Tint.AMBER.hue, Tint.AMBER.hue)))
+            Text("${w.doneMinutes} of $t min this week", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
         }
     }
 }
 
-/** This week's focus as one line with its progress. Tap for the details, or to choose one. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** This week's focus as one tile with its progress. Tap for the details, or to choose one. */
 @Composable
 private fun FocusLine(state: com.bennybar.runnersidekick.data.remote.FocusState, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val cur = state.current
-    Surface(onClick = onOpen, shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            com.bennybar.runnersidekick.ui.components.ShapeBadge(Icons.Outlined.CenterFocusStrong, MaterialShapes.Sunny, Modifier.size(40.dp),
-                container = cs.secondaryContainer, content = cs.onSecondaryContainer)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("This week's focus", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                Text(cur?.title ?: "Choose one", style = MaterialTheme.typography.titleMedium)
-                cur?.summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 2) }
-            }
-            cur?.let {
-                Surface(shape = CircleShape, color = if (it.status == "achieved") cs.primary else cs.secondaryContainer,
-                    contentColor = if (it.status == "achieved") cs.onPrimary else cs.onSecondaryContainer) {
-                    Text(statusLabel(it.status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-                }
-            }
+    Tile(tint = Tint.AMBER, onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("This week's focus", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            cur?.let { FocusStatusChip(it.status) }
         }
+        Text(cur?.title ?: "Choose one", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        cur?.summary?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 2) }
     }
+}
+
+/** The focus's status as a chip; "Done" is filled. */
+@Composable
+internal fun FocusStatusChip(status: String?) {
+    val cs = MaterialTheme.colorScheme
+    if (status == "achieved") TagChip(statusLabel(status), container = cs.primary, content = cs.onPrimary) else TagChip(statusLabel(status))
 }
 
 /** Last night with the Samsung watch: how much was measured, sleeping heart rate, skin temperature and blood oxygen,
@@ -865,24 +909,30 @@ private fun LastNight(n: com.bennybar.runnersidekick.data.remote.Overnight) {
     val learning = "your usual comes after 5 nights"
     val lines = listOfNotNull(
         n.sleepHr?.let { h ->
-            "Sleeping heart rate ${h.low?.roundToInt() ?: h.avg.roundToInt()} bpm" + (h.delta?.let { d ->
+            "Sleeping heart rate" to "${h.low?.roundToInt() ?: h.avg.roundToInt()} bpm" + (h.delta?.let { d ->
                 if (kotlin.math.abs(d) < 1) ", as usual" else ", ${kotlin.math.abs(d).roundToInt()} ${if (d > 0) "above" else "below"} your usual"
             } ?: " · $learning")
         },
         n.skinTemp?.let { s ->
-            "Skin temperature " + (s.delta?.let { d -> if (kotlin.math.abs(d) < 0.1) "as usual" else "%+.1f °C vs your usual".format(d) }
+            "Skin temperature" to (s.delta?.let { d -> if (kotlin.math.abs(d) < 0.1) "as usual" else "%+.1f °C vs your usual".format(d) }
                 ?: "%.1f °C · $learning".format(s.value))
         },
         n.spo2?.let { o ->
-            "Blood oxygen ${o.avg.roundToInt()}%" + (o.min?.let { " (lowest ${it.roundToInt()}%)" } ?: "") +
+            "Blood oxygen" to "${o.avg.roundToInt()}%" + (o.min?.let { " (lowest ${it.roundToInt()}%)" } ?: "") +
                 (o.usual?.let { u -> " · usual ${u[0].roundToInt()}–${u[1].roundToInt()}%" } ?: "")
         },
     )
     val covered = n.asleepS?.takeIf { it > 0 }?.let { (n.measuredS / it).coerceAtMost(1.0) }
-    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Last night", style = MaterialTheme.typography.titleMedium)
-            lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionLabel("Last night · Samsung")
+        Tile(tint = Tint.INDIGO, spacing = 10.dp) {
+            lines.forEach { (label, value) ->
+                Row(Modifier.semantics(mergeDescendants = true) {}) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f).padding(start = 8.dp))
+                }
+            }
             Text(
                 (covered?.let { c -> if (c >= 0.9) "Measured through the night" else "Measured ${Format.duration(n.measuredS)} of ${Format.duration(n.asleepS)} asleep, so read it loosely" }
                     ?: "Measured ${Format.duration(n.measuredS)}") +

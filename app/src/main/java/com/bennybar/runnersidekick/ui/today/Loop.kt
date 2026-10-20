@@ -5,7 +5,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,7 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -33,12 +38,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.bennybar.runnersidekick.data.remote.DayPlan
 import com.bennybar.runnersidekick.data.remote.FocusState
 import com.bennybar.runnersidekick.data.remote.RunIntent
 import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.components.ShapeBadge
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
 
 val PLAN_KINDS = listOf("rest" to "Rest", "easy" to "Easy", "long" to "Long", "tempo" to "Tempo", "intervals" to "Intervals", "race" to "Race")
 private val MINUTES = listOf(20, 30, 45, 60, 90)
@@ -81,7 +89,7 @@ internal fun statusLabel(s: String?) = when (s) {
     else -> "In progress"
 }
 
-/** One focus for the week, chosen from data-based suggestions, then measured on the week's runs. */
+/** One focus for the week, chosen from data-based suggestions, then measured on the week's runs. Shown on its own page. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String) -> Unit) {
@@ -98,39 +106,34 @@ fun FocusCard(state: FocusState, onChoose: (String) -> Unit, onOpenRun: (String)
         }
         return
     }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(Icons.Outlined.CenterFocusStrong, MaterialShapes.Sunny, Modifier.size(40.dp), container = cs.secondary, content = cs.onSecondary)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (cur.auto) "This week's focus · picked for you" else "This week's focus", style = MaterialTheme.typography.labelLarge,
-                        color = cs.onSecondaryContainer)
-                    Text(cur.title, style = MaterialTheme.typography.titleLarge, color = cs.onSecondaryContainer)
-                }
-                Surface(shape = MaterialTheme.shapes.small, color = if (cur.status == "achieved") cs.primary else cs.surface) {
-                    Text(statusLabel(cur.status), style = MaterialTheme.typography.labelLarge,
-                        color = if (cur.status == "achieved") cs.onPrimary else cs.onSurface, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                }
-            }
-            cur.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = cs.onSecondaryContainer) }
-            cur.target?.let { Text("Target: $it", style = MaterialTheme.typography.bodySmall, color = cs.onSecondaryContainer.copy(alpha = 0.8f)) }
-            cur.felt?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSecondaryContainer.copy(alpha = 0.8f)) }
-            val runs = cur.runs.filter { it.sourceId != null }
-            if (runs.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                runs.forEach { r ->
-                    FilterChip(selected = r.met, onClick = { r.sourceId?.let(onOpenRun) },
-                        label = { Text(java.time.LocalDate.parse(r.date).dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase) +
-                            if (r.met) " ✓" else "") })
+    Tile(tint = Tint.AMBER) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(cur.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            FocusStatusChip(cur.status)
+        }
+        cur.summary?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+        listOfNotNull(cur.target?.let { "Target: $it" }, if (cur.auto) "picked for you" else null).joinToString(" · ")
+            .takeIf { it.isNotEmpty() }?.let { Text(it.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+        cur.felt?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+        val runs = cur.runs.filter { it.sourceId != null }
+        if (runs.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            runs.forEach { r ->
+                val d = java.time.LocalDate.parse(r.date)
+                Surface(selected = r.met, onClick = { r.sourceId?.let(onOpenRun) }, shape = CircleShape, color = cs.surface.copy(alpha = 0.75f)) {
+                    Text(d.dayOfWeek.name.take(3).lowercase().replaceFirstChar(Char::uppercase) + " ${d.dayOfMonth}" + if (r.met) " ✓" else "",
+                        style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
-            state.lastWeek?.let { lw ->
-                Text("Last week (${lw.title.lowercase()}): ${statusLabel(lw.status).lowercase()}. ${lw.summary ?: ""}",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSecondaryContainer.copy(alpha = 0.8f))
-            }
-            if (state.options.size > 1) TextButton(onClick = { changing = true }) { Text("Change") }
         }
     }
+    state.lastWeek?.let { lw ->
+        Tile(spacing = 4.dp) {
+            Text("Last week", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            Text("${lw.title}: ${statusLabel(lw.status).lowercase()}. ${lw.summary ?: ""}", style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    if (state.options.size > 1) OutlinedButton(onClick = { changing = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Change") }
 }
 
 val INTENT_KINDS = listOf("recovery" to "Recovery", "easy" to "Easy", "steady" to "Steady aerobic", "long" to "Long run",
@@ -177,37 +180,44 @@ private fun RunContextSheet(intent: RunIntent?, onDismiss: () -> Unit, onSave: (
     var limiter2 by remember { mutableStateOf(if (stated) intent?.limiter2 else null) }
     var health by remember { mutableStateOf(if (stated) intent?.health else null) }
     var note by remember { mutableStateOf(if (stated) intent?.note ?: "" else "") }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background) {
+        Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("This run", style = MaterialTheme.typography.headlineSmall)
+            Text("This run", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("All optional. What you say here comes first in the run's advice, AI input and export; blanks are left out.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Choice("Meant to be", INTENT_KINDS, kind, optional = false) { kind = it }
             OutlinedTextField(target, { target = it.take(100) }, label = { Text("Target (e.g. HR ≤ 160, 5:30 /km)") }, singleLine = true,
-                modifier = Modifier.fillMaxWidth())
+                shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
             Choice("Perceived effort", EFFORTS, effort) { effort = it }
             Choice("Overall feel", FEELS, feel) { feel = it }
             Choice("What limited you", LIMITERS, limiter) { limiter = it }
             if (limiter != null && limiter != "none") Choice("Anything else", LIMITERS.filter { it.first != limiter }, limiter2) { limiter2 = it }
             Choice("Health", HEALTH, health) { health = it }
             OutlinedTextField(note, { note = it.take(500) }, label = { Text("Notes (private, never sent to AI)") }, maxLines = 4,
-                modifier = Modifier.fillMaxWidth())
-            FilledTonalButton(onClick = {
+                shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            Button(onClick = {
                 kind?.let { onSave(RunIntent(it, note, "user", target, effort, feel, limiter, limiter2.takeIf { limiter != null && limiter != "none" }, health)) }
-            }, enabled = kind != null) { Text("Save") }
+            }, enabled = kind != null, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Save", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }
 
-/** One labelled row of chips; tapping the selected chip again clears an optional answer. */
+/** One labelled row of pill chips (the chosen one filled); tapping the selected chip again clears an optional answer. */
 @Composable
 private fun Choice(title: String, options: List<Pair<String, String>>, selected: String?, optional: Boolean = true, onPick: (String?) -> Unit) {
+    val cs = MaterialTheme.colorScheme
     Column {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
             options.forEach { (k, l) ->
-                FilterChip(selected = selected == k, onClick = { onPick(if (selected == k && optional) null else k) }, label = { Text(l) })
+                val on = selected == k
+                Surface(selected = on, onClick = { onPick(if (on && optional) null else k) }, shape = CircleShape,
+                    color = if (on) cs.primary else cs.surface, contentColor = if (on) cs.onPrimary else cs.onSurface,
+                    border = if (on) null else BorderStroke(1.dp, cs.outlineVariant)) {
+                    Text(l, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
             }
         }
     }

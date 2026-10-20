@@ -2,7 +2,6 @@ package com.bennybar.runnersidekick.ui.activities
 
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Route
 
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
@@ -13,9 +12,13 @@ import androidx.compose.material.icons.outlined.Sync
 
 import androidx.compose.material.icons.outlined.AutoAwesome
 
-import androidx.compose.material.icons.outlined.Psychology
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -33,9 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.EmojiEvents
-import androidx.compose.material.icons.outlined.Insights
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
@@ -46,14 +46,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material.icons.outlined.Info
 import kotlinx.coroutines.launch
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -87,11 +85,15 @@ import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.components.DemoBadge
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.EvidenceSheet
+import com.bennybar.runnersidekick.ui.components.BigValue
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.SectionLabel
+import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.components.SeriesChart
-import com.bennybar.runnersidekick.ui.components.ShapeBadge
 import com.bennybar.runnersidekick.ui.factory
 import com.bennybar.runnersidekick.ui.theme.LocalDataColors
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
@@ -113,13 +115,10 @@ private enum class Filter(val label: String) { ALL("All"), ROAD("Road"), TRAIL("
 private fun displayName(name: String?) = name?.takeUnless { it.isBlank() || it.equals("Running", true) || it.endsWith(" Running") }
 
 @Composable
-private fun BigStat(value: String, unit: String?, label: String, color: Color, modifier: Modifier = Modifier) {
+private fun BigStat(value: String, label: String, modifier: Modifier = Modifier) {
     Column(modifier) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = MaterialTheme.typography.headlineMedium, color = color, maxLines = 1)
-            unit?.let { Text(" $it", style = MaterialTheme.typography.titleMedium, color = color.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 4.dp)) }
-        }
-        Text(label, style = MaterialTheme.typography.labelLarge, color = color.copy(alpha = 0.8f))
+        Text(value, style = MaterialTheme.typography.headlineMedium, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -145,7 +144,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {
-            LargeTopAppBar(title = { Text("Activities") }, scrollBehavior = scroll, actions = {
+            LargeTopAppBar(title = { Text("Runs") }, scrollBehavior = scroll, actions = {
                 if (acts?.value?.any { it.synthetic } == true) DemoBadge()
                 androidx.compose.material3.IconButton(onClick = onTrophies) { Icon(Icons.Outlined.EmojiEvents, "Your records") }
                 // Fetch a run you just finished from Garmin without waiting for the hourly sync
@@ -172,7 +171,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
                 }
             }
             val weeks = shown.groupBy { Format.weekStart(LocalDate.parse(it.localDate), firstDay) }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 weeks.entries.firstOrNull()?.let { (start, runs) -> item { WeekHero(start, runs, units, firstDay) } }
                 item {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -187,20 +186,14 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
                     item(key = "w$weekStart") {
                         val dist = runs.sumOf { it.distanceM ?: 0.0 }
                         val time = runs.sumOf { it.movingS ?: 0.0 }
-                        Group(title = "Week of ${Format.shortDate(weekStart.toString())} · ${runs.size} ${if (runs.size == 1) "run" else "runs"} · " +
-                            "${Format.distance(dist, units)} · ${Format.hoursMinutes(time)}") {
-                            runs.forEach { a ->
-                                row(
-                                    headline = "${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)}",
-                                    overline = Format.activityTime(a.startUtc, a.utcOffsetS),
-                                    supporting = listOfNotNull(displayName(a.name), "${Format.duration(a.movingS)} moving",
-                                        a.avgHr?.let { "${it.roundToInt()} bpm" }).joinToString(" · ") +
-                                        (if (a.records.isNotEmpty()) "\nNew best: " + a.records.joinToString(", ") { "${it.title.removePrefix("Fastest ")} ${it.value}" } else ""),
-                                    // A run that set a record wears a trophy
-                                    icon = if (a.records.isNotEmpty()) Icons.Outlined.EmojiEvents else Icons.AutoMirrored.Outlined.DirectionsRun,
-                                    iconShape = if (a.records.isNotEmpty()) MaterialShapes.Sunny else MaterialShapes.Cookie9Sided,
-                                    onClick = { onOpen(a.sourceId) },
-                                )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionLabel("Week of ${Format.shortDate(weekStart.toString())} · ${runs.size} ${if (runs.size == 1) "run" else "runs"} · " +
+                                "${Format.distance(dist, units)} · ${Format.hoursMinutes(time)}")
+                            Tile(contentPadding = PaddingValues(vertical = 4.dp), spacing = 0.dp) {
+                                runs.forEachIndexed { i, a ->
+                                    if (i > 0) HorizontalDivider(Modifier.padding(horizontal = 18.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+                                    RunRow(a, units) { onOpen(a.sourceId) }
+                                }
                             }
                         }
                     }
@@ -210,19 +203,36 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
     }
 }
 
+/** One run in a week's list: when, distance and pace, then name, moving time and heart rate; a run that set a record
+ *  says so in words and wears a trophy. */
+@Composable
+private fun RunRow(a: ActivitySummary, units: Units, onClick: () -> Unit) {
+    val sub = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(Format.activityTime(a.startUtc, a.utcOffsetS), style = MaterialTheme.typography.labelMedium, color = sub)
+            Text("${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)}", style = MaterialTheme.typography.titleMedium)
+            Text(listOfNotNull(displayName(a.name), "${Format.duration(a.movingS)} moving", a.avgHr?.let { "${it.roundToInt()} bpm" }).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium, color = sub)
+            if (a.records.isNotEmpty()) Text("New best: " + a.records.joinToString(", ") { "${it.title.removePrefix("Fastest ")} ${it.value}" },
+                style = MaterialTheme.typography.labelLarge, color = ink(Tint.AMBER))
+        }
+        if (a.records.isNotEmpty()) Icon(Icons.Outlined.EmojiEvents, "Set a record", Modifier.padding(start = 8.dp), tint = ink(Tint.AMBER))
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = sub)
+    }
+}
+
 @Composable
 private fun WeekHero(start: LocalDate, runs: List<ActivitySummary>, units: Units, firstDay: java.time.DayOfWeek) {
-    val on = MaterialTheme.colorScheme.onPrimaryContainer
     val (d, du) = distanceParts(runs.sumOf { it.distanceM ?: 0.0 }, units)
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(if (start == Format.weekStart(LocalDate.now(), firstDay)) "This week" else "Week of ${Format.shortDate(start.toString())}",
-                style = MaterialTheme.typography.titleMedium, color = on)
-            Row {
-                BigStat(d, du, "distance", on, Modifier.weight(1.25f))
-                BigStat("${runs.size}", null, if (runs.size == 1) "run" else "runs", on, Modifier.weight(0.6f))
-                BigStat(Format.hoursMinutes(runs.sumOf { it.movingS ?: 0.0 }).replace(" min", "m").replace(" h ", "h "), null, "moving", on, Modifier.weight(1f))
-            }
+    Tile(tint = Tint.ORANGE, spacing = 12.dp) {
+        Text(if (start == Format.weekStart(LocalDate.now(), firstDay)) "This week" else "Week of ${Format.shortDate(start.toString())}",
+            style = MaterialTheme.typography.titleSmall)
+        Row {
+            BigStat(d, du, Modifier.weight(1f))
+            BigStat("${runs.size}", if (runs.size == 1) "run" else "runs", Modifier.weight(1f))
+            BigStat(Format.hoursMinutes(runs.sumOf { it.movingS ?: 0.0 }).replace(" min", "m").replace(" h ", "h "), "moving", Modifier.weight(1f))
         }
     }
 }
@@ -238,10 +248,10 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
     val aiScroll = remember { mutableStateOf(0) }
     val runList = androidx.compose.foundation.lazy.rememberLazyListState()
-    // The AI card comes after the header and (when there's one) the decoupling card
+    // The AI card comes after the title, the header, the verdict and (when there's one) the decoupling card
     LaunchedEffect(aiScroll.value) {
         val rr = detail?.value?.report
-        if (aiScroll.value > 0) runList.animateScrollToItem(1 + (if (rr?.verdict != null) 1 else 0) +
+        if (aiScroll.value > 0) runList.animateScrollToItem(2 + (if (rr?.verdict != null) 1 else 0) +
             if (rr?.decoupling?.let { it.decouplingPct != null || it.reasons.isNotEmpty() } == true) 1 else 0)
     }
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -267,7 +277,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(r?.activity?.let { Format.activityTime(it.startUtc, it.utcOffsetS) } ?: "Run", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // The run's name and date are the page's big title, in the list below
+                title = {},
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
                 actions = {
                     if (r?.synthetic == true) DemoBadge()
@@ -312,10 +323,11 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 return@RefreshBox
             }
             if (routeOpen) detail?.value?.route?.let { rt -> routes?.value?.routes?.firstOrNull { it.id == rt.id }?.let { full ->
-                RouteSheet(full, routes?.value?.basis.orEmpty(), units, current = id, onOpenRun = { routeOpen = false; onOpenRun(it) },
-                    onNotThis = { routeOpen = false; vm.notThisRoute() }, onDismiss = { routeOpen = false })
+                RoutePage(full, routes?.value?.basis.orEmpty(), units, current = id, onOpenRun = { routeOpen = false; onOpenRun(it) },
+                    onNotThis = { routeOpen = false; vm.notThisRoute() }, onBack = { routeOpen = false })
             } }
-            LazyColumn(state = runList, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyColumn(state = runList, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item { RunTitle(r) }
                 item { RunHero(r, units) }
                 r.verdict?.let { v -> item(key = "verdict") { VerdictCard(v) } }
                 // Shown also when it couldn't be measured, saying why (a short run, missing heart rate), instead of nothing
@@ -325,9 +337,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 item { com.bennybar.runnersidekick.ui.today.IntentPicker(r.intent, vm::setIntent) }
                 // The repeat route this run belongs to, recognised from its shape; opens how the route has gone
                 detail?.value?.route?.let { rt -> item(key = "route") {
-                    Group(title = "Route") {
+                    Group(title = "Route", tint = Tint.BLUE) {
                         row(routeTitle(rt.name, rt.distanceKm, rt.loop, rt.runs), supporting = rt.progress ?: "Recognised from its shape",
-                            icon = Icons.Outlined.Route, iconShape = androidx.compose.material3.MaterialShapes.Cookie9Sided,
                             onClick = { vm.loadRoutes(); routeOpen = true })
                     }
                 } }
@@ -340,7 +351,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         custom {
                             r.story.forEach { line ->
                                 Row(Modifier.padding(vertical = 4.dp)) {
-                                    Text("•", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                                    Text("•", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(Modifier.width(10.dp))
                                     Text(line, style = MaterialTheme.typography.bodyLarge)
                                 }
@@ -354,10 +365,9 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                         efforts.forEach { e ->
                             row("${e.label}: ${Format.duration(e.elapsedS)}",
                                 supporting = Format.pace(e.paceSPerKm, units) + (e.previousBestS?.let { " · your previous best ${Format.duration(it)}" } ?: " · first one recorded"),
-                                icon = Icons.Outlined.EmojiEvents, iconShape = MaterialShapes.Sunny,
                                 trailing = if (e.isBest) ({
-                                    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.tertiaryContainer) {
-                                        Text("New best", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    Surface(shape = MaterialTheme.shapes.small, color = Tint.AMBER.hue.copy(alpha = 0.22f)) {
+                                        Text("New best", style = MaterialTheme.typography.labelLarge, color = ink(Tint.AMBER),
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
                                     }
                                 }) else null)
@@ -367,8 +377,9 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                 detail?.value?.chart?.let { c ->
                     item {
                         val colors = LocalDataColors.current
-                        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionLabel("Pace and heart rate")
+                            Tile(spacing = 20.dp) {
                                 SeriesChart("Pace (moving)", c.t, c.speed.map { s -> s?.let { 1000.0 / it } }, colors.pace,
                                     { Format.pace(it, units) }, Modifier.fillMaxWidth(), invert = true,
                                     description = "Pace over time. Gaps are stops or missing data.")
@@ -381,30 +392,21 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                     }
                 }
                 item {
-                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ShapeBadge(Icons.Outlined.Insights, MaterialShapes.Sunny, Modifier.size(44.dp),
-                                container = MaterialTheme.colorScheme.secondary, content = MaterialTheme.colorScheme.onSecondary)
-                            Spacer(Modifier.width(16.dp))
-                            Column {
-                                Text("Next focus", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                                Text(r.nextFocus, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                            }
-                        }
+                    Tile(tint = Tint.GREEN, spacing = 4.dp) {
+                        Text("Next focus", style = MaterialTheme.typography.titleSmall)
+                        Text(r.nextFocus, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 // Only findings that say something; checks that couldn't run aren't listed
                 if (r.findings.isNotEmpty()) item {
                     Group(title = "Analysis") {
-                        r.findings.forEach { f -> row(f.title, supporting = f.statement, icon = Icons.Outlined.Timeline, iconShape = MaterialShapes.Pill,
-                            onClick = { evidence = f }) }
+                        r.findings.forEach { f -> row(f.title, supporting = f.statement, onClick = { evidence = f }) }
                     }
                 }
                 if (r.splits.isNotEmpty()) item { Splits(r, units) }
                 if (r.comparable.runs.isNotEmpty()) item {
                     Group(title = "Similar runs (${r.comparable.n}) · distance ±20%, similar climbing, steady") {
-                        row("This run", supporting = "${Format.pace(r.paceMovingSPerKm, units)} · ${r.activity.avgHr?.let { "${it.roundToInt()} bpm" } ?: "no HR"}",
-                            icon = Icons.Outlined.Speed, iconShape = MaterialShapes.Cookie9Sided)
+                        row("This run", supporting = "${Format.pace(r.paceMovingSPerKm, units)} · ${r.activity.avgHr?.let { "${it.roundToInt()} bpm" } ?: "no HR"}")
                         r.comparable.runs.forEach { c ->
                             row("${Format.shortDate(c.localDate)} · ${Format.distance(c.distanceM, units)}",
                                 supporting = "${Format.pace(c.paceSPerKm, units)} · ${c.avgHr?.let { "${it.roundToInt()} bpm" } ?: "no HR"}")
@@ -419,7 +421,7 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                     (o.value?.let { "%.1f".format(it) } ?: "—")) }.orEmpty()
                 val fromWatch = vo2 + ours + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
                 if (fromWatch.isNotEmpty()) item {
-                    Group(title = "VO₂ max and the watch's numbers") {
+                    Group(title = "VO₂ max and the watch's numbers", tint = Tint.TEAL) {
                         fromWatch.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) }
                         // The runner can leave a run out of our VO2 max (heart rate that looked wrong, say): its own value stays here
                         r.vo2Ours?.takeIf { it.value != null || it.heldOut }?.let { o ->
@@ -439,73 +441,80 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     evidence?.let { EvidenceSheet(it) { evidence = null } }
 }
 
-/** The run's header, in the green hero card: distance with the moving pace in a white pill beside it, then six numbers
- *  as tiles. */
+/** The page's big title: the run's day ("Sunday run"), then the date, start time and the run's name. */
 @Composable
-private fun RunHero(r: PostRunReport, units: Units) {
+private fun RunTitle(r: PostRunReport) {
     val a = r.activity
-    val hero = com.bennybar.runnersidekick.ui.theme.LocalHero.current
-    val on = hero.content
-    val (d, du) = distanceParts(a.distanceM, units)
-    val pace = Format.pace(r.paceMovingSPerKm, units)
-    Surface(shape = RoundedCornerShape(40.dp), color = hero.container, contentColor = on, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(listOfNotNull(Format.longDate(a.localDate), displayName(a.name)).joinToString(" · "),
-                style = MaterialTheme.typography.labelLarge, color = on.copy(alpha = 0.85f))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(d, style = MaterialTheme.typography.displayLarge)
-                Text(" $du", style = MaterialTheme.typography.titleMedium, color = on.copy(alpha = 0.85f), modifier = Modifier.padding(bottom = 8.dp))
-                Spacer(Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(20.dp), color = on, contentColor = hero.container) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(pace.substringBefore(" "), style = MaterialTheme.typography.headlineMedium)
-                        Text(pace.substringAfter(" ", "") + " moving", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-            val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
-            // The watch's VO2 max on the day of the run (as the watch shows it); the run's own estimate as a fallback
-            val vo2 = r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"')
-            val ours = r.vo2Ours?.value
-            val tiles = listOf(
-                (a.avgHr?.roundToInt()?.toString() ?: "—") to "avg bpm",
-                // Garmin's Training Effect; a watch without it (Samsung) shows the app's own training load for the run
-                te?.let { "%.1f".format(it) to "aerobic TE" } ?: ((r.load?.toString() ?: "—") to "training load"),
-                // Garmin's training readiness on the morning of the run; without it, the run's highest heart rate
-                r.garminReadinessDay?.value?.roundToInt()?.let { it.toString() to "Garmin readiness" }
-                    ?: ((a.maxHr?.roundToInt()?.toString() ?: "—") to "max bpm"),
-                // Elapsed only when stops made it differ
-                Format.duration(a.movingS) to (if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "moving · ${Format.duration(a.elapsedS)} total" else "moving"),
-                "+${Format.elevation(a.elevationGainM, units)}" to "climb",
-                // Ours from this run, big; the watch's beside it
-                if (ours != null) "%.0f".format(ours) to ("VO₂ Sidekick" + (vo2?.let { " · ${r.watch} $it" } ?: ""))
-                else (vo2 ?: "—") to ("VO₂ (${r.watch})" + (if (vo2 != null) " · Sidekick: n/a" else "")),
-            )
-            tiles.chunked(3).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-                    row.forEach { (v, l) ->
-                        Column(Modifier.weight(1f).fillMaxHeight().background(hero.tile, RoundedCornerShape(18.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                            Text(v, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-                            Text(l, style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.85f), minLines = 2, maxLines = 2)
-                        }
-                    }
-                }
-            }
-            Text("Pace uses moving time (stops excluded). Elapsed includes stops." + (r.hrQuality?.takeIf { it.grade != "good" }?.let { q ->
-                " The heart-rate recording looked ${q.grade} in ${q.stretches.size} ${if (q.stretches.size == 1) "stretch" else "stretches"} (" +
-                    q.stretches.take(3).joinToString { "${Format.duration(it.startS)}–${Format.duration(it.endS)}" } +
-                    "), so read heart-rate numbers loosely."
-            } ?: ""), style = MaterialTheme.typography.labelSmall, color = on.copy(alpha = 0.75f))
-        }
+    val day = LocalDate.parse(a.localDate)
+    Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 6.dp).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()) + " run",
+            style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
+        Text(listOfNotNull(day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM")),
+            Format.activityTime(a.startUtc, a.utcOffsetS).substringAfter(" · "), displayName(a.name)).joinToString(" · "),
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-/** Aerobic decoupling for every run, pace:HR and power:HR (first half against second), as two tonal tiles. */
+/** The run's header, in the orange hero tile: distance with the moving pace in a pill beside it, six numbers, then
+ *  what the numbers leave out (stops, the watch's VO2 max, doubtful heart rate). */
+@Composable
+private fun RunHero(r: PostRunReport, units: Units) {
+    val a = r.activity
+    val sub = MaterialTheme.colorScheme.onSurfaceVariant
+    val (d, du) = distanceParts(a.distanceM, units)
+    val pace = Format.pace(r.paceMovingSPerKm, units)
+    Tile(tint = Tint.ORANGE, spacing = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BigValue(d, du, Modifier.weight(1f))
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)) {
+                Text("$pace moving", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+            }
+        }
+        val te = r.garminMetrics["aerobicTrainingEffect"]?.toString()?.toDoubleOrNull()
+        // The watch's VO2 max on the day of the run (as the watch shows it); the run's own estimate as a fallback
+        val vo2 = r.garminVo2maxDay?.value?.let { "%.1f".format(it) } ?: r.garminMetrics["vO2MaxValue"]?.toString()?.trim('"')
+        val ours = r.vo2Ours?.value
+        val tiles = listOf(
+            "Avg heart rate" to (a.avgHr?.roundToInt()?.toString() ?: "—"),
+            // Garmin's Training Effect; a watch without it (Samsung) shows the app's own training load for the run
+            te?.let { "Aerobic TE" to "%.1f".format(it) } ?: ("Training load" to (r.load?.toString() ?: "—")),
+            // Garmin's training readiness on the morning of the run; without it, the run's highest heart rate
+            r.garminReadinessDay?.value?.roundToInt()?.let { "Garmin readiness" to it.toString() }
+                ?: ("Max heart rate" to (a.maxHr?.roundToInt()?.toString() ?: "—")),
+            "Moving time" to Format.duration(a.movingS),
+            "Climb" to "+${Format.elevation(a.elevationGainM, units)}",
+            // Ours from this run, big; the watch's in the footnote
+            if (ours != null) "VO₂ Sidekick" to "%.0f".format(ours) else "VO₂ (${r.watch})" to (vo2 ?: "—"),
+        )
+        tiles.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (l, v) ->
+                    Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(l, style = MaterialTheme.typography.labelMedium, color = sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(v, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                    }
+                }
+            }
+        }
+        Text(listOfNotNull(
+            // Elapsed only when stops made it differ
+            if ((a.elapsedS ?: 0.0) - (a.movingS ?: 0.0) >= 30) "Elapsed ${Format.duration(a.elapsedS)} with stops" else null,
+            if (ours != null) vo2?.let { "${r.watch}'s VO₂ max $it" } else if (vo2 != null) "Sidekick VO₂ max: n/a" else null,
+        ).joinToString(" · ").let { if (it.isEmpty()) it else "$it. " } +
+            "Pace uses moving time (stops excluded). Elapsed includes stops." + (r.hrQuality?.takeIf { it.grade != "good" }?.let { q ->
+            " The heart-rate recording looked ${q.grade} in ${q.stretches.size} ${if (q.stretches.size == 1) "stretch" else "stretches"} (" +
+                q.stretches.take(3).joinToString { "${Format.duration(it.startS)}–${Format.duration(it.endS)}" } +
+                "), so read heart-rate numbers loosely."
+        } ?: ""), style = MaterialTheme.typography.labelMedium, color = sub)
+    }
+}
+
+/** Aerobic decoupling for every run, pace:HR and power:HR (first half against second), in a blue tile. */
 @Composable
 private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decoupling) {
     val cs = MaterialTheme.colorScheme
-    Surface(shape = MaterialTheme.shapes.large, color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Tile(tint = Tint.BLUE, spacing = 12.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DecouplingTitle(cs.onSurface)
             if (dc.decouplingPct == null) {
                 val why = dc.reasons.firstOrNull().orEmpty()
@@ -518,13 +527,12 @@ private fun DecouplingCard(dc: com.bennybar.runnersidekick.data.remote.Decouplin
                 }, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 return@Column
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 // power:HR only when the watch records running power (Samsung's doesn't)
-                listOfNotNull(dc.decouplingPct to "pace:HR", dc.powerDecouplingPct?.let { it to "power:HR" }).forEach { (v, l) ->
-                    Column(Modifier.weight(1f).fillMaxHeight().background(cs.secondaryContainer, RoundedCornerShape(22.dp)).padding(14.dp)) {
-                        Text(v?.let { "%.1f%%".format(it) } ?: "—", style = MaterialTheme.typography.headlineMedium, color = cs.onSecondaryContainer)
-                        Text(if (v == null && l.startsWith("power")) "no power" else l, style = MaterialTheme.typography.labelMedium,
-                            color = cs.onSecondaryContainer.copy(alpha = 0.85f), maxLines = 1)
+                listOfNotNull(dc.decouplingPct to "Pace : heart rate", dc.powerDecouplingPct?.let { it to "Power : heart rate" }).forEach { (v, l) ->
+                    Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(l, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, maxLines = 1)
+                        Text(v?.let { "%.1f%%".format(it) } ?: if (l.startsWith("Power")) "no power" else "—", style = MaterialTheme.typography.headlineMedium)
                     }
                 }
             }
@@ -545,7 +553,7 @@ private fun DecouplingTitle(color: Color) {
     val tip = androidx.compose.material3.rememberTooltipState(isPersistent = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text("Aerobic decoupling", style = MaterialTheme.typography.titleMedium, color = color, modifier = Modifier.weight(1f))
+        Text("Aerobic decoupling", style = MaterialTheme.typography.titleSmall, color = color, modifier = Modifier.weight(1f))
         androidx.compose.material3.TooltipBox(
             positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(
                 androidx.compose.material3.TooltipAnchorPosition.Above),
@@ -558,7 +566,7 @@ private fun DecouplingTitle(color: Color) {
             },
             state = tip,
         ) {
-            androidx.compose.material3.IconButton(onClick = { scope.launch { tip.show() } }, modifier = Modifier.size(32.dp)) {
+            androidx.compose.material3.IconButton(onClick = { scope.launch { tip.show() } }) {
                 Icon(Icons.Outlined.Info, contentDescription = "About aerobic decoupling", tint = color.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
             }
         }
@@ -568,8 +576,9 @@ private fun DecouplingTitle(color: Color) {
 @Composable
 private fun Splits(r: PostRunReport, units: Units) {
     val cs = MaterialTheme.colorScheme
+    val paceColor = LocalDataColors.current.pace
     Group(title = "Splits") {
-        // Capsules: taller = faster; the hilliest km in coral with its flat-equivalent pace
+        // Capsules: taller = faster; the hilliest km in full orange, with its flat-equivalent pace
         val paced = r.splits.filter { it.paceSPerKm != null }
         if (paced.size >= 2) custom {
             val fastest = paced.minOf { it.paceSPerKm!! }
@@ -580,7 +589,8 @@ private fun Splits(r: PostRunReport, units: Units) {
                 r.splits.forEach { s ->
                     val f = s.paceSPerKm?.let { if (slowest > fastest) 0.35f + 0.65f * ((slowest - it) / (slowest - fastest)).toFloat() else 1f } ?: 0.1f
                     Box(Modifier.weight(1f).fillMaxHeight(f).background(
-                        (if (s.idx == hilly?.idx) cs.tertiary else cs.primary).copy(alpha = if (s.complete) 1f else 0.45f), CircleShape))
+                        if (s.idx == hilly?.idx) paceColor.copy(alpha = if (s.complete) 1f else 0.45f)
+                        else Tint.ORANGE.hue.copy(alpha = if (s.complete) 0.45f else 0.2f), RoundedCornerShape(6.dp)))
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -588,7 +598,7 @@ private fun Splits(r: PostRunReport, units: Units) {
                     color = cs.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
             }
             hilly?.let { h ->
-                Surface(shape = RoundedCornerShape(18.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.padding(top = 10.dp)) {
+                Surface(shape = RoundedCornerShape(18.dp), color = Tint.ORANGE.hue.copy(alpha = 0.16f), modifier = Modifier.padding(top = 10.dp)) {
                     Text("Km ${h.idx + 1} climbed ${Format.elevation(h.elevationGainM, units)}: ${Format.pace(h.paceSPerKm, units)} actual, " +
                         "${Format.pace(h.gapPaceSPerKm, units)} on the flat.", style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
@@ -630,13 +640,11 @@ private fun Splits(r: PostRunReport, units: Units) {
 private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val shown = v?.takeIf { it.status == "ok" } ?: v?.previous?.takeIf { it.status == "ok" }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Tile {
+        Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ShapeBadge(Icons.Outlined.Psychology, MaterialShapes.Flower, Modifier.size(40.dp), container = cs.tertiary, content = cs.onTertiary)
-                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("AI input on this run", style = MaterialTheme.typography.titleMedium)
+                    Text("AI input on this run", style = MaterialTheme.typography.titleSmall)
                     Text("Coaching from this run's analysis, its week and your plan", style = MaterialTheme.typography.labelMedium,
                         color = cs.onSurfaceVariant)
                 }
@@ -650,19 +658,19 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
                     // Older input has no one-liner: its summary is shown as plain text instead
                     if (more || shown.tldr == null) shown.summary?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                     if (more && shown.wentWell.isNotEmpty()) {
-                        Text("Went well", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                        Text("Went well", style = MaterialTheme.typography.titleSmall)
                         shown.wentWell.forEach { p -> Bullet(p.text) }
                     }
                     if (more && shown.toWorkOn.isNotEmpty()) {
-                        Text("To work on", style = MaterialTheme.typography.titleSmall, color = cs.primary)
+                        Text("To work on", style = MaterialTheme.typography.titleSmall)
                         shown.toWorkOn.forEach { p -> Bullet(p.text) }
                     }
                     shown.nextTime?.let { n ->
-                        Surface(shape = MaterialTheme.shapes.medium, color = cs.secondaryContainer) {
+                        Surface(shape = MaterialTheme.shapes.medium, color = cs.surfaceContainerHighest) {
                             Column(Modifier.padding(14.dp)) {
                                 Text("Next time · " + when (n.direction) { "easier" -> "easier"; "harder" -> "harder"; else -> "similar effort" },
-                                    style = MaterialTheme.typography.labelLarge, color = cs.onSecondaryContainer)
-                                Text(n.text, style = MaterialTheme.typography.bodyMedium, color = cs.onSecondaryContainer)
+                                    style = MaterialTheme.typography.labelLarge)
+                                Text(n.text, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -699,7 +707,7 @@ private fun RunAiCard(v: com.bennybar.runnersidekick.data.remote.RunAi?, onAsk: 
 @Composable
 private fun Bullet(text: String) {
     Row {
-        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium)
     }
@@ -709,23 +717,24 @@ private fun Bullet(text: String) {
 @Composable
 private fun VerdictCard(v: com.bennybar.runnersidekick.data.remote.RunVerdict) {
     val cs = MaterialTheme.colorScheme
-    val (bg, fg) = when (v.verdict) {
-        "on_target" -> cs.primaryContainer to cs.onPrimaryContainer
-        "harder", "easier", "shortened" -> cs.tertiaryContainer to cs.onTertiaryContainer
-        else -> cs.surfaceContainer to cs.onSurface
+    // On target in green; off it (harder, easier, cut short) in pink, as the mockup; the label says which in words
+    val tint = when (v.verdict) {
+        "on_target" -> Tint.GREEN
+        "harder", "easier", "shortened" -> Tint.PINK
+        else -> Tint.NEUTRAL
     }
-    Surface(shape = MaterialTheme.shapes.large, color = bg, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Tile(tint = tint, spacing = 6.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             v.ageGrade?.let { ag ->
-                Text("Age grade %.1f%%".format(ag.pct), style = MaterialTheme.typography.headlineMedium, color = fg)
-                Text(ag.gradeClass.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelLarge, color = fg.copy(alpha = 0.85f))
-            } ?: Text(v.label, style = MaterialTheme.typography.headlineSmall, color = fg)
-            Text(v.say, style = MaterialTheme.typography.bodyMedium, color = fg)
+                Text("Age grade %.1f%%".format(ag.pct), style = MaterialTheme.typography.headlineMedium)
+                Text(ag.gradeClass.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            } ?: Text(v.label, style = MaterialTheme.typography.titleMedium)
+            Text(v.say, style = MaterialTheme.typography.bodyMedium)
             Text(listOfNotNull(
                 v.judgedAs?.let { k -> "Judged as ${k.replace('_', ' ')}" + (v.basis?.let { " from $it" } ?: "") },
                 if (v.verdict == "not_enough_data" && v.judgedAs == null) "Set the run type below" else null,
                 v.hrNote, v.note).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.8f))
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }

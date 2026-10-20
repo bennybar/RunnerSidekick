@@ -1,50 +1,35 @@
 package com.bennybar.runnersidekick.ui.journal
 
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Insights
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.MaterialShapes
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import com.bennybar.runnersidekick.data.remote.InsightsReport
-import com.bennybar.runnersidekick.data.remote.WeeklyReport
-import com.bennybar.runnersidekick.ui.components.Group
-import com.bennybar.runnersidekick.ui.insights.InsightCard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.WbSunny
-import androidx.compose.material3.Badge
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -52,37 +37,64 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bennybar.runnersidekick.data.remote.Finding
+import com.bennybar.runnersidekick.data.remote.InsightsReport
 import com.bennybar.runnersidekick.data.remote.MorningReport
 import com.bennybar.runnersidekick.data.remote.PostRunReport
+import com.bennybar.runnersidekick.data.remote.WeeklyReport
 import com.bennybar.runnersidekick.ui.Format
 import com.bennybar.runnersidekick.ui.JournalVm
 import com.bennybar.runnersidekick.ui.ReportVm
 import com.bennybar.runnersidekick.ui.components.DemoBadge
 import com.bennybar.runnersidekick.ui.components.EmptyState
 import com.bennybar.runnersidekick.ui.components.EvidenceSheet
-import com.bennybar.runnersidekick.ui.components.SectionHeader
+import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.SectionLabel
+import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.insights.InsightCard
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 import kotlinx.serialization.json.Json
+
+/** What a report of [type] is called. */
+private fun kindOf(type: String?) = when (type) {
+    "morning" -> "Morning briefing"
+    "post_run" -> "Run report"
+    "weekly" -> "Weekly review"
+    else -> "Insights update"
+}
+
+/** A page's top: back arrow, title, and anything on the right (the demo badge). */
+@Composable
+private fun PageTop(title: String, onBack: () -> Unit, demo: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") }
+        Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, modifier = Modifier.weight(1f).semantics { heading() })
+        if (demo) DemoBadge()
+    }
+}
+
+private val PageList = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 32.dp)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factory = factory(::JournalVm))) {
+fun JournalScreen(onOpenReport: (Long) -> Unit, onBack: () -> Unit, vm: JournalVm = viewModel(factory = factory(::JournalVm))) {
     val reports by vm.reports.collectAsStateWithLifecycle()
     val checkins by vm.checkins.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { LargeTopAppBar(title = { Text("Journal") }, scrollBehavior = scroll) },
-    ) { padding ->
-        com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.padding(padding).fillMaxSize()) {
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        PageTop("Reports", onBack)
+        com.bennybar.runnersidekick.ui.components.RefreshBox(busy, vm::refresh, Modifier.fillMaxSize()) {
+            LazyColumn(contentPadding = PageList, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // The app no longer asks for check-ins; the tab only stays for people who logged some earlier
                 if (checkins.isNotEmpty()) item {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -97,12 +109,13 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
                         item(key = "m$month") {
                             Group(title = java.time.YearMonth.parse(month).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))) {
                                 rs.forEach { r ->
-                                    val (icon, shape, kind) = when (r.type) {
-                                        "morning" -> Triple(Icons.Outlined.WbSunny, MaterialShapes.Sunny, "Morning briefing")
-                                        "post_run" -> Triple(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided, "Run report")
-                                        "weekly" -> Triple(Icons.Outlined.CalendarMonth, MaterialShapes.Cookie12Sided, "Weekly review")
-                                        else -> Triple(Icons.Outlined.Insights, MaterialShapes.Flower, "Insights update")
+                                    val (icon, shape) = when (r.type) {
+                                        "morning" -> Icons.Outlined.WbSunny to MaterialShapes.Sunny
+                                        "post_run" -> Icons.AutoMirrored.Outlined.DirectionsRun to MaterialShapes.Cookie9Sided
+                                        "weekly" -> Icons.Outlined.CalendarMonth to MaterialShapes.Cookie12Sided
+                                        else -> Icons.Outlined.Insights to MaterialShapes.Flower
                                     }
+                                    val kind = kindOf(r.type)
                                     row(r.title ?: kind, overline = "$kind · ${Format.shortDate(r.localDate)}" + if (r.revision > 1) " · revised" else "",
                                         icon = icon, iconShape = shape, onClick = { onOpenReport(r.id) })
                                 }
@@ -130,7 +143,6 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, vm: JournalVm = viewModel(factor
 private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
 /** Shows a report exactly as generated at the time (its own revision), not recomputed with today's baselines. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportScreen(
     id: Long, onBack: () -> Unit, onOpenRun: (String) -> Unit, onOpenReport: (Long) -> Unit,
@@ -144,56 +156,38 @@ fun ReportScreen(
     val run = remember(body) { if (entity?.type == "post_run" && body != null) runCatching { json.decodeFromString<PostRunReport>(body) }.getOrNull() else null }
     val ins = remember(body) { if (entity?.type == "insights" && body != null) runCatching { json.decodeFromString<InsightsReport>(body) }.getOrNull() else null }
     val wk = remember(body) { if (entity?.type == "weekly" && body != null) runCatching { json.decodeFromString<WeeklyReport>(body) }.getOrNull() else null }
-    Scaffold(topBar = {
-        TopAppBar(
-            title = { Text(entity?.let { Format.shortDate(it.localDate) } ?: "Report") },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
-            actions = { if (morning?.synthetic == true || run?.synthetic == true) DemoBadge() },
-        )
-    }) { padding ->
-        LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        PageTop(entity?.let { "${kindOf(it.type)} · ${Format.shortDate(it.localDate)}" } ?: "Report", onBack,
+            demo = morning?.synthetic == true || run?.synthetic == true)
+        LazyColumn(contentPadding = PageList, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ins?.let { r ->
-                item { Text("Insights as they stood on ${Format.shortDate(r.localDate)}", style = MaterialTheme.typography.titleMedium) }
+                item { Text("Insights as they stood on ${Format.shortDate(r.localDate)}", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp)) }
                 items(r.insights, key = { it.id }) { i -> InsightCard(i, emphasised = i.verdict == "pattern", onMethod = {}) }
             }
             wk?.let { w ->
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Week of ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}", style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text(w.headline, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text("Next week: ${w.nextWeekFocus.text}", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
+                    Headline(w.headline, label = "Week of ${Format.shortDate(w.weekStart)} – ${Format.shortDate(w.weekEnd)}",
+                        lines = listOf("Next week: ${w.nextWeekFocus.text}"))
                 }
-                items(w.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
+                if (w.findings.isNotEmpty()) item { SectionLabel("Findings") }
+                items(w.findings, key = { it.id }) { f -> FindingTile(f) { evidence = f } }
                 item { Meta("Revision ${w.revision} · generated ${w.generatedAt} · focus rule ${w.nextWeekFocus.rule}") }
             }
             if (morning == null && run == null && ins == null && wk == null) {
                 item { EmptyState(Icons.Outlined.MenuBook, "Report not cached", "Connect to the backend once to save this report for offline reading.") }
             }
             morning?.let { m ->
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(m.headline, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text(m.recommendation.suggestion, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text(m.recommendation.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                }
-                item { SectionHeader("Findings") }
-                items(m.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
+                item { Headline(m.headline, lines = listOf(m.recommendation.suggestion, m.recommendation.reason)) }
+                item { SectionLabel("Findings") }
+                items(m.findings, key = { it.id }) { f -> FindingTile(f) { evidence = f } }
                 item { Meta("Revision ${m.revision} · generated ${m.generatedAt} · data through ${m.dataCutoff ?: "unknown"} · ${m.algorithmVersion.values.joinToString()}") }
             }
             run?.let { r ->
-                item {
-                    Text(r.activity.name ?: "Run", style = MaterialTheme.typography.headlineSmall)
-                    Text(r.nextFocus, style = MaterialTheme.typography.bodyLarge)
-                }
-                items(r.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
-                item { OutlinedButton(onClick = { onOpenRun(r.activity.sourceId) }) { Text("Open run details") } }
+                item { Headline(r.activity.name ?: "Run", lines = listOf(r.nextFocus)) }
+                if (r.findings.isNotEmpty()) item { SectionLabel("Findings") }
+                items(r.findings, key = { it.id }) { f -> FindingTile(f) { evidence = f } }
+                item { FilledTonalButton(onClick = { onOpenRun(r.activity.sourceId) }, modifier = Modifier.fillMaxWidth()) { Text("Open run details") } }
                 item { Meta("Revision ${r.revision} · generated ${r.generatedAt}") }
             }
             if (revisions.size > 1) item {
@@ -210,48 +204,46 @@ fun ReportScreen(
     evidence?.let { EvidenceSheet(it) { evidence = null } }
 }
 
+/** The report's headline tile: an optional small label, the headline, then its sentences. */
 @Composable
-private fun FindingCard(f: Finding, onWhy: () -> Unit) {
-    OutlinedCard(shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp).fillMaxWidth()) {
-            Text(f.title, style = MaterialTheme.typography.titleMedium)
-            Text(f.statement, style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onWhy, contentPadding = PaddingValues(0.dp)) { Text("Show why") }
-        }
+private fun Headline(headline: String, label: String? = null, lines: List<String>) {
+    Tile(tint = Tint.PURPLE) {
+        label?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = ink(Tint.PURPLE)) }
+        Text(headline, style = MaterialTheme.typography.headlineSmall)
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable
+private fun FindingTile(f: Finding, onWhy: () -> Unit) {
+    Tile(spacing = 4.dp, contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 4.dp)) {
+        Text(f.title, style = MaterialTheme.typography.titleMedium)
+        Text(f.statement, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onWhy, contentPadding = PaddingValues(0.dp)) { Text("Show why") }
     }
 }
 
 @Composable
 private fun Meta(text: String) =
-    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
 
 
 /** One day's morning briefing, opened from a trend chart. Rendered from the report for that date. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DayScreen(date: String, onBack: () -> Unit, vm: com.bennybar.runnersidekick.ui.DayVm = viewModel(key = "d$date", factory = factory { com.bennybar.runnersidekick.ui.DayVm(it, date) })) {
     val day by vm.day.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var evidence by remember { mutableStateOf<Finding?>(null) }
-    Scaffold(topBar = {
-        TopAppBar(title = { Text(Format.longDate(date)) },
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
-            actions = { if (day?.value?.synthetic == true) DemoBadge() })
-    }) { padding ->
+    Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        PageTop(Format.longDate(date), onBack, demo = day?.value?.synthetic == true)
         val m = day?.value
-        LazyColumn(Modifier.padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(contentPadding = PageList, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (m == null) {
                 item { EmptyState(Icons.Outlined.MenuBook, if (busy) "Loading day" else "Day not cached", if (busy) "Fetching…" else "Connect to the backend to load this day.") }
             } else {
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = MaterialTheme.shapes.extraLarge) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(m.headline, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text(m.recommendation.suggestion, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                }
-                items(m.findings, key = { it.id }) { f -> FindingCard(f) { evidence = f } }
+                item { Headline(m.headline, lines = listOf(m.recommendation.suggestion)) }
+                if (m.findings.isNotEmpty()) item { SectionLabel("Findings") }
+                items(m.findings, key = { it.id }) { f -> FindingTile(f) { evidence = f } }
                 m.checkin?.let { c -> item { Meta("Check-in: energy ${c.energy ?: "–"}, soreness ${c.soreness ?: "–"}, recovery ${c.recovery ?: "–"}") } }
                 item { Meta("Report revision ${m.revision} · generated ${m.generatedAt}") }
             }

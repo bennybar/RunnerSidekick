@@ -6,24 +6,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,75 +38,85 @@ import com.bennybar.runnersidekick.data.remote.Cardio
 import com.bennybar.runnersidekick.data.remote.CardioPart
 import com.bennybar.runnersidekick.data.remote.SettingsDto
 import com.bennybar.runnersidekick.ui.Format
+import com.bennybar.runnersidekick.ui.components.DetailPage
 import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
 
-/** One line per piece of evidence, in the Fitness details; the sheet has the rest. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** One line per piece of evidence, in the Summary tab; the detail page has the rest. */
 @Composable
 fun CardioCard(c: Cardio, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
     val parts = listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire).filter { it.value != null }
-    Group(title = "Cardio fitness (experimental)") {
-        row(parts.joinToString(" · ") { "${short(it)} ${it.value!!.toInt()}" }.ifEmpty { "Not enough evidence yet" },
-            supporting = listOfNotNull(c.runs.comparison?.headline ?: c.garmin.comparison?.headline,
-                c.performance.value?.let { "Running performance: VDOT ${it.toInt()}" },
-                "VO₂ max estimates side by side, each with its method").joinToString("\n"),
-            icon = Icons.Outlined.MonitorHeart, iconShape = MaterialShapes.Flower, onClick = onOpen)
+    Tile(tint = Tint.TEAL, onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.MonitorHeart, null, Modifier.size(22.dp), tint = ink(Tint.TEAL))
+            Spacer(Modifier.width(10.dp))
+            Text("Cardio fitness (experimental)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = cs.onSurfaceVariant)
+        }
+        Text(parts.joinToString(" · ") { "${short(it)} ${it.value!!.toInt()}" }.ifEmpty { "Not enough evidence yet" },
+            style = MaterialTheme.typography.titleMedium)
+        Text(listOfNotNull(c.runs.comparison?.headline ?: c.garmin.comparison?.headline,
+            c.performance.value?.let { "Running performance: VDOT ${it.toInt()}" },
+            "VO₂ max estimates side by side, each with its method").joinToString("\n"),
+            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
     }
 }
 
 private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> p.maker ?: "Garmin"; "questionnaire" -> "Questionnaire"; "hunt" -> "HUNT"; else -> p.title }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> SettingsDto) -> Unit, onOpenRun: (String) -> Unit,
                 onDismiss: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     var editing by remember { mutableStateOf<String?>(null) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Cardio fitness", style = MaterialTheme.typography.headlineSmall)
-            Text(c.basis, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
-            // Technical detail, collapsed: the estimates side by side already show how far apart they are
-            c.combined?.let { m ->
-                var open by remember { mutableStateOf(false) }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { open = !open }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                        Text(if (open) "Hide the median of the estimates" else "Median of the estimates (technical detail)")
+    DetailPage("Cardio fitness", onDismiss) {
+        Text(c.basis, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
+        listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
+        if (c.notes.isNotEmpty()) Tile(spacing = 6.dp) {
+            Text("How they relate", style = MaterialTheme.typography.titleSmall)
+            c.notes.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        }
+        // Technical detail, collapsed: the estimates side by side already show how far apart they are
+        c.combined?.let { m ->
+            var open by remember { mutableStateOf(false) }
+            Tile(onClick = { open = !open }, spacing = 4.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (open) "Hide the median of the estimates" else "Median of the estimates", style = MaterialTheme.typography.titleSmall)
+                        Text("Technical detail · not used by any score", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
                     }
-                    if (open) {
-                        Text("${fmt(m.value)} from " + m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" },
-                            style = MaterialTheme.typography.bodyMedium)
-                        Text("Not used by any score or by fitness age, which use the VO₂ max chosen in Settings. HUNT counts only with a " +
-                            "seated pulse.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                    }
+                    Icon(if (open) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null, tint = cs.onSurfaceVariant)
+                }
+                if (open) {
+                    Text("${fmt(m.value)} from " + m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" },
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("Not used by any score or by fitness age, which use the VO₂ max chosen in Settings. HUNT counts only with a " +
+                        "seated pulse.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
             }
-            if (c.notes.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("How they relate", style = MaterialTheme.typography.titleMedium)
-                c.notes.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            }
-            // The answers these estimates use, each with the day it was given
-            Group(title = "Your answers") {
-                val a = answers
-                row("Activity level, last month", supporting = a?.activityPar?.let { "$it of 7" + (a.activityParAt?.let { d -> " · answered ${Format.shortDate(d)}" } ?: "") }
-                    ?: "Not answered", onClick = { editing = "par" })
-                row("Weight", supporting = c.inputs.weightKg?.let { "${fmt(it)} kg · " + from(c.inputs.weightFrom) } ?: "Not set",
-                    onClick = { editing = "weight" })
-                row("Height", supporting = c.inputs.heightCm?.let { "${fmt(it)} cm · " + from(c.inputs.heightFrom) } ?: "Not set",
-                    onClick = { editing = "height" })
-                row("Maximum heart rate", supporting = c.hrMax.value?.let { "${it.toInt()} bpm · ${c.hrMax.source}" } ?: "Not known yet",
-                    onClick = { editing = "hrmax" })
-                row("Resting pulse, seated", supporting = a?.restingPulseSeated?.let { "$it bpm · " + from(a.restingPulseSeatedAt) }
-                    ?: "Not set (HUNT uses your watch's overnight value)", onClick = { editing = "seated" })
-                row("Waist", supporting = a?.profileWaistCm?.let { "${fmt(it)} cm · " + from(a.profileWaistCmAt) } ?: "Not set",
-                    onClick = { editing = "waist" })
-                c.huntQuestions.forEach { q ->
-                    val (v, at) = huntAnswer(a, q.key)
-                    row(q.title, supporting = q.options.firstOrNull { it.value == v }?.let { o -> o.text + (at?.let { " · answered ${Format.shortDate(it)}" } ?: "") }
-                        ?: "Not answered", onClick = { editing = q.key })
-                }
+        }
+        // The answers these estimates use, each with the day it was given
+        Group(title = "Your answers") {
+            val a = answers
+            row("Activity level, last month", supporting = a?.activityPar?.let { "$it of 7" + (a.activityParAt?.let { d -> " · answered ${Format.shortDate(d)}" } ?: "") }
+                ?: "Not answered", onClick = { editing = "par" })
+            row("Weight", supporting = c.inputs.weightKg?.let { "${fmt(it)} kg · " + from(c.inputs.weightFrom) } ?: "Not set",
+                onClick = { editing = "weight" })
+            row("Height", supporting = c.inputs.heightCm?.let { "${fmt(it)} cm · " + from(c.inputs.heightFrom) } ?: "Not set",
+                onClick = { editing = "height" })
+            row("Maximum heart rate", supporting = c.hrMax.value?.let { "${it.toInt()} bpm · ${c.hrMax.source}" } ?: "Not known yet",
+                onClick = { editing = "hrmax" })
+            row("Resting pulse, seated", supporting = a?.restingPulseSeated?.let { "$it bpm · " + from(a.restingPulseSeatedAt) }
+                ?: "Not set (HUNT uses your watch's overnight value)", onClick = { editing = "seated" })
+            row("Waist", supporting = a?.profileWaistCm?.let { "${fmt(it)} cm · " + from(a.profileWaistCmAt) } ?: "Not set",
+                onClick = { editing = "waist" })
+            c.huntQuestions.forEach { q ->
+                val (v, at) = huntAnswer(a, q.key)
+                row(q.title, supporting = q.options.firstOrNull { it.value == v }?.let { o -> o.text + (at?.let { " · answered ${Format.shortDate(it)}" } ?: "") }
+                    ?: "Not answered", onClick = { editing = q.key })
             }
         }
     }
@@ -159,11 +169,18 @@ private fun fmt(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f
 @Composable
 private fun Evidence(p: CardioPart, onOpenRun: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(p.title, style = MaterialTheme.typography.titleMedium)
+    // Running performance is a different quantity (orange, like runs); an estimate without a value stays plain
+    val tint = when {
+        p.id == "performance" -> Tint.ORANGE
+        p.value != null -> Tint.TEAL
+        else -> Tint.NEUTRAL
+    }
+    Tile(tint = tint, spacing = 4.dp) {
+        Text(p.title, style = MaterialTheme.typography.titleSmall)
         Row(verticalAlignment = Alignment.Bottom) {
-            p.value?.let { Text("${it.toInt()}", style = MaterialTheme.typography.headlineMedium, color = cs.primary); Spacer(Modifier.width(10.dp)) }
-            Text(p.headline ?: "", style = MaterialTheme.typography.bodyLarge)
+            p.value?.let { Text("${it.toInt()}", style = MaterialTheme.typography.headlineLarge); Spacer(Modifier.width(10.dp)) }
+            Text(p.headline ?: "", style = MaterialTheme.typography.bodyLarge, color = if (p.value != null) cs.onSurfaceVariant else cs.onSurface,
+                modifier = Modifier.padding(bottom = if (p.value != null) 4.dp else 0.dp))
         }
         p.comparison?.let { Text(listOfNotNull(it.headline, it.detail).joinToString(". "), style = MaterialTheme.typography.bodyMedium) }
         p.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }

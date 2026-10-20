@@ -39,19 +39,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
-
-/** Corner radii for a segmented group (Android 16 Settings style): outer corners large, inner corners small. */
-fun segmentShape(index: Int, count: Int, outer: Int = 24, inner: Int = 6): Shape = when {
-    count == 1 -> RoundedCornerShape(outer.dp)
-    index == 0 -> RoundedCornerShape(outer.dp, outer.dp, inner.dp, inner.dp)
-    index == count - 1 -> RoundedCornerShape(inner.dp, inner.dp, outer.dp, outer.dp)
-    else -> RoundedCornerShape(inner.dp)
-}
 
 class GroupScope internal constructor() {
     internal val rows = mutableListOf<@Composable (Shape) -> Unit>()
@@ -71,23 +61,24 @@ class GroupScope internal constructor() {
     }
 
     fun custom(content: @Composable ColumnScope.() -> Unit) {
-        rows += { shape ->
-            Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), content = content)
-            }
-        }
+        rows += { _ -> Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), content = content) }
     }
 }
 
+/** A titled list of rows in one card (tinted with [tint]), rows separated by thin lines. */
 @Composable
-fun Group(modifier: Modifier = Modifier, title: String? = null, content: GroupScope.() -> Unit) {
+fun Group(modifier: Modifier = Modifier, title: String? = null, tint: com.bennybar.runnersidekick.ui.theme.Tint = com.bennybar.runnersidekick.ui.theme.Tint.NEUTRAL,
+          content: GroupScope.() -> Unit) {
     val scope = GroupScope().apply(content)
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        title?.let {
-            Text(it, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 20.dp, bottom = 6.dp, top = 4.dp).semantics { heading() })
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        title?.let { SectionLabel(it) }
+        if (scope.rows.isNotEmpty()) Tile(tint = tint, contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp), spacing = 0.dp) {
+            scope.rows.forEachIndexed { i, r ->
+                if (i > 0) androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+                r(RoundedCornerShape(0.dp))
+            }
         }
-        scope.rows.forEachIndexed { i, r -> r(segmentShape(i, scope.rows.size)) }
     }
 }
 
@@ -97,22 +88,22 @@ private fun GroupRow(
     shape: Shape, headline: String, supporting: String?, overline: String?, icon: ImageVector?, iconShape: RoundedPolygon?,
     onClick: (() -> Unit)?, accentCategory: String?, trailing: (@Composable RowScope.() -> Unit)?,
 ) {
-    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-                .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+                .heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
                 val accent = accentCategory?.let { com.bennybar.runnersidekick.ui.theme.accentFor(it) }
-                ShapeBadge(icon, iconShape ?: MaterialShapes.Circle, Modifier.size(40.dp),
+                ShapeBadge(icon, iconShape ?: MaterialShapes.Circle, Modifier.size(36.dp),
                     container = accent?.container ?: MaterialTheme.colorScheme.primaryContainer,
-                    content = accent?.content ?: MaterialTheme.colorScheme.onPrimaryContainer)
-                Spacer(Modifier.width(16.dp))
+                    content = accent?.content ?: MaterialTheme.colorScheme.onPrimaryContainer, iconSize = 20.dp)
+                Spacer(Modifier.width(14.dp))
             }
             Column(Modifier.weight(1f)) {
                 overline?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Text(headline, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(headline, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 supporting?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             when {
@@ -139,7 +130,8 @@ fun ShapeBadge(
     }
 }
 
-/** Big-numeral tile for a reading. Colour is never the only signal: the status line has text and an icon. */
+/** Big-numeral tile for a reading, tinted for its kind of data. Colour is never the only signal: the status line has
+ *  text and an icon, and a flagged reading also says so in words. */
 @Composable
 fun MetricTile(
     label: String,
@@ -149,27 +141,28 @@ fun MetricTile(
     statusIcon: ImageVector?,
     flagged: Boolean,
     modifier: Modifier = Modifier,
+    tint: com.bennybar.runnersidekick.ui.theme.Tint = com.bennybar.runnersidekick.ui.theme.Tint.NEUTRAL,
     onClick: () -> Unit,
     chart: (@Composable () -> Unit)? = null,
 ) {
-    val container = if (flagged) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
-    val on = if (flagged) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface
-    Surface(onClick = onClick, shape = MaterialTheme.shapes.large, color = container, modifier = modifier) {
-        Column(Modifier.padding(18.dp).heightIn(min = 128.dp)) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = on.copy(alpha = 0.8f))
+    val on = MaterialTheme.colorScheme.onSurface
+    val sub = MaterialTheme.colorScheme.onSurfaceVariant
+    Tile(modifier, tint = if (flagged) com.bennybar.runnersidekick.ui.theme.Tint.ORANGE else tint, onClick = onClick, spacing = 4.dp) {
+        Column(Modifier.heightIn(min = 104.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge, color = on)
             Spacer(Modifier.weight(1f, fill = false))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, style = MaterialTheme.typography.displaySmall, color = on, maxLines = 1)
+                Text(value, style = MaterialTheme.typography.headlineMedium, color = on, maxLines = 1)
                 unit?.let {
                     Spacer(Modifier.width(4.dp))
-                    Text(it, style = MaterialTheme.typography.titleMedium, color = on.copy(alpha = 0.75f), modifier = Modifier.padding(bottom = 6.dp))
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = sub, modifier = Modifier.padding(bottom = 4.dp))
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                statusIcon?.let { Icon(it, null, Modifier.size(16.dp), tint = on.copy(alpha = 0.8f)); Spacer(Modifier.width(4.dp)) }
-                Text(status, style = MaterialTheme.typography.labelMedium, color = on.copy(alpha = 0.8f), maxLines = 2)
+                statusIcon?.let { Icon(it, null, Modifier.size(16.dp), tint = sub); Spacer(Modifier.width(4.dp)) }
+                Text(status, style = MaterialTheme.typography.labelMedium, color = sub, maxLines = 2)
             }
-            chart?.let { Spacer(Modifier.padding(top = 10.dp)); it() }
+            chart?.let { Spacer(Modifier.padding(top = 8.dp)); it() }
         }
     }
 }
