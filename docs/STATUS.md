@@ -1052,3 +1052,8 @@ After the round-4 review:
   samples alone (its steady stretch and the highest heart rate held for a minute) are now kept per revision of the run
   (`rp.run_key`, as the run analysis already was); weather, resting and maximum heart rate are still read each time.
 - The floating tab bar no longer has a fade behind it.
+
+## Screens load side by side (2026-10-20, v0.70.3)
+- After the connection step (status, settings, the Samsung/GTII upload), the app asks for every screen at once instead
+  of one after another; the progress label reads "Loading your data". The server's per-run caches tolerate two requests
+  evicting at the same time.

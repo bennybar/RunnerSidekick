@@ -425,7 +425,7 @@ class Bounded(dict):
     def __setitem__(self, k, v):
         if k not in self and len(self) >= self.size:
             for old in list(self)[: self.size // 4]:
-                del self[old]
+                self.pop(old, None)  # another request's thread may have evicted it already
         super().__setitem__(k, v)
 
 

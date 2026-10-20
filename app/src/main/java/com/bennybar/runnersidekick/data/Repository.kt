@@ -1,5 +1,7 @@
 package com.bennybar.runnersidekick.data
 
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.async
 import androidx.room.withTransaction
 
 import com.bennybar.runnersidekick.data.local.CachedBlob
@@ -412,9 +414,21 @@ class Repository(
             "Loading the journal" to { refreshJournal() },
         )
         try {
-            steps.forEachIndexed { i, (label, run) ->
-                _progress.value = Progress(from + (to - from) * i / steps.size, label)
-                run()
+            // The connection step first (it uploads the watch's new data, which the rest must include), then every
+            // screen at once: the server answers them side by side instead of one after another
+            _progress.value = Progress(from, steps[0].first)
+            steps[0].second()
+            val rest = steps.drop(1)
+            var done = 1
+            _progress.value = Progress(from + (to - from) * done / steps.size, "Loading your data")
+            kotlinx.coroutines.coroutineScope {
+                rest.map { (_, run) ->
+                    async {
+                        run()
+                        synchronized(this@Repository) { done++ }
+                        _progress.value = Progress(from + (to - from) * done / steps.size, "Loading your data")
+                    }
+                }.awaitAll()
             }
         } finally {
             if (to >= 1f) _progress.value = null
