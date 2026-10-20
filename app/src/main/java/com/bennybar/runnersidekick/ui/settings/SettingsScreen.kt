@@ -309,10 +309,13 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
                         })
                     row("Watchletic", supporting = when {
-                        wl?.connected == true -> "Connected, read-only" + (wl?.lastSync?.let { t -> " · last checked ${Format.ago(runCatching { Instant.parse(t) }.getOrNull())}" } ?: "") +
+                        wl?.connected == true -> (if (wl?.canDelete == true) "Connected" else "Connected, read-only · reconnect to allow deleting runs there") +
+                            (wl?.lastSync?.let { t -> " · last checked ${Format.ago(runCatching { Instant.parse(t) }.getOrNull())}" } ?: "") +
                             (wl?.problem?.let { "\n$it" } ?: "")
                         else -> "Connect to bring in what Watchletic records (needs Watchletic Club)"
-                    }, trailing = if (s?.synthetic == true) null else if (wl?.connected == true) ({ TextButton(onClick = { confirm = "watchletic" }) { Text("Disconnect") } })
+                    }, trailing = if (s?.synthetic == true) null
+                        else if (wl?.connected == true && wl?.canDelete != true) ({ FilledTonalButton(onClick = { vm.connectWatchletic(ctx) }) { Text("Reconnect") } })
+                        else if (wl?.connected == true) ({ TextButton(onClick = { confirm = "watchletic" }) { Text("Disconnect") } })
                         else ({ FilledTonalButton(onClick = { vm.connectWatchletic(ctx) }) { Text("Connect") } }))
                     row("Samsung Health check", supporting = "What the app can read from a Galaxy Watch on this phone. Read only, a test for now",
                         onClick = onSamsungCheck)

@@ -1,5 +1,6 @@
 package com.bennybar.runnersidekick.ui.activities
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.MoreVert
 
@@ -267,12 +268,33 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     val r = detail?.value?.report
     var runMenu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // A run from Watchletic can be deleted there too, but only when the runner ticks it, each time
+    var alsoWatchletic by remember { mutableStateOf(false) }
+    val wl by vm.watchletic.collectAsStateWithLifecycle()
     if (confirmDelete) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("Delete this run?") },
-        text = { Text("It leaves your runs, records, trends and reports, and won't come back with the next sync or upload. " +
-            "Use it for test recordings and mistakes.") },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false; vm.deleteRun(onBack) }) { Text("Delete") } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("It leaves your runs, records, trends and reports, and won't come back with the next sync or upload. " +
+                    "Use it for test recordings and mistakes.")
+                if (detail?.value?.watchletic == true) {
+                    val allowed = wl?.canDelete == true
+                    Row(Modifier.fillMaxWidth().toggleable(alsoWatchletic && allowed, enabled = allowed, role = androidx.compose.ui.semantics.Role.Checkbox) { alsoWatchletic = it },
+                        verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(alsoWatchletic && allowed, onCheckedChange = null, enabled = allowed)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Also delete it in Watchletic", style = MaterialTheme.typography.bodyLarge)
+                            Text(if (allowed) "Permanently, in Watchletic too" else "Reconnect Watchletic in Me to allow this",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false
+            vm.deleteRun(alsoWatchletic && wl?.canDelete == true, onBack) }) { Text("Delete") } },
         dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
     Scaffold(
         topBar = {

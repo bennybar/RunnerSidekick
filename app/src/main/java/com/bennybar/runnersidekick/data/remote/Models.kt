@@ -466,7 +466,8 @@ data class Chart(
 )
 
 @Serializable
-data class ActivityDetail(val report: PostRunReport? = null, val chart: Chart? = null, val route: RunRoute? = null)
+data class ActivityDetail(val report: PostRunReport? = null, val chart: Chart? = null, val route: RunRoute? = null,
+                          /** The run came from Watchletic (it can be deleted there too) */ val watchletic: Boolean = false)
 
 /** The repeat route this run belongs to (recognised from its shape), when it has one. */
 @Serializable
@@ -1019,4 +1020,6 @@ data class WatchleticStatus(
     @SerialName("linked_at") val linkedAt: String? = null,
     @SerialName("last_sync") val lastSync: String? = null,
     val problem: String? = null,
+    /** Full access approved, so a run can also be deleted in Watchletic (an older read-only connection can't) */
+    @SerialName("can_delete") val canDelete: Boolean = false,
 )

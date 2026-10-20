@@ -770,8 +770,10 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
             body["checks"] = run_checks.build(conn, cfg.source, body)
         from . import routes
         rt = next((r for r in routes.all_routes(conn, cfg.source) if sid in {x["source_id"] for x in r["rows"]}), None)
+        from . import watchletic as wl
         return {"report": body, "chart": downsample(s) if s else None,
-                "route": {k: rt[k] for k in ("id", "name", "distance_km", "loop", "runs", "progress")} if rt else None}
+                "route": {k: rt[k] for k in ("id", "name", "distance_km", "loop", "runs", "progress")} if rt else None,
+                "watchletic": wl.workout_of(conn, sid) is not None}
 
     @api.get("/v1/routes")
     def get_routes(conn=Depends(db)):
@@ -791,12 +793,19 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         return {"held_out": body.held_out}
 
     @api.delete("/v1/activities/{sid}")
-    def delete_run(sid: str, conn=Depends(db)):
+    def delete_run(sid: str, also_watchletic: bool = False, conn=Depends(db), user=Depends(current_user)):
         """The runner deletes a run: it leaves runs, records, trends and reports, and is never imported again (Garmin's
-        sync, Samsung Health and GTII all check). Its data is set aside on the server, not destroyed."""
+        sync, Samsung Health, GTII and Watchletic all check). Its data is set aside on the server, not destroyed. With
+        also_watchletic (ticked in the delete dialog), the Watchletic workout it came from is deleted there too."""
         a = one(conn.activity, {"source": cfg.source, "source_id": sid})
         if a is None:
             raise HTTPException(404, "No such run")
+        if also_watchletic:
+            from . import watchletic as wl
+            try:
+                wl.delete_workout(conn, sid, user_cfg(user).data_dir, cfg.data_dir, WATCHLETIC_REDIRECT_URI)
+            except (wl.WatchleticError, httpx.HTTPError) as e:  # nothing is deleted here either, so the runner can retry
+                raise HTTPException(502, f"Watchletic didn't delete it: {e}")
         conn.deleted_run.update_one({"source_id": sid}, {"$set": {"source_id": sid, "local_date": a["local_date"], "deleted_at": utc_now()}},
                                     upsert=True)
         conn.activity.delete_one({"source": "deleted", "source_id": sid})

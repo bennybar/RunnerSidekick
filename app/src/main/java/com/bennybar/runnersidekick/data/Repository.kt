@@ -95,8 +95,8 @@ class Repository(
     suspend fun refreshRoutes() = put("routes", api.getRaw("/v1/routes"))
     /** "Different route": this run leaves the route it was grouped with, for good. */
     /** Deletes a run on the server (kept aside there, never imported again), then refreshes what lists it. */
-    suspend fun deleteRun(sid: String) {
-        api.delete("/v1/activities/$sid", emptyMap())
+    suspend fun deleteRun(sid: String, alsoWatchletic: Boolean = false) {
+        api.delete("/v1/activities/$sid", if (alsoWatchletic) mapOf("also_watchletic" to "true") else emptyMap())
         put("activities", api.getRaw("/v1/activities"))
         runCatching { refreshAll() }
     }

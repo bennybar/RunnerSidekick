@@ -21,7 +21,7 @@ from test_multiuser import client
 @pytest.fixture
 def watchletic_mock():
     import fitgen
-    calls, state = [], {"refresh": "r1", "n": 0, "start": datetime(2026, 9, 29, 5, tzinfo=timezone.utc)}
+    calls, state = [], {"refresh": "r1", "n": 0, "start": datetime(2026, 9, 30, 5, tzinfo=timezone.utc)}
 
     def handler(req: httpx.Request) -> httpx.Response:
         calls.append(req)
@@ -61,6 +61,12 @@ def watchletic_mock():
             elif name == "export_activity_file":
                 assert args == {"activityId": "w-run", "format": "fit"}  # the test recording isn't downloaded
                 out = {"downloadUrl": "https://api.watchletic.com/mcp/download/wld_x"}
+            elif name == "preview_activity_delete":
+                assert args == {"activityId": "w-run", "revision": "r1"}
+                out = {"data": {"summary": "Delete workout", "confirmationToken": "ct1"}}
+            elif name == "apply_activity_delete":
+                assert args == {"activityId": "w-run", "revision": "r1", "confirmationToken": "ct1"}
+                state["deleted"] = True
             elif name == "get_training_context":
                 assert args["timeZone"] == "Asia/Jerusalem"
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": msg["id"], "result": {"structuredContent": out}})
@@ -76,10 +82,12 @@ def test_watchletic_connect_flow(tmp_path, watchletic_mock):
     c = client(tmp_path)
     h = {"Authorization": f"Bearer {create_token(tmp_path, 'o')}"}
     c.put("/v1/settings", json={"watch": "samsung"}, headers=h)
+    today = datetime.fromisoformat(c.get("/v1/status", headers=h).json()["today"])
+    state["start"] = today.replace(hour=5, tzinfo=timezone.utc)  # a run on the Samsung watch (it's the watch from today)
     assert c.get("/v1/watchletic", headers=h).json()["connected"] is False
     url = c.post("/v1/watchletic/start", headers=h).json()["authorize_url"]
     q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
-    assert q["client_id"] == "rs-client" and q["code_challenge_method"] == "S256" and q["scope"] == "watchletic.read"
+    assert q["client_id"] == "rs-client" and q["code_challenge_method"] == "S256" and q["scope"] == "watchletic.read watchletic.write"
     assert q["resource"] == wl.RESOURCE and q["redirect_uri"].endswith("/v1/watchletic/callback")
     # The callback page only hands the answer to the app
     page = c.get("/v1/watchletic/callback", params={"state": q["state"], "code": "good-code"})
@@ -99,6 +107,11 @@ def test_watchletic_connect_flow(tmp_path, watchletic_mock):
     assert {r["kind"] for r in conn.watchletic_raw.find({})} >= {"readiness", "context", "fitness", "tools"}
     # Seen at the same revision: nothing new the next time
     assert c.post("/v1/watchletic/sync", headers=h).json()["new_runs"] == 0
+    # The run says it came from Watchletic; deleting it with the box ticked deletes it there too (preview, then apply)
+    sid = f"fit-{int(state['start'].timestamp())}"
+    assert c.get(f"/v1/activities/{sid}", headers=h).json()["watchletic"] is True
+    assert c.delete(f"/v1/activities/{sid}", params={"also_watchletic": True}, headers=h).json() == {"deleted": sid}
+    assert state.get("deleted") and conn.watchletic_seen.find_one({"id": "w-run"}).get("deleted_there")
     # The client is registered once and reused
     assert sum(1 for x in calls if x.url.path == "/oauth/register") == 1
     # An expired access token is refreshed, and the rotated refresh token is the one kept

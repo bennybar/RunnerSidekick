@@ -1071,3 +1071,10 @@ After the round-4 review:
   weather, reports and AI input like any new run. First look back 90 days, in the background after connecting.
   Readiness, training context and fitness analytics are kept as they come (`watchletic_raw`). Seen workouts:
   `watchletic_seen`. Watchletic readiness has no HRV for this user (sleep and some resting HR only).
+
+## Watchletic: full access, delete there too (2026-10-20, v0.72.0)
+- The connection asks for read and write (`watchletic.write`), only so a run can be deleted in Watchletic: the run
+  screen's delete dialog has "Also delete it in Watchletic" for runs that came from it, unticked by default, each time
+  (preview_activity_delete, then apply with its confirmation token). If Watchletic refuses, nothing is deleted here
+  either. An older read-only connection shows "Reconnect" in Me. Our client is re-registered when its scope grows.
+- Imported runs remember their Watchletic workout (`watchletic_seen.source_id`); the run detail says `watchletic: true`.

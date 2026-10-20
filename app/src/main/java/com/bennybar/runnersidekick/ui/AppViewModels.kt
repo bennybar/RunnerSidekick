@@ -224,9 +224,10 @@ class ActivityVm(repo: Repository, val id: String) : BaseVm(repo) {
     fun loadRoutes() = launchIo { repo.refreshRoutes() }
     fun notThisRoute() = launchIo { repo.differentRoute(id) }
     fun holdOutVo2(held: Boolean) = launchIo { repo.holdOutVo2(id, held) }
-    fun deleteRun(onDone: () -> Unit) = viewModelScope.launch {
+    val watchletic = repo.watchletic.state(null)
+    fun deleteRun(alsoWatchletic: Boolean, onDone: () -> Unit) = viewModelScope.launch {
         var ok = false
-        runIo { repo.deleteRun(id); ok = true }
+        runIo { repo.deleteRun(id, alsoWatchletic); ok = true }
         if (ok) onDone()
     }
     val ai = repo.runAi(id).state(null)

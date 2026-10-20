@@ -1,6 +1,7 @@
 """Watchletic (a Galaxy Watch / Apple Watch workout app) through its official MCP endpoint, the route Watchletic offers
 third-party apps: OAuth 2.1 with S256 PKCE, the client registered dynamically (RFC 7591) with our HTTPS callback.
-Read-only (watchletic.read). Access tokens last an hour; refresh tokens rotate on every use and live 180 days, and
+Read and write (watchletic.read, watchletic.write: write only so the runner can delete a run there too, each time
+from the app's delete dialog). Access tokens last an hour; refresh tokens rotate on every use and live 180 days, and
 reusing a rotated one revokes the connection, so each refresh is saved before it's used and refreshes never overlap.
 Data access needs the user's Watchletic Club membership; without it the tools answer premium_required.
 Docs: github.com/watchletic/api (docs/authentication.md, docs/mcp.md)."""
@@ -24,7 +25,7 @@ from .db import utc_now
 
 BASE = "https://api.watchletic.com"
 RESOURCE = BASE + "/mcp"
-SCOPE = "watchletic.read"
+SCOPE = "watchletic.read watchletic.write"
 STATE_TTL_S = 600
 REFRESH_MARGIN_S = 120
 APP_RETURN = "runnersidekick://watchletic-callback"  # the callback page hands the answer to the app
@@ -56,7 +57,7 @@ def client_id(data_dir: Path, redirect_uri: str) -> str:
     p = data_dir / "watchletic_client.json"
     if p.exists():
         reg = json.loads(p.read_text())
-        if redirect_uri in reg.get("redirect_uris", []):
+        if redirect_uri in reg.get("redirect_uris", []) and set(SCOPE.split()) <= set((reg.get("scope") or "").split()):
             return reg["client_id"]
     with _client() as c:
         r = c.post(BASE + "/oauth/register", json={
@@ -65,7 +66,7 @@ def client_id(data_dir: Path, redirect_uri: str) -> str:
     if r.status_code >= 300:
         raise WatchleticError(f"Watchletic didn't register the app ({r.status_code}).")
     reg = r.json()
-    _write_private(p, {**reg, "redirect_uris": reg.get("redirect_uris") or [redirect_uri]})
+    _write_private(p, {**reg, "redirect_uris": reg.get("redirect_uris") or [redirect_uri], "scope": reg.get("scope") or SCOPE})
     return reg["client_id"]
 
 
@@ -125,7 +126,8 @@ def complete(app_conn, state: str, code: str, data_dir: Path, redirect_uri: str,
 
 def status(user_dir: Path) -> dict:
     t = _load(user_dir)
-    return {"connected": bool(t), "linked_at": t.get("linked_at"), "last_sync": t.get("last_sync"), "problem": t.get("problem")}
+    return {"connected": bool(t), "linked_at": t.get("linked_at"), "last_sync": t.get("last_sync"), "problem": t.get("problem"),
+            "can_delete": "watchletic.write" in (t.get("scope") or "").split()}
 
 
 def access_token(user_dir: Path, data_dir: Path, redirect_uri: str) -> str:
@@ -254,14 +256,16 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
                 seen = conn.watchletic_seen.find_one({"id": a["id"]})
                 if seen and seen.get("revision") == a.get("revision"):
                     continue
-                note = "imported"
+                note, sid = "imported", None
                 if (a.get("durationSeconds") or 0) < fit.MIN_RUN_S or (a.get("distanceMeters") or 0) < fit.MIN_RUN_M:
                     note = "too short to be a run"
                     got["skipped"] += 1
                 else:
                     try:
                         f = m.tool("export_activity_file", {"activityId": a["id"], "format": "fit"})
-                        ch, rs = fit.ingest(conn, stream, _download(f["downloadUrl"]))
+                        data = _download(f["downloadUrl"])
+                        ch, rs = fit.ingest(conn, stream, data)
+                        sid = fit.parse(data)[0].source_id
                         dates |= ch
                         runs += rs
                         got["new_runs"] += len(rs)
@@ -270,7 +274,8 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
                         conn.watchletic_seen.update_one({"id": a["id"]}, {"$set": {"error": str(e)[:300], "at": utc_now()}}, upsert=True)
                         continue
                 conn.watchletic_seen.replace_one({"id": a["id"]}, {"id": a["id"], "revision": a.get("revision"), "date": a.get("date"),
-                                                                   "note": note, "at": utc_now()}, upsert=True)
+                                                                   "note": note, "at": utc_now(),
+                                                                   **({"source_id": sid} if note == "imported" else {})}, upsert=True)
             cursor = page.get("nextCursor")
             if not cursor:
                 break
@@ -285,3 +290,36 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
             conn.watchletic_raw.insert_one({"kind": "tools", "at": utc_now(), "data": m.call("tools/list").get("tools", [])})
     mark(user_dir, last_sync=utc_now(), problem=None)
     return dates, runs, got
+
+
+def workout_of(conn, source_id: str) -> dict | None:
+    """The Watchletic workout a run of ours came from, if it did."""
+    return conn.watchletic_seen.find_one({"source_id": source_id})
+
+
+def delete_workout(conn, source_id: str, user_dir: Path, data_dir: Path, redirect_uri: str) -> bool:
+    """Deletes in Watchletic the workout this run came from (the runner ticked it in the app's delete dialog, which is the
+    explicit confirmation Watchletic asks for): its preview, then the apply with the preview's confirmation token."""
+    w = workout_of(conn, source_id)
+    if not w:
+        return False
+    args = {"activityId": w["id"], **({"revision": w["revision"]} if w.get("revision") else {})}
+    with Mcp(access_token(user_dir, data_dir, redirect_uri)) as m:
+        preview = m.tool("preview_activity_delete", args)
+        token = _find(preview, "confirmationToken")
+        if not token:
+            raise WatchleticError("Watchletic didn't confirm the deletion.")
+        m.tool("apply_activity_delete", {**args, "confirmationToken": token})
+    conn.watchletic_seen.update_one({"id": w["id"]}, {"$set": {"deleted_there": utc_now()}})
+    return True
+
+
+def _find(x, key: str):
+    """A key anywhere in a nested answer (where Watchletic puts the confirmation token)."""
+    if isinstance(x, dict):
+        if key in x:
+            return x[key]
+        return next((v for v in (_find(y, key) for y in x.values()) if v), None)
+    if isinstance(x, list):
+        return next((v for v in (_find(y, key) for y in x) if v), None)
+    return None
