@@ -276,7 +276,7 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
                 break
         # Kept as they came, nothing derived from them yet
         for kind, name, args in (("readiness", "list_readiness", {"limit": 100}), ("context", "get_training_context", {"timeZone": tz}),
-                                 ("fitness", "get_fitness_analytics", {})):
+                                 ("fitness", "get_fitness_analytics", {"timeZone": tz})):
             try:
                 conn.watchletic_raw.replace_one({"kind": kind}, {"kind": kind, "at": utc_now(), "data": m.tool(name, args)}, upsert=True)
             except WatchleticError as e:
