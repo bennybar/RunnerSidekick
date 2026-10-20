@@ -62,10 +62,10 @@ def watchletic_mock():
                 assert args == {"activityId": "w-run", "format": "fit"}  # the test recording isn't downloaded
                 out = {"downloadUrl": "https://api.watchletic.com/mcp/download/wld_x"}
             elif name == "preview_activity_delete":
-                assert args == {"activityId": "w-run", "revision": "r1"}
+                assert args == {"id": "w-run", "revision": "r1"}  # as the real one: "This operation requires id"
                 out = {"data": {"summary": "Delete workout", "confirmationToken": "ct1"}}
             elif name == "apply_activity_delete":
-                assert args == {"activityId": "w-run", "revision": "r1", "confirmationToken": "ct1"}
+                assert args == {"id": "w-run", "revision": "r1", "confirmationToken": "ct1"}
                 state["deleted"] = True
             elif name == "get_training_context":
                 assert args["timeZone"] == "Asia/Jerusalem"

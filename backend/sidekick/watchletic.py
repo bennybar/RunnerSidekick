@@ -303,7 +303,7 @@ def delete_workout(conn, source_id: str, user_dir: Path, data_dir: Path, redirec
     w = workout_of(conn, source_id)
     if not w:
         return False
-    args = {"activityId": w["id"], **({"revision": w["revision"]} if w.get("revision") else {})}
+    args = {"id": w["id"], **({"revision": w["revision"]} if w.get("revision") else {})}  # preview/apply take id, not activityId
     with Mcp(access_token(user_dir, data_dir, redirect_uri)) as m:
         preview = m.tool("preview_activity_delete", args)
         token = _find(preview, "confirmationToken")
