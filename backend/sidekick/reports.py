@@ -647,6 +647,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     plan = one(conn.day_plan, {"local_date": a["local_date"]})
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "plan": (plan or {}).get("kind"), "plan_minutes": (plan or {}).get("minutes"), "vo2_ours": body["vo2_ours"],
+              "hr_sensor": body["hr_sensor"], "recorded_with": body["recorded_with"],
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
               "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day, "heat": heat}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
