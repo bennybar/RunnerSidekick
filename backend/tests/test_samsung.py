@@ -247,7 +247,7 @@ def test_samsung_run_export_names_its_sources():
     rp.build_post_run(conn, "garmin", "samsung-e", False)
     md = run_export.markdown(conn, "garmin", "samsung-e", fetch=lambda *a, **k: None)[1]
     assert "VO₂ max (Samsung estimate, device value): **55.4**" in md and "Garmin estimate" not in md
-    assert "Heart-rate recording quality: **Good**" in md and "VO₂ source: **Samsung (device estimate)**" in md
+    assert "Heart-rate recording quality: **Good**" in md and "VO₂ source: **Samsung (the watch's estimate for the day, not from this run)**" in md
     assert "Running dynamics source: **Not accessible via the current Samsung integration**" in md
 
 

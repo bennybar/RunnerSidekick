@@ -144,6 +144,31 @@ def _num(v) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
 
 
+def km_laps(s: Samples, start: datetime, dt: list[float]) -> list[Lap]:
+    """1 km splits from the samples' own distance (the last one is what's left), like Garmin's automatic laps. dt is
+    the time each sample closes (0 across a gap). Samples without a distance (before GPS is found) start no split."""
+    laps: list[Lap] = []
+    first = next((i for i, d in enumerate(s.dist) if d is not None), None)
+    if first is None:
+        return laps
+    last = max(i for i, d in enumerate(s.dist) if d is not None)
+    for i in range(first + 1, last + 1):
+        if s.dist[i] is None or (s.dist[i] < (len(laps) + 1) * 1000 and i < last):
+            continue
+        seg = range(first + 1, i + 1)
+        hr = [s.hr[j] for j in seg if s.hr[j] is not None]
+        cad = [s.cad[j] for j in seg if s.cad[j] is not None]
+        el = [s.elev[j] for j in range(first, i + 1, 10) if s.elev[j] is not None]  # every 10 s: GPS altitude is noisy
+        laps.append(Lap(idx=len(laps), start_utc=_iso(start + timedelta(seconds=s.t[first])),
+                        distance_m=round(s.dist[i] - s.dist[first], 1), elapsed_s=s.t[i] - s.t[first],
+                        moving_s=float(sum(dt[j] for j in seg if (s.speed[j] or 0) >= 0.5)),
+                        avg_hr=round(sum(hr) / len(hr), 1) if hr else None, max_hr=max(hr) if hr else None,
+                        elevation_gain_m=round(sum(max(0.0, b - a) for a, b in zip(el, el[1:])), 1) if len(el) > 1 else None,
+                        avg_cadence_spm=round(sum(cad) / len(cad), 1) if cad else None))
+        first = i
+    return [l for l in laps if l.distance_m and l.distance_m > 0]
+
+
 def activity(a: dict) -> Activity:
     """One workout from the phone: the summary, the per-second log [ms, hr, speed m/s, cadence spm, power W] and the
     route [ms, lat, lon, altitude]. Samples go on a one-second grid (the watch logs heart rate and speed in separate
@@ -183,24 +208,7 @@ def activity(a: dict) -> Activity:
         samples = Samples(t=[float(s) for s in secs], hr=valid_hr([by_s[s][0] for s in secs]), speed=[by_s[s][1] for s in secs],
                           dist=dist, elev=elev, cad=[by_s[s][2] for s in secs], power=power if any(p is not None for p in power) else None)
     # Samsung keeps no laps: 1 km splits from the samples, like Garmin's automatic laps (the last one is what's left)
-    laps: list[Lap] = []
-    if samples:
-        s, first = samples, 0
-        for i in range(1, len(s.t)):
-            if s.dist[i] < (len(laps) + 1) * 1000 and i < len(s.t) - 1:
-                continue
-            seg = range(first + 1, i + 1)
-            hr = [s.hr[j] for j in seg if s.hr[j] is not None]
-            cad = [s.cad[j] for j in seg if s.cad[j] is not None]
-            el = [s.elev[j] for j in range(first, i + 1, 10) if s.elev[j] is not None]  # every 10 s: GPS altitude is noisy
-            laps.append(Lap(idx=len(laps), start_utc=_iso(start + timedelta(seconds=s.t[first])),
-                            distance_m=round(s.dist[i] - s.dist[first], 1), elapsed_s=s.t[i] - s.t[first],
-                            moving_s=float(sum(dt[j] for j in seg if (s.speed[j] or 0) >= 0.5)),
-                            avg_hr=round(sum(hr) / len(hr), 1) if hr else None, max_hr=max(hr) if hr else None,
-                            elevation_gain_m=round(sum(max(0.0, b - a) for a, b in zip(el, el[1:])), 1) if len(el) > 1 else None,
-                            avg_cadence_spm=round(sum(cad) / len(cad), 1) if cad else None))
-            first = i
-        laps = [l for l in laps if l.distance_m and l.distance_m > 0]
+    laps = km_laps(samples, start, dt) if samples else []
     if len(route) >= 10:
         along, run = [0.0], 0.0
         for p, q in zip(route, route[1:]):

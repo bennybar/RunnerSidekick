@@ -16,12 +16,13 @@ from pymongo.database import Database
 
 from .connectors.base import Activity, Lap, RawPayload, Samples, valid_hr
 from .routes import shape_from_track
-from .samsung import MIN_RUN_M, MIN_RUN_S, SAME_RUN_S, SAMSUNG, _iso, climb, watch_on
+from .samsung import MIN_RUN_M, MIN_RUN_S, SAME_RUN_S, SAMSUNG, _iso, climb, km_laps, watch_on
 from .store import save_activity
 
-FIT_CONVERSION = 1          # raised when the conversion changes, so files sent again are converted again
+FIT_CONVERSION = 2          # raised when the conversion changes, so files sent again are converted again
 SEMI = 180 / 2 ** 31        # FIT positions are semicircles
 MOVING_SPEED, GAP_S = 0.5, 10.0
+CAD_HOLD_S = 5.0            # Watchletic repeats the last cadence reading in every record; past this it's not a reading
 SPORTS = {("running", "treadmill"): "treadmill_running", ("running", "trail"): "trail_running", ("running", None): "running"}
 LAP_INTENSITY = {"active": "ACTIVE", "rest": "REST", "recovery": "RECOVERY", "warmup": "WARMUP", "cooldown": "COOLDOWN",
                  "interval": "INTERVAL"}
@@ -66,6 +67,17 @@ def parse(data: bytes) -> tuple[Activity, dict]:
 
     recs = [r for r in records if r.get("timestamp")]
     cad_raw = [(_v(r.get("cadence")) or 0) + (r.get("fractional_cadence") or 0) for r in recs]
+    if device.get("product_name") == "Watchletic":
+        # Its watch reports cadence only now and then, and every record carries the last reading on (two thirds of
+        # the 22 Oct 2026 run's records were over 5 s old, some a minute): an unchanged value is kept for 5 s, then
+        # left out rather than counted as a new reading
+        since, read = None, list(cad_raw)
+        for i, r in enumerate(recs):
+            ts = _utc(r["timestamp"])
+            if i == 0 or read[i] != read[i - 1]:
+                since = ts
+            elif (ts - since).total_seconds() > CAD_HOLD_S:
+                cad_raw[i] = 0
     # FIT keeps running cadence in strides a minute (one foot); steps are twice that, unless the file already has steps
     cad_steps = median([c for c in cad_raw if c]) > 120 if any(cad_raw) else False
     t, hr, sp, dist, elev, cad, pw, lat, lon = [], [], [], [], [], [], [], [], []
@@ -91,7 +103,10 @@ def parse(data: bytes) -> tuple[Activity, dict]:
     shape = shape_from_track([d for d in dist], lat, lon) if t and any(lat) else None
 
     out_laps = []
-    for i, l in enumerate(laps):
+    if len(laps) <= 1 and samples and (_v(session.get("total_distance")) or 0) > 1000:
+        # One lap for the whole run (Watchletic writes no splits): 1 km splits from the samples' distance instead
+        out_laps = km_laps(samples, start, [0.0] + [b - a if 0 < b - a <= GAP_S else 0.0 for a, b in zip(t, t[1:])])
+    for i, l in enumerate([] if out_laps else laps):
         ls = l.get("start_time")
         lc = _v(l.get("avg_running_cadence")) or _v(l.get("avg_cadence"))
         out_laps.append(Lap(idx=i, start_utc=_iso(_utc(ls)) if ls else None, distance_m=_v(l.get("total_distance")),

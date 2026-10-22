@@ -227,6 +227,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     if r.get("step_length_m"):
         add(f"Cadence: **{num(a.get('avg_cadence_spm'))} spm** · step length **{r['step_length_m']:.2f} m** (distance ÷ steps)  ")
     samsung = a.get("manufacturer") == "Samsung"
+    gtii = sid.startswith("fit-")
+    app = a.get("recorded_with") or ("GTII" if gtii else None)  # Watchletic's runs come as FIT files too
     if r.get("garmin_vo2max_day"):  # the watch's own estimate: Samsung's on a Samsung run (run report picks it)
         add(f"VO₂ max ({'Samsung' if samsung else 'Garmin'} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
     ours = r.get("vo2_ours") or {}
@@ -310,6 +312,9 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     if zt:
         add("## Heart-rate zones")
         L.extend(zt)
+        if hrq and hrq["grade"] != "good":
+            add("The heart-rate recording looked questionable in parts (see Heart-rate recording quality): these times are "
+                "from the readings as recorded, and less certain.")
         add("")
 
     # 7. Pace and splits
@@ -386,6 +391,21 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("|---:|---:|---|")
         L.extend(f"| {clock(x['start_s'])} | {clock(x['end_s'])} | {x['reason']} |" for x in hrq["stretches"])
         add("")
+        if s is not None:
+            # A sensitivity check: the same time-weighted average with and without the flagged stretches
+            from .analytics.running import _weights
+            w = _weights(s)
+
+            def hr_mean(skip):
+                pts = [(w[i], s.hr[i]) for i in range(len(s.t)) if w[i] > 0 and s.hr[i] is not None
+                       and not (skip and any(x["start_s"] <= s.t[i] <= x["end_s"] for x in hrq["stretches"]))]
+                return sum(a * h for a, h in pts) / sum(a for a, _ in pts) if pts else None
+            allr, without = hr_mean(False), hr_mean(True)
+            if allr and without:
+                add(f"Sensitivity check, not a correction: from the samples (time-weighted, moving), the average heart rate is "
+                    f"{allr:.0f} bpm with every reading and {without:.0f} bpm without the flagged stretches. The recorded "
+                    "readings stay as they are, and nothing is filled in.")
+                add("")
 
     # 9. Running dynamics: Garmin's averages, with the halves from the samples
     dyn = (s.dyn or {}) if s is not None else {}
@@ -409,7 +429,16 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("|---|---:|---:|---:|---:|")
         L.extend(rows)
         add("")
-        add("Averages and maxima from Garmin; halves are equal halves of moving time, from the watch's samples.")
+        cov = [i for i in range(len(s.t)) if s.cad[i] and (s.speed[i] or 0) >= 0.5] if s is not None else []
+        from .analytics.running import _weights
+        w = _weights(s) if s is not None else []
+        covered = sum(w[i] for i in cov)
+        add(f"Averages and maxima from {app or ('the Samsung watch' if samsung else 'Garmin')}; halves are equal halves of "
+            "moving time (warm-up included), time-weighted over the samples that hold a reading, and left out (–) when "
+            "either half has readings for less than half its time."
+            + (f" Cadence: {app} repeats the watch's last reading in every record, so repeats past 5 s are left out; "
+               f"the remaining readings cover {covered / sum(w):.0%} of moving time and average "
+               f"{sum(w[i] * s.cad[i] for i in cov) / covered:.0f} spm (time-weighted)." if app == "Watchletic" and covered else ""))
         add("")
 
     # 11. Recovery context (no reliable heart-rate recovery after the stop, so that section is left out)
@@ -636,8 +665,6 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
 
     # 20. Data provenance
     add("## Data provenance")
-    gtii = sid.startswith("fit-")
-    app = a.get("recorded_with") or ("GTII" if gtii else None)  # Watchletic's runs come as FIT files too
     hrs = a.get("hr_sensor")
     prov = [("Activity device", ("Samsung Galaxy Watch" if samsung else (a.get("manufacturer") or "Garmin").capitalize())
                                 + (f" ({a['device_id']})" if a.get("device_id") else "")),
@@ -646,12 +673,14 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             ("HR source", (f"External heart-rate sensor{' ' + hrs['name'] if hrs.get('name') else ''} (paired in {app})" if hrs else
                            f"Galaxy Watch optical sensor, or a strap paired in {app}") if gtii else "Galaxy Watch optical sensor (wrist)" if samsung
              else "Garmin watch (wrist, or a paired strap)"),
-            ("Pace, cadence, elevation", f"{app} samples from the Galaxy Watch" if gtii else "Galaxy Watch samples (elevation from GPS)" if samsung
+            ("Pace, cadence, elevation", "Watchletic samples from the Galaxy Watch: pace and distance from GPS, cadence from "
+             "the watch (the HR sensor has none), elevation from the GPS fixes' altitude" if app == "Watchletic" else
+             f"{app} samples from the Galaxy Watch" if gtii else "Galaxy Watch samples (elevation from GPS)" if samsung
              else "Garmin watch samples"),
             ("Running dynamics source", (f"A sensor paired in {app}" if dyn else None) if gtii else
              "Not accessible via the current Samsung integration" if samsung else ("Garmin" if dyn else None)),
             ("Power", "Garmin" if g.get("avgPower") else None),
-            ("VO₂ source", "Samsung (device estimate)" if samsung else "Garmin (device estimate)"),
+            ("VO₂ source", "Samsung (the watch's estimate for the day, not from this run)" if samsung else "Garmin (device estimate)"),
             ("Training effect, training load", "Runner Sidekick training load (no Training Effect from Samsung)" if samsung else "Garmin"),
             ("HR-zone threshold source", "Garmin-derived (your Garmin profile)"),
             ("Recovery context source", ("Samsung watch daily data and Runner Sidekick's resting HR estimate" if samsung

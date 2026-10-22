@@ -1091,3 +1091,13 @@ After the round-4 review:
   says "connected the whole run" or "dropped out at 15:00, back at 16:00". The 22 Oct run: connected throughout (no
   dropout logged); its 15–18 min dip (HR ~30 bpm down at the same pace, then back to 167) is the armband reading low,
   flagged "questionable" by the HR recording-quality check.
+- Watchletic FIT audit (22 Oct run, against the original FIT and Watchletic's own JSON samples):
+  cadence is right as steps (FIT 91 strides ×2 = 182 = Watchletic's figure), but Watchletic repeats the watch's last
+  cadence reading in every record (two thirds of the records were over 5 s old, up to a minute), which made the
+  203–221 spm minutes and the halves (184/187, above the 182 average). FIT conversion 2: in Watchletic files an
+  unchanged cadence is kept for 5 s, then left out (matches the raw channel: 689 of 718 kept records within 5 s of a
+  reading). Watchletic writes one lap for the whole run, so a FIT with one lap now gets 1 km splits from its distance
+  samples (`samsung.km_laps`, shared with Samsung). The 15–18 min HR dip is in the original file (no gap, no zero, no
+  sensor dropout logged): kept as recorded. Export: no "from Garmin" on a Watchletic run, halves say warm-up included
+  and how they're weighted, a zone caveat and an HR sensitivity check when HR quality isn't good, provenance per field.
+  Regression fixture: tests/data/watchletic_2026-10-22.fit (the real file without positions).
