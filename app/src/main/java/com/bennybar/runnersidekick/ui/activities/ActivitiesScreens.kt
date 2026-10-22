@@ -472,8 +472,14 @@ private fun RunTitle(r: PostRunReport) {
         Text(day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()) + " run",
             style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
         Text(listOfNotNull(day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM")),
-            Format.activityTime(a.startUtc, a.utcOffsetS).substringAfter(" · "), displayName(a.name)).joinToString(" · "),
+            Format.activityTime(a.startUtc, a.utcOffsetS).substringAfter(" · "), displayName(a.name),
+            r.recordedWith?.let { "recorded with $it" }).joinToString(" · "),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Where the heart rate came from, when it wasn't the watch's own sensor
+        r.hrSensor?.let { s ->
+            Text("Heart rate from ${s.name ?: "an external sensor"}" + (if (s.name != null) " (external sensor)" else ""),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

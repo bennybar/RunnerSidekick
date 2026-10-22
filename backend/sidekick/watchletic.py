@@ -249,6 +249,7 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
     got = {"new_runs": 0, "skipped": 0, "failed": 0}
     since = (datetime.now(timezone.utc) - timedelta(days=BACKFILL_DAYS)).isoformat().replace("+00:00", "Z")
     with Mcp(access_token(user_dir, data_dir, redirect_uri)) as m:
+        devices: list | None = None  # Watchletic's paired sensors, read once when a run used one
         cursor = None
         while True:
             page = m.tool("list_activities", {"activityType": "running", "from": since, "limit": 100, **({"cursor": cursor} if cursor else {})})
@@ -269,6 +270,15 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
                         dates |= ch
                         runs += rs
                         got["new_runs"] += len(rs)
+                        # Which app recorded it, and the heart-rate sensor when it was an external one: the FIT file only
+                        # says "Heart Rate Monitor", Watchletic's device list has its name (when it knows just one)
+                        extra = {"recorded_with": "Watchletic"}
+                        if "heartRateMonitor" in (a.get("bluetoothDevices") or []):
+                            if devices is None:
+                                devices = (m.tool("list_devices") or {}).get("data", [])
+                            hrms = [d for d in devices if d.get("type") == "heartRateMonitor"]
+                            extra["hr_sensor"] = {"name": hrms[0].get("name") if len(hrms) == 1 else None, "kind": "external"}
+                        conn.activity.update_many({"source_id": sid}, {"$set": extra})
                     except Exception as e:  # one bad workout doesn't stop the rest; it's tried again next time
                         got["failed"] += 1
                         conn.watchletic_seen.update_one({"id": a["id"]}, {"$set": {"error": str(e)[:300], "at": utc_now()}}, upsert=True)

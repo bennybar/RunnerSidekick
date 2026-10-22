@@ -440,6 +440,10 @@ data class PostRunReport(
     val verdict: RunVerdict? = null,
     /** The watch that recorded the run: "Garmin" or "Samsung" */
     val watch: String = "Garmin",
+    /** The app on the watch that recorded it, when it wasn't the watch's own ("Watchletic") */
+    @SerialName("recorded_with") val recordedWith: String? = null,
+    /** An external heart-rate sensor (strap or armband), with its name when known */
+    @SerialName("hr_sensor") val hrSensor: HrSensor? = null,
     /** Runner Sidekick's VO2 max from this run, or why it doesn't give one */
     @SerialName("vo2_ours") val vo2Ours: RunVo2? = null,
     @SerialName("garmin_readiness_day") val garminReadinessDay: Point? = null,
@@ -1023,3 +1027,6 @@ data class WatchleticStatus(
     /** Full access approved, so a run can also be deleted in Watchletic (an older read-only connection can't) */
     @SerialName("can_delete") val canDelete: Boolean = false,
 )
+
+@Serializable
+data class HrSensor(val name: String? = null, val kind: String = "external")

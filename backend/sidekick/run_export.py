@@ -637,15 +637,18 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     # 20. Data provenance
     add("## Data provenance")
     gtii = sid.startswith("fit-")
+    app = a.get("recorded_with") or ("GTII" if gtii else None)  # Watchletic's runs come as FIT files too
+    hrs = a.get("hr_sensor")
     prov = [("Activity device", ("Samsung Galaxy Watch" if samsung else (a.get("manufacturer") or "Garmin").capitalize())
                                 + (f" ({a['device_id']})" if a.get("device_id") else "")),
-            ("Activity source", "GTII on the Galaxy Watch (FIT file)" if gtii else "Samsung Health (Galaxy Watch recording)" if samsung
+            ("Activity source", f"{app} on the Galaxy Watch (FIT file)" if gtii else "Samsung Health (Galaxy Watch recording)" if samsung
              else "Garmin Connect (watch recording)"),
-            ("HR source", "Galaxy Watch optical sensor, or a strap paired in GTII" if gtii else "Galaxy Watch optical sensor (wrist)" if samsung
+            ("HR source", (f"External heart-rate sensor{' ' + hrs['name'] if hrs.get('name') else ''} (paired in {app})" if hrs else
+                           f"Galaxy Watch optical sensor, or a strap paired in {app}") if gtii else "Galaxy Watch optical sensor (wrist)" if samsung
              else "Garmin watch (wrist, or a paired strap)"),
-            ("Pace, cadence, elevation", "GTII samples from the Galaxy Watch" if gtii else "Galaxy Watch samples (elevation from GPS)" if samsung
+            ("Pace, cadence, elevation", f"{app} samples from the Galaxy Watch" if gtii else "Galaxy Watch samples (elevation from GPS)" if samsung
              else "Garmin watch samples"),
-            ("Running dynamics source", ("A sensor paired in GTII" if dyn else None) if gtii else
+            ("Running dynamics source", (f"A sensor paired in {app}" if dyn else None) if gtii else
              "Not accessible via the current Samsung integration" if samsung else ("Garmin" if dyn else None)),
             ("Power", "Garmin" if g.get("avgPower") else None),
             ("VO₂ source", "Samsung (device estimate)" if samsung else "Garmin (device estimate)"),

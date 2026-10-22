@@ -56,7 +56,8 @@ def watchletic_mock():
             name, args = msg["params"].get("name"), msg["params"].get("arguments", {})
             out = {}
             if name == "list_activities":
-                out = {"data": [{"id": "w-run", "revision": "r1", "durationSeconds": 900, "distanceMeters": 1440},
+                out = {"data": [{"id": "w-run", "revision": "r1", "durationSeconds": 900, "distanceMeters": 1440,
+                                 "bluetoothDevices": ["heartRateMonitor"]},
                                 {"id": "w-test", "revision": "r1", "durationSeconds": 33, "distanceMeters": 0}], "nextCursor": None}
             elif name == "export_activity_file":
                 assert args == {"activityId": "w-run", "format": "fit"}  # the test recording isn't downloaded
@@ -67,6 +68,8 @@ def watchletic_mock():
             elif name == "apply_activity_delete":
                 assert args == {"id": "w-run", "revision": "r1", "confirmationToken": "ct1"}
                 state["deleted"] = True
+            elif name == "list_devices":
+                out = {"data": [{"type": "heartRateMonitor", "name": "HW9 17586", "capabilities": ["heartRate"]}]}
             elif name == "get_training_context":
                 assert args["timeZone"] == "Asia/Jerusalem"
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": msg["id"], "result": {"structuredContent": out}})
@@ -109,7 +112,10 @@ def test_watchletic_connect_flow(tmp_path, watchletic_mock):
     assert c.post("/v1/watchletic/sync", headers=h).json()["new_runs"] == 0
     # The run says it came from Watchletic; deleting it with the box ticked deletes it there too (preview, then apply)
     sid = f"fit-{int(state['start'].timestamp())}"
-    assert c.get(f"/v1/activities/{sid}", headers=h).json()["watchletic"] is True
+    detail = c.get(f"/v1/activities/{sid}", headers=h).json()
+    assert detail["watchletic"] is True
+    # The external heart-rate sensor is named (Watchletic knows one), and the run says what recorded it
+    assert detail["report"]["hr_sensor"] == {"name": "HW9 17586", "kind": "external"} and detail["report"]["recorded_with"] == "Watchletic"
     assert c.delete(f"/v1/activities/{sid}", params={"also_watchletic": True}, headers=h).json() == {"deleted": sid}
     assert state.get("deleted") and conn.watchletic_seen.find_one({"id": "w-run"}).get("deleted_there")
     # The client is registered once and reused

@@ -1078,3 +1078,11 @@ After the round-4 review:
   (preview_activity_delete, then apply with its confirmation token). If Watchletic refuses, nothing is deleted here
   either. An older read-only connection shows "Reconnect" in Me. Our client is re-registered when its scope grows.
 - Imported runs remember their Watchletic workout (`watchletic_seen.source_id`); the run detail says `watchletic: true`.
+
+## Watchletic runs: recording app and heart-rate sensor (2026-10-22, v0.73.0)
+- A run from Watchletic says so ("recorded with Watchletic") and, when it used an external heart-rate sensor, names it
+  ("Heart rate from HW9 17586 (external sensor)"): the FIT file only says "Heart Rate Monitor", so the name comes from
+  Watchletic's device list (when it knows exactly one; else "an external sensor"). Stored on the activity
+  (`recorded_with`, `hr_sensor`), in the run report (report-2.14) and in the Markdown export's data provenance.
+- First real run checked: 5.04 km, 27:57, HR avg 158 / max 181 from the HW9 armband (1,674 samples), GPS, cadence 182
+  spm (FIT strides doubled), 50 m climb. Beat-to-beat intervals weren't recorded (the sensor reports it supports them).
