@@ -463,6 +463,17 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
     evidence?.let { EvidenceSheet(it) { evidence = null } }
 }
 
+/** The sensor's connection log in words: each dropout with when it came back, or that it stayed connected. */
+private fun sensorLog(s: com.bennybar.runnersidekick.data.remote.HrSensor): String {
+    if (!s.logged) return ""
+    val drops = s.events.filter { it.event.contains("disconnect", ignoreCase = true) }
+    if (drops.isEmpty()) return " · connected the whole run"
+    return " · " + drops.joinToString("; ") { d ->
+        val back = s.events.firstOrNull { it.atS > d.atS && it.event.contains("connected", ignoreCase = true) && !it.event.contains("disconnect", ignoreCase = true) }
+        "dropped out at ${Format.duration(d.atS)}" + (back?.let { ", back at ${Format.duration(it.atS)}" } ?: " and didn't come back")
+    }
+}
+
 /** The page's big title: the run's day ("Sunday run"), then the date, start time and the run's name. */
 @Composable
 private fun RunTitle(r: PostRunReport) {
@@ -477,7 +488,7 @@ private fun RunTitle(r: PostRunReport) {
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         // Where the heart rate came from, when it wasn't the watch's own sensor
         r.hrSensor?.let { s ->
-            Text("Heart rate from ${s.name ?: "an external sensor"}" + (if (s.name != null) " (external sensor)" else ""),
+            Text("Heart rate from ${s.name ?: "an external sensor"}" + (if (s.name != null) " (external sensor)" else "") + sensorLog(s),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

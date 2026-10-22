@@ -1029,4 +1029,9 @@ data class WatchleticStatus(
 )
 
 @Serializable
-data class HrSensor(val name: String? = null, val kind: String = "external")
+data class HrSensor(val name: String? = null, val kind: String = "external",
+                    /** Its connection log, when the recording app keeps one (Watchletic): connects and dropouts */
+                    val logged: Boolean = false, val events: List<SensorEvent> = emptyList())
+
+@Serializable
+data class SensorEvent(@SerialName("at_s") val atS: Double, val event: String, val device: String? = null)

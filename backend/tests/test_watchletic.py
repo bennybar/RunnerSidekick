@@ -39,6 +39,13 @@ def watchletic_mock():
             state["n"] += 1
             state["refresh"] = f"r{state['n'] + 1}"
             return httpx.Response(200, json={"access_token": f"a{state['n'] + 1}", "refresh_token": state["refresh"], "expires_in": 3600})
+        if path == "/mcp/download/wld_json":  # the native JSON export: its diagnostics carry the sensor's connection log
+            t0 = int(state["start"].timestamp() * 1000)
+            return httpx.Response(200, json={"diagnostics": {"workoutStartedAtMs": t0, "expectedSources": {"bpms": {"deviceName": "HW9 17586"}},
+                "events": [{"timestampMs": t0 + 50, "type": "bluetoothConnected", "source": "bluetooth", "deviceName": "HW9 17586"},
+                           {"timestampMs": t0 + 900_000, "type": "bluetoothDisconnected", "source": "bluetooth", "deviceName": "HW9 17586"},
+                           {"timestampMs": t0 + 960_000, "type": "bluetoothConnected", "source": "bluetooth", "deviceName": "HW9 17586"},
+                           {"timestampMs": t0 + 2_000, "type": "heartRateSampleStatusChanged", "source": "healthServices"}]}})
         if path.startswith("/mcp/download/"):
             return httpx.Response(200, content=fitgen.run(state["start"]), headers={"content-type": "application/vnd.ant.fit"})
         if path == "/mcp":
@@ -60,8 +67,8 @@ def watchletic_mock():
                                  "bluetoothDevices": ["heartRateMonitor"]},
                                 {"id": "w-test", "revision": "r1", "durationSeconds": 33, "distanceMeters": 0}], "nextCursor": None}
             elif name == "export_activity_file":
-                assert args == {"activityId": "w-run", "format": "fit"}  # the test recording isn't downloaded
-                out = {"downloadUrl": "https://api.watchletic.com/mcp/download/wld_x"}
+                assert args["activityId"] == "w-run"  # the test recording isn't downloaded
+                out = {"downloadUrl": "https://api.watchletic.com/mcp/download/" + ("wld_json" if args["format"] == "json" else "wld_x")}
             elif name == "preview_activity_delete":
                 assert args == {"id": "w-run", "revision": "r1"}  # as the real one: "This operation requires id"
                 out = {"data": {"summary": "Delete workout", "confirmationToken": "ct1"}}
@@ -115,7 +122,11 @@ def test_watchletic_connect_flow(tmp_path, watchletic_mock):
     detail = c.get(f"/v1/activities/{sid}", headers=h).json()
     assert detail["watchletic"] is True
     # The external heart-rate sensor is named (Watchletic knows one), and the run says what recorded it
-    assert detail["report"]["hr_sensor"] == {"name": "HW9 17586", "kind": "external"} and detail["report"]["recorded_with"] == "Watchletic"
+    assert detail["report"]["recorded_with"] == "Watchletic"
+    assert detail["report"]["hr_sensor"] == {"name": "HW9 17586", "kind": "external", "logged": True, "events": [
+        {"at_s": 0, "event": "bluetoothConnected", "device": "HW9 17586"},
+        {"at_s": 900, "event": "bluetoothDisconnected", "device": "HW9 17586"},
+        {"at_s": 960, "event": "bluetoothConnected", "device": "HW9 17586"}]}  # the watch's own sensor events aren't the sensor's
     assert c.delete(f"/v1/activities/{sid}", params={"also_watchletic": True}, headers=h).json() == {"deleted": sid}
     assert state.get("deleted") and conn.watchletic_seen.find_one({"id": "w-run"}).get("deleted_there")
     # The client is registered once and reused

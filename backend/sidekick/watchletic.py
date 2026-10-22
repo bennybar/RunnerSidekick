@@ -277,7 +277,8 @@ def sync(conn, stream: str, user_dir: Path, data_dir: Path, redirect_uri: str, t
                             if devices is None:
                                 devices = (m.tool("list_devices") or {}).get("data", [])
                             hrms = [d for d in devices if d.get("type") == "heartRateMonitor"]
-                            extra["hr_sensor"] = {"name": hrms[0].get("name") if len(hrms) == 1 else None, "kind": "external"}
+                            extra["hr_sensor"] = {"name": hrms[0].get("name") if len(hrms) == 1 else None, "kind": "external",
+                                                  **_sensor_log(m, a["id"])}
                         conn.activity.update_many({"source_id": sid}, {"$set": extra})
                     except Exception as e:  # one bad workout doesn't stop the rest; it's tried again next time
                         got["failed"] += 1
@@ -333,3 +334,20 @@ def _find(x, key: str):
     if isinstance(x, list):
         return next((v for v in (_find(y, key) for y in x) if v), None)
     return None
+
+
+def _sensor_log(m: Mcp, workout_id: str) -> dict:
+    """The external sensor's connection log from the workout's diagnostics (Watchletic's JSON export): when it connected,
+    dropped out and came back, as seconds into the run, and the sensor's name as the app knew it. Empty when there's no log."""
+    try:
+        f = m.tool("export_activity_file", {"activityId": workout_id, "format": "json"})
+        diag = (json.loads(_download(f["downloadUrl"])) or {}).get("diagnostics") or {}
+    except (WatchleticError, httpx.HTTPError, ValueError):
+        return {}
+    t0 = diag.get("workoutStartedAtMs")
+    if not t0:
+        return {}
+    events = [{"at_s": round((e["timestampMs"] - t0) / 1000), "event": e["type"], "device": e.get("deviceName")}
+              for e in diag.get("events") or [] if e.get("source") == "bluetooth" and e.get("timestampMs")]
+    named = ((diag.get("expectedSources") or {}).get("bpms") or {}).get("deviceName")
+    return {"events": events, "logged": True, **({"name": named} if named else {})}

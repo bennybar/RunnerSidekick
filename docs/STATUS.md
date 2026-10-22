@@ -1086,3 +1086,8 @@ After the round-4 review:
   (`recorded_with`, `hr_sensor`), in the run report (report-2.14) and in the Markdown export's data provenance.
 - First real run checked: 5.04 km, 27:57, HR avg 158 / max 181 from the HW9 armband (1,674 samples), GPS, cadence 182
   spm (FIT strides doubled), 50 m climb. Beat-to-beat intervals weren't recorded (the sensor reports it supports them).
+- (v0.73.1) The external sensor's connection log comes with each Watchletic run (from the diagnostics in Watchletic's
+  JSON export: Bluetooth connects and dropouts, seconds into the run; the sensor's name as recorded). The run screen
+  says "connected the whole run" or "dropped out at 15:00, back at 16:00". The 22 Oct run: connected throughout (no
+  dropout logged); its 15–18 min dip (HR ~30 bpm down at the same pace, then back to 167) is the armband reading low,
+  flagged "questionable" by the HR recording-quality check.
