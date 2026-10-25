@@ -101,7 +101,7 @@ class TodayVm(repo: Repository) : BaseVm(repo) {
         repo.refreshAll()
         updateCoach()
     }
-    fun syncNow() = launchIo { repo.syncNow { pause(it, 2_000.0, 8_000.0) } }
+    fun syncNow() = launchIo { repo.syncNow { pause(it, 1_000.0, 2_000.0) } }
     val unwellPending = repo.unwellPending.state(false)
     val checkins = repo.checkins.state(emptyList())
     // The week's focus lives on Today (with the race week, in the report)
@@ -210,11 +210,16 @@ class ActivitiesVm(repo: Repository) : BaseVm(repo) {
     /** One-off message after a manual sync ("2 new runs", "No new runs"). */
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
     fun syncNow() = launchIo {
-        val n = repo.syncRunsNow { pause(it, 2_000.0, 8_000.0) }
+        val n = repo.syncRunsNow { pause(it, 1_000.0, 2_000.0) }
         _syncResult.value = (if (status.value?.value?.watch == "samsung") "Synced your Samsung watch · " else "Synced with Garmin · ") + when (n) { 0 -> "no new runs"; 1 -> "1 new run"; else -> "$n new runs" }
     }
     fun clearSyncResult() { _syncResult.value = null }
     val weekStart = repo.weekStart.state(java.time.DayOfWeek.MONDAY)
+    /** The run the wizard asks about: its detail (for the guessed type), saved answers, and "asked" once it closes. */
+    fun runDetail(id: String) = repo.activity(id)
+    fun loadRun(id: String) = launchIo { repo.refreshActivity(id) }
+    fun answer(id: String, i: com.bennybar.runnersidekick.data.remote.RunIntent) = launchIo { repo.setIntent(id, i) }
+    fun asked(id: String) = viewModelScope.launch { repo.settings.setRunAsked(id) }
     fun refresh() = launchIo { repo.refreshAll() }
 }
 

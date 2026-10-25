@@ -338,6 +338,8 @@ data class ActivitySummary(
     val synthetic: Boolean = false,
     /** Records this run set (it beat an earlier best): a trophy on the run, and its notification */
     val records: List<RunRecord> = emptyList(),
+    /** The runner has said what the run was meant to be or how it went (else the app asks about its newest run) */
+    val answered: Boolean = false,
 )
 
 @Serializable

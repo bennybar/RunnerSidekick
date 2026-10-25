@@ -173,6 +173,7 @@ class Repository(
         api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(i.kind, text(i.note), text(i.target), i.effort, i.feel,
             i.limiter, i.limiter2, i.health, Instant.now().toString())))
         refreshActivity(activityId)
+        runCatching { put("activities", api.getRaw("/v1/activities")) }  // the run now counts as answered
         refreshFocus()
         // The AI input was written for the old type: refresh its state so "Update AI input" shows straight away
         runCatching { refreshRunAi(activityId) }

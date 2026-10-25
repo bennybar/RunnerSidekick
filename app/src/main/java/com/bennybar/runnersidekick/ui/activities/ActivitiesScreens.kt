@@ -139,6 +139,17 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
     LaunchedEffect(syncResult) { syncResult?.let { listSnackbar.showSnackbar(it); vm.clearSyncResult() } }
     val syncStatus by vm.status.collectAsStateWithLifecycle()
     LaunchedEffect(listError) { listError?.let { listSnackbar.showSnackbar(it); vm.clearError() } }
+    // The newest run, if nothing's been said about it and it hasn't been asked about: a few questions, once (Settings turns it off)
+    acts?.value?.firstOrNull()?.takeIf { !it.synthetic && !it.answered && settings?.askAboutRuns == true && it.sourceId != settings?.runAsked }
+        ?.let { run ->
+            LaunchedEffect(run.sourceId) { vm.loadRun(run.sourceId) }
+            val detail by remember(run.sourceId) { vm.runDetail(run.sourceId) }.collectAsStateWithLifecycle(null)
+            detail?.value?.let { d ->  // its guessed type first, so the first question starts from it
+                com.bennybar.runnersidekick.ui.today.RunWizard(
+                    "${Format.activityTime(run.startUtc, run.utcOffsetS)} · ${Format.distance(run.distanceM, units)} at ${Format.pace(run.paceMovingSPerKm, units)}",
+                    d.report?.intent, onClose = { vm.asked(run.sourceId) }, onSave = { vm.answer(run.sourceId, it) })
+            }
+        }
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {

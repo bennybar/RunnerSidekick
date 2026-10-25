@@ -172,6 +172,7 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         keep("appearance", kotlinx.serialization.json.JsonPrimitive(a.name)) }
     fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }.also {
         keep("notifications", kotlinx.serialization.json.JsonPrimitive(on)) }
+    fun setAskAboutRuns(on: Boolean) = viewModelScope.launch { repo.settings.setAskAboutRuns(on) }
     fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }.also {
         keep("background_refresh", kotlinx.serialization.json.JsonPrimitive(on)) }
 
@@ -383,6 +384,9 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                             Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
                                 enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
                         })
+                    row("Ask about your newest run", supporting = "When you open Runs: what it was meant to be and how it went, " +
+                            "a few taps. Skipped runs aren't asked again.",
+                        trailing = { Switch(checked = local?.askAboutRuns != false, onCheckedChange = vm::setAskAboutRuns) })
                     remote?.let { r ->
                         row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
                             "or at the end of the window as provisional", onClick = { vm.openSheet("window") })

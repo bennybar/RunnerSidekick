@@ -40,6 +40,9 @@ data class LocalSettings(
     val appearance: String? = null,
     /** "Skip for now" on Connect Garmin: it isn't opened by itself again on this sign-in. */
     val garminPromptSkipped: Boolean = false,
+    /** Ask about the newest run (meant to be, how it went) when Runs opens; [runAsked] is the last run asked about. */
+    val askAboutRuns: Boolean = true,
+    val runAsked: String? = null,
 )
 
 /** Notification de-duplication state, kept on the phone. */
@@ -67,6 +70,8 @@ class SettingsStore(private val context: Context) {
     private val kSamsungAt = longPreferencesKey("samsung_uploaded_at")  // when this phone last sent the Samsung watch's data
     private val kFitFolder = stringPreferencesKey("fit_folder")         // GTII's export folder (a document tree this app may read)
     private val kFitSent = stringSetPreferencesKey("fit_sent")          // FIT files already sent, as "name|size"
+    private val kAskRuns = booleanPreferencesKey("ask_about_runs")
+    private val kRunAsked = stringPreferencesKey("run_asked")           // asked once per run: skipping isn't asked again
 
     val settings: Flow<LocalSettings> = context.dataStore.data.map { p ->
         LocalSettings(
@@ -81,6 +86,8 @@ class SettingsStore(private val context: Context) {
             theme = p[kTheme],
             appearance = p[kAppearance],
             garminPromptSkipped = p[kGarminSkipped] == true,
+            askAboutRuns = p[kAskRuns] ?: true,
+            runAsked = p[kRunAsked],
         )
     }
 
@@ -95,6 +102,8 @@ class SettingsStore(private val context: Context) {
         androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED)
     suspend fun setBackgroundRefresh(on: Boolean) = context.dataStore.edit { it[kBackground] = on }
+    suspend fun setAskAboutRuns(on: Boolean) = context.dataStore.edit { it[kAskRuns] = on }
+    suspend fun setRunAsked(id: String) = context.dataStore.edit { it[kRunAsked] = id }
 
     suspend fun markWeeklyNotified(weekStart: String) = context.dataStore.edit { it[kWeekly] = weekStart }
 

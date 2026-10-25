@@ -199,6 +199,89 @@ private fun RunContextSheet(intent: RunIntent?, onDismiss: () -> Unit, onSave: (
     }
 }
 
+/** A few questions about a run, one at a time: what it was meant to be (pre-set to the plan's or the data's guess), how
+ *  hard it felt, how it went, what limited you, health, a note. Every step can be skipped; one tap on a single answer
+ *  moves on. Closing it early keeps what was answered. Saved like the "This run" sheet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RunWizard(title: String, guess: RunIntent?, onClose: () -> Unit, onSave: (RunIntent) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var step by remember { mutableStateOf(0) }
+    var kind by remember { mutableStateOf(guess?.kind) }
+    var target by remember { mutableStateOf("") }
+    var effort by remember { mutableStateOf<String?>(null) }
+    var feel by remember { mutableStateOf<String?>(null) }
+    var limiter by remember { mutableStateOf<String?>(null) }
+    var limiter2 by remember { mutableStateOf<String?>(null) }
+    var health by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf("") }
+    val last = 5
+    val said = kind != guess?.kind || target.isNotBlank() || effort != null || feel != null || limiter != null || health != null || note.isNotBlank()
+    fun save() = kind?.let { onSave(RunIntent(it, note, "user", target, effort, feel, limiter, limiter2.takeIf { limiter != null && limiter != "none" }, health)) }
+    fun next() { if (step < last) step++ else { save(); onClose() } }
+    // Picking a single answer moves on; picking it again clears it and stays
+    fun pick(options: List<Pair<String, String>>, current: String?, set: (String?) -> Unit): (Int) -> Unit = { i ->
+        val k = options[i].first
+        if (current == k) set(null) else { set(k); next() }
+    }
+    ModalBottomSheet(onDismissRequest = { if (said) save(); onClose() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = cs.background) {
+        Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 24.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("About your run · ${step + 1} of ${last + 1}", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            androidx.compose.material3.LinearWavyProgressIndicator(progress = { (step + 1f) / (last + 1) }, Modifier.fillMaxWidth())
+            val (question, hint) = when (step) {
+                0 -> "What was it meant to be?" to (guess?.let { g -> (if (g.source == "plan") "From today's plan: " else "Looks like: ") +
+                    "${label(INTENT_KINDS, g.kind)}. Change it if not." })
+                1 -> "How hard did it feel?" to null
+                2 -> "How did it go overall?" to null
+                3 -> "What limited you?" to (if (limiter != null && limiter != "none") "Anything else? Optional." else null)
+                4 -> "How's your health?" to null
+                else -> "Anything to note?" to "Private: never sent to the AI."
+            }
+            Text(question, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            hint?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
+            when (step) {
+                0 -> {
+                    com.bennybar.runnersidekick.ui.components.ToggleRow(INTENT_KINDS.map { it.second }, { kind == INTENT_KINDS[it].first },
+                        { kind = INTENT_KINDS[it].first })
+                    OutlinedTextField(target, { target = it.take(100) }, label = { Text("Target, optional (e.g. HR ≤ 160, 5:30 /km)") },
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                }
+                1 -> com.bennybar.runnersidekick.ui.components.ToggleRow(EFFORTS.map { it.second }, { effort == EFFORTS[it].first },
+                    pick(EFFORTS, effort) { effort = it })
+                2 -> com.bennybar.runnersidekick.ui.components.ToggleRow(FEELS.map { it.second }, { feel == FEELS[it].first },
+                    pick(FEELS, feel) { feel = it })
+                3 -> {
+                    com.bennybar.runnersidekick.ui.components.ToggleRow(LIMITERS.map { it.second }, { limiter == LIMITERS[it].first }, onToggle = { i ->
+                        val k = LIMITERS[i].first
+                        limiter = if (limiter == k) null else k
+                        limiter2 = null
+                        if (limiter == "none") next()  // nothing limited you: nothing more to ask here
+                    })
+                    if (limiter != null && limiter != "none") {
+                        val rest = LIMITERS.filter { it.first != limiter && it.first != "none" }
+                        com.bennybar.runnersidekick.ui.components.ToggleRow(rest.map { it.second }, { limiter2 == rest[it].first },
+                            { limiter2 = if (limiter2 == rest[it].first) null else rest[it].first })
+                    }
+                }
+                4 -> com.bennybar.runnersidekick.ui.components.ToggleRow(HEALTH.map { it.second }, { health == HEALTH[it].first },
+                    pick(HEALTH, health) { health = it })
+                else -> OutlinedTextField(note, { note = it.take(500) }, label = { Text("Notes") }, maxLines = 4,
+                    shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (step > 0) TextButton(onClick = { step-- }) { Text("Back") } else TextButton(onClick = onClose) { Text("Not now") }
+                Spacer(Modifier.weight(1f))
+                Button(onClick = ::next, enabled = kind != null, modifier = Modifier.height(48.dp)) {
+                    Text(if (step == last) "Save" else "Next")
+                }
+            }
+        }
+    }
+}
+
 /** One labelled row of pill chips (the chosen one filled); tapping the selected chip again clears an optional answer. */
 @Composable
 private fun Choice(title: String, options: List<Pair<String, String>>, selected: String?, optional: Boolean = true, onPick: (String?) -> Unit) {

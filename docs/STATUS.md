@@ -1114,3 +1114,12 @@ After the round-4 review:
   in Runs (a trophy on a sun shape for a run that set a record, replacing the trophy at the row's end). Still shapes only.
 - Expressive APIs are opted into once in app/build.gradle.kts. Lint: the run day's name reads the locale from the
   configuration (the one lint error, from 0.70.0).
+
+## Newest-run questions as a wizard; faster Garmin sync (2026-10-25, v0.75.0)
+- Opening Runs asks about the newest run when nothing's been said about it yet: what it was meant to be (pre-set to
+  the plan's or the data's guess), effort, how it went, what limited you, health, a note — one question per step,
+  one tap moves on, every step skippable. Closing it keeps what was answered; a run is asked about once (the phone
+  remembers it). Me → Notifications → "Ask about your newest run" turns it off. The run list carries `answered`.
+- Garmin sync: 0.3 s between Garmin requests instead of 1 s (measured: a quiet sync 15.6 s → 6.3 s; the wait was most
+  of it). The app checks a running sync every 1–2 s instead of backing off to 8 s.
+- Garmin data coverage audit: ~/Downloads/garmin_data_coverage_audit_findings.md (findings only, nothing changed).
