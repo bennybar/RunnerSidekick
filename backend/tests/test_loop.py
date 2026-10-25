@@ -106,8 +106,10 @@ def test_loop_endpoints(tmp_path):
     stale = client.put("/v1/plan/2026-09-30", json={"kind": "rest", "client_updated_at": "2026-09-30T04:00:00Z"}, headers=h)
     assert stale.json()["recommendation"]["plan"]["kind"] == "intervals"  # last writer wins
     acts = client.get("/v1/activities", headers=h).json()
+    assert not any(a["answered"] for a in acts)  # nothing said about any run yet: the app asks about the newest
     ir = client.put(f"/v1/activities/{acts[0]['source_id']}/intent", json={"kind": "tempo", "note": "felt strong", "client_updated_at": "z"}, headers=h)
     assert ir.json()["intent"]["kind"] == "tempo" and ir.json()["intent"]["source"] == "user"
+    assert [a["answered"] for a in client.get("/v1/activities", headers=h).json()][:2] == [True, False]
     ir = client.put(f"/v1/activities/{acts[0]['source_id']}/intent", headers=h, json={
         "kind": "steady", "target": " HR <= 160 ", "feel": "good", "limiter": "feet", "health": None, "note": "", "client_updated_at": "zz"})
     it = ir.json()["intent"]

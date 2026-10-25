@@ -751,10 +751,13 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         rows = many(conn.activity, {"source": cfg.source, "local_date": {"$gte": start, "$lte": end}}, sort=[("start_utc", -1)])
         from . import trophies
         sets = trophies.records_set(conn, cfg.source, today(conn))  # the records each run set: a trophy on the run, and its notification
+        # Runs the runner has said something about (what it was meant to be, how it went): the app asks about the newest otherwise
+        answered = {x["activity_source_id"] for x in conn.run_intent.find(
+            {"activity_source_id": {"$in": [r["source_id"] for r in rows]}}, {"activity_source_id": 1})}
         return [{k: r[k] for k in ("source_id", "sport", "name", "start_utc", "utc_offset_s", "local_date", "distance_m",
                                    "elapsed_s", "moving_s", "avg_hr", "elevation_gain_m")} |
                 {"pace_moving_s_per_km": rp.rn.moving_pace(r["distance_m"], r["moving_s"]), "synthetic": synthetic,
-                 "records": sets.get(r["source_id"], [])} for r in rows]
+                 "records": sets.get(r["source_id"], []), "answered": r["source_id"] in answered} for r in rows]
 
     @api.get("/v1/activities/{sid}")
     def get_activity(sid: str, conn=Depends(db)):
