@@ -29,7 +29,7 @@ def test_export_v2_sections_in_order_and_the_layers_kept_apart():
     assert [md.index(s) for s in order] == sorted(md.index(s) for s in order)
     assert "## Athlete context" not in md  # nothing entered: no section, no placeholders
     assert "Data-based classification:" in md and "Not stated by the runner." in md
-    assert "<details>" in md and "Export schema: **Runner Sidekick LLM Export v2**" in md and "App version: **0.30.0**" in md
+    assert "<details>" in md and "Export schema: **Runner Sidekick LLM Export v2.1**" in md and "App version: **0.30.0**" in md
     assert "| Metric | First half | Second half | Change |" in md and "Warm-up excluded: **first 10 min" in md
     assert "No AI interpretation for this run yet." in md
     conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": "x", "model": "m", "status": "ok",

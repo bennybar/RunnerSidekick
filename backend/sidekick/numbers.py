@@ -192,6 +192,16 @@ def own_predictions(conn, source: str, today: date) -> dict:
             "series": series}
 
 
+def current_predictions(conn) -> dict:
+    """Garmin's current race predictions (seconds by "5k", "10k", "half", "marathon", with their "date"): the newer of
+    the latest snapshot and the last row of the daily history. The snapshot can lag days behind, or be one kept from
+    an earlier fetch."""
+    snap = (get_setting(conn, "garmin_fitness", None) or {}).get("race_predictions") or {}
+    rows = [r for r in get_setting(conn, "garmin_predictions", None) or [] if r.get("5k")]
+    last = rows[-1] if rows else {}
+    return last if (last.get("date") or "") > (snap.get("date") or "") else snap
+
+
 def predictions(conn, source: str, today: date) -> dict:
     """Garmin's race predictions while Garmin is the watch and it has them; Runner Sidekick's own otherwise."""
     from .samsung import SAMSUNG, watch_on

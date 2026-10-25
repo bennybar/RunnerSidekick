@@ -68,6 +68,13 @@ METRIC_UNITS: dict[str, str] = {
     "night_skin_temp": "°C",
     "night_spo2_avg": "%",
     "night_spo2_min": "%",  # Samsung's estimate from a run; its own formula, so never mixed with Garmin's
+    # Garmin's context for its own numbers: its HRV baseline band, what its morning readiness was built from, the
+    # recovery time it reported then, and how much of the night the watch measured (0: not worn overnight)
+    "hrv_baseline_low": "ms",
+    "hrv_baseline_high": "ms",
+    "garmin_recovery_time_min": "min",
+    "garmin_readiness_inputs": "flag",     # 1 when Garmin had a valid night; the label lists each input's feedback
+    "asleep_measured_s": "s",
 }
 
 # Values Garmin computes itself. Shown under their own names; never fed into our recommendation rules.

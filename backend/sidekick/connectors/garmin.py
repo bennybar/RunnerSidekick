@@ -116,6 +116,8 @@ def normalise_user_summary(d: str, p: dict | None) -> list[Observation]:
         obs(d, "active_duration", active, method="garmin_active_plus_highly_active"),
         obs(d, "intensity_minutes_moderate", non_negative(p.get("moderateIntensityMinutes")), method="garmin_intensity_minutes"),
         obs(d, "intensity_minutes_vigorous", non_negative(p.get("vigorousIntensityMinutes")), method="garmin_intensity_minutes"),
+        # 0 is a reading here (the watch wasn't worn overnight), so it's kept
+        obs(d, "asleep_measured_s", non_negative(p.get("measurableAsleepDuration")), method="garmin_wellness"),
     ]
 
 
@@ -162,13 +164,30 @@ def normalise_hrv(d: str, p: dict | None) -> list[Observation]:
     return [
         obs(d, "hrv_overnight_avg", non_negative(s.get("lastNightAvg")), method="garmin_overnight_hrv", label=label),
         obs(d, "hrv_weekly_avg", non_negative(s.get("weeklyAvg")), method="garmin_overnight_hrv_7d"),
+        # Garmin's own "balanced" band for this person (its baseline), what its HRV status is judged against
+        obs(d, "hrv_baseline_low", non_negative((s.get("baseline") or {}).get("balancedLow")), method="garmin_hrv_baseline"),
+        obs(d, "hrv_baseline_high", non_negative((s.get("baseline") or {}).get("balancedUpper")), method="garmin_hrv_baseline"),
     ]
 
 
+READINESS_INPUTS = (("sleep", "sleepScoreFactorFeedback"), ("recovery", "recoveryTimeFactorFeedback"), ("load", "acwrFactorFeedback"),
+                    ("hrv", "hrvFactorFeedback"), ("stress", "stressHistoryFactorFeedback"), ("sleep_history", "sleepHistoryFactorFeedback"))
+
+
 def normalise_readiness(d: str, p: dict | None) -> list[Observation]:
+    """Garmin's morning readiness, and what it was built from: a score can come without sleep or HRV (no night on the
+    watch), and its time and recovery time say when it was taken. Recovery time is in minutes."""
     p = p or {}
     level = p.get("level") if isinstance(p.get("level"), str) else None
-    return [obs(d, "garmin_training_readiness", non_negative(p.get("score")), method="garmin_morning_readiness", label=level)]
+    at = p.get("timestamp")
+    when = (at[:19] + "Z") if isinstance(at, str) and len(at) >= 19 else None  # Garmin's GMT time
+    inputs = ",".join(f"{k}:{p[f]}" for k, f in READINESS_INPUTS if isinstance(p.get(f), str))
+    score = non_negative(p.get("score"))
+    return [obs(d, "garmin_training_readiness", score, method="garmin_morning_readiness", label=level),
+            obs(d, "garmin_recovery_time_min", non_negative(p.get("recoveryTime")) if score is not None else None,
+                method="garmin_morning_readiness", observed_end=when),
+            obs(d, "garmin_readiness_inputs", (1.0 if p.get("validSleep") else 0.0) if score is not None else None,
+                method="garmin_morning_readiness", label=inputs or None, observed_end=when)]
 
 
 def normalise_max_metrics(d: str, p: Any) -> list[Observation]:
@@ -318,6 +337,12 @@ def normalise_samples(details: dict | None, start: datetime) -> Samples | None:
                              ("directVerticalOscillation", "vo", 1), ("directVerticalRatio", "vr", 1), ("directBodyBattery", "bb", 1)):
         if key in idx:
             dyn[name] = [round(v * scale, 3) if v else None for v in pick(col(key))]  # 0 means not measured
+    # Garmin's in-run Performance Condition (vs your fitness, about −20…+20; 0 is a reading, so it's kept) and the
+    # stamina left (%); both Garmin's estimates
+    if "directPerformanceCondition" in idx:
+        dyn["pc"] = pick(col("directPerformanceCondition", num))
+    if "directAvailableStamina" in idx:
+        dyn["stamina"] = pick(col("directAvailableStamina"))
     return Samples(t=[round(t[i], 1) for i in keep], hr=valid_hr(pick(col("directHeartRate"))), speed=pick(col("directSpeed")),
                    dist=pick(col("sumDistance")), elev=pick(col("directElevation", num)), cad=pick(cadence),
                    power=pick(col("directPower")) if "directPower" in idx else None, dyn=dyn or None)

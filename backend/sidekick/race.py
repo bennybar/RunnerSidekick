@@ -71,7 +71,8 @@ def status(conn, today: date) -> dict | None:
            "phase_basis": "Common periodisation rules of thumb by weeks to race; not a personal plan."}
     if g.get("target_s"):
         out["target_pace_s_per_km"] = round(g["target_s"] / (metres / 1000), 1)
-    pred = ((get_setting(conn, "garmin_fitness", None) or {}).get("race_predictions") or {}).get(g["distance"])
+    from .numbers import current_predictions
+    pred = current_predictions(conn).get(g["distance"])
     if pred:
         out["garmin_prediction_s"] = pred
         if g.get("target_s"):

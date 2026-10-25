@@ -167,6 +167,14 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
                 merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
                 merged["fetched_at"] = utc_now()
                 set_setting(conn, "garmin_fitness", merged)
+                # Garmin's training status and load by the day it's for (it only says "latest"): a run's export shows the
+                # status as of its own day, not today's
+                st, lb = snap.get("training_status") or {}, snap.get("load_balance") or {}
+                if st.get("date"):
+                    hist = {r["date"]: r for r in get_setting(conn, "garmin_status_history", None) or []}
+                    hist[st["date"]] = {**{k: st.get(k) for k in ("date", "phrase", "acute_load", "chronic_min", "chronic_max")},
+                                        "load_focus": lb.get("trainingBalanceFeedbackPhrase")}
+                    set_setting(conn, "garmin_status_history", [hist[k] for k in sorted(hist)][-400:])
         # Garmin's threshold and race-prediction histories: with the fitness numbers. Extras: Garmin failing on one of them
         # doesn't fail the sync (a sign-in problem or rate limit still does)
         for fn, key in (("threshold_history", "garmin_threshold"), ("prediction_history", "garmin_predictions")):

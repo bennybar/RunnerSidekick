@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.14"  # 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.15"  # 2.15: Garmin's in-run performance condition, stamina, threshold share; 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -324,7 +324,11 @@ def build_morning(conn, source: str, d: date, synthetic: bool) -> dict:
     for m in sorted(GARMIN_PROPRIETARY):
         r = obs.get(m)
         if r is not None and r["state"] == "measured":
-            garmin_ctx.append({"metric": m, "value": r["value"], "unit": r["unit"], "label": r["label"], "origin": "Garmin"})
+            label = r["label"]
+            if m == "garmin_training_readiness":  # say what it was built from (a score can come without a night's data)
+                basis = readiness_basis(conn, garmin_day(conn, source, ds))
+                label = " · ".join(x for x in ((label or "").replace("_", " ").lower(), basis) if x) or None
+            garmin_ctx.append({"metric": m, "value": r["value"], "unit": r["unit"], "label": label, "origin": "Garmin"})
     r = obs.get("samsung_sleep_score")  # Samsung's own score, beside Garmin's, never in place of it
     if r is not None and r["state"] == "measured":
         garmin_ctx.append({"metric": "samsung_sleep_score", "value": r["value"], "unit": r["unit"], "label": None, "origin": "Samsung"})
@@ -644,13 +648,66 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     body["recorded_with"] = a.get("recorded_with")  # the app on the watch, when it wasn't the watch's own (Watchletic)
     body["hr_sensor"] = a.get("hr_sensor")  # an external heart-rate sensor, with its name when known
     body["vo2_ours"] = cardio.estimate_for_run(conn, source, a)  # Runner Sidekick's VO2 max from this run, beside the watch's
+    body["garmin_extra"] = garmin_extra(conn, a, samples_for(conn, a["id"]))  # Garmin's own reads of the run, when it has them
     plan = one(conn.day_plan, {"local_date": a["local_date"]})
     inputs = {"a": a["content_hash"], "comp": [r["source_id"] for r in comp["runs"]], "rpe": rpe["rpe"] if rpe else None, "v": ALGORITHMS,
               "plan": (plan or {}).get("kind"), "plan_minutes": (plan or {}).get("minutes"), "vo2_ours": body["vo2_ours"],
-              "hr_sensor": body["hr_sensor"], "recorded_with": body["recorded_with"],
+              "hr_sensor": body["hr_sensor"], "recorded_with": body["recorded_with"], "garmin_extra": body["garmin_extra"],
               "prev_bests": {k: e["previous_best_s"] for k, e in best_efforts.items()}, "zones": zones, "intent": intent,
               "week_first": first_weekday(conn), "vo2_day": vo2_day, "readiness_day": readiness_day, "heat": heat}
     return save_report(conn, "post_run", sid, a["local_date"], body, input_hash(inputs), data_cutoff(conn, source))
+
+
+GARMIN_DAY_METRICS = ("garmin_training_readiness", "garmin_readiness_inputs", "garmin_recovery_time_min", "hrv_overnight_avg",
+                      "hrv_baseline_low", "hrv_baseline_high", "asleep_measured_s", "resting_hr")
+
+
+def garmin_day(conn, source: str, day: str) -> dict:
+    """Garmin's readings for a day that need their context: readiness and what fed it, recovery time, HRV and Garmin's
+    baseline band, how much of the night the watch measured, resting HR. Measured rows only, by metric."""
+    return {r["metric"]: r for r in conn.daily_observation.find(
+        {"source": source, "local_date": day, "state": "measured", "metric": {"$in": list(GARMIN_DAY_METRICS)}}, {"_id": 0})}
+
+
+def readiness_basis(conn, rows: dict) -> str | None:
+    """What Garmin's readiness was built from, in words: when it was taken, whether it had a night's sleep and HRV, and
+    the recovery time Garmin gave then. None when Garmin didn't say."""
+    inp = rows.get("garmin_readiness_inputs")
+    if not inp:
+        return None
+    fed = dict(x.split(":", 1) for x in (inp.get("label") or "").split(",") if ":" in x)
+    missing = [w for k, w in (("sleep", "sleep"), ("hrv", "HRV")) if fed.get(k) == "NONE"]
+    parts = []
+    if inp.get("observed_end"):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        at = datetime.fromisoformat(inp["observed_end"].replace("Z", "+00:00")).astimezone(ZoneInfo(get_setting(conn, "timezone", "UTC")))
+        parts.append(f"at {at:%H:%M}")
+    parts.append(f"without {' or '.join(missing)} (no night on this watch)" if len(missing) == 2 else
+                 f"without {missing[0]}" if missing else "with your sleep and HRV")
+    rec = rows.get("garmin_recovery_time_min")
+    if rec and rec.get("value") is not None:
+        parts.append(f"recovery time then {round(rec['value'] / 60)} h")
+    return ", ".join(parts)
+
+
+def garmin_extra(conn, a: dict, s: Samples | None) -> list[dict]:
+    """Garmin's own reads of a run, as label/value rows: how its in-run Performance Condition went (it starts after
+    about 6 minutes), the stamina left at the end, and the run's average heart rate against Garmin's lactate threshold
+    as of that day. All Garmin estimates; whichever exists."""
+    out = []
+    dyn = (s.dyn or {}) if s is not None else {}
+    pc = [x for x in dyn.get("pc") or [] if x is not None]
+    if pc:
+        out.append({"label": "Performance condition (Garmin)", "value": f"{pc[0]:+.0f} → {pc[-1]:+.0f}" + (f" (lowest {min(pc):+.0f})" if min(pc) < min(pc[0], pc[-1]) else "")})
+    st = [x for x in dyn.get("stamina") or [] if x is not None]
+    if st:
+        out.append({"label": "Stamina left at the end (Garmin)", "value": f"{st[-1]:.0f}%"})
+    lt = [p for p in (get_setting(conn, "garmin_threshold", None) or {}).get("points") or [] if p.get("hr") and p["date"] <= a["local_date"]]
+    if lt and a.get("avg_hr"):
+        p = lt[-1]
+        out.append({"label": "Average HR vs Garmin's threshold", "value": f"{a['avg_hr'] / p['hr']:.0%} of {p['hr']:.0f} bpm"})
+    return out
 
 
 CONTEXT_FIELDS = ("target", "effort", "feel", "limiter", "limiter2", "health")  # the runner's own report on a run, all optional

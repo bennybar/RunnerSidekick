@@ -5,7 +5,7 @@ than filled in. Tables instead of images, so it stays one plain file."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
 import httpx
@@ -13,9 +13,9 @@ import httpx
 from . import reports as rp
 from . import run_checks
 from . import weather
-from .db import one
+from .db import get_setting, one
 
-SCHEMA = "Runner Sidekick LLM Export v2"
+SCHEMA = "Runner Sidekick LLM Export v2.1"
 INTENT_WORDS = {"recovery": "Recovery", "easy": "Easy", "steady": "Steady aerobic", "long": "Long run", "tempo": "Tempo",
                 "threshold": "Threshold", "intervals": "Intervals", "race": "Race", "progression": "Progression",
                 "free": "Free run", "other": "Other"}
@@ -138,16 +138,23 @@ def recovery_context(conn, source: str, a: dict, s) -> list[tuple[str, str]]:
     """The watch's readings from the morning of the run, only those that exist (Garmin's or Samsung's, as recorded)."""
     day = a["local_date"]
     rows = {r["metric"]: r for r in conn.daily_observation.find({"source": source, "local_date": day, "state": "measured"},
-                                                                {"_id": 0, "metric": 1, "value": 1, "label": 1})}
+                                                                {"_id": 0, "metric": 1, "value": 1, "label": 1, "observed_end": 1})}
     out = []
 
     def v(m):
         return rows[m]["value"] if m in rows and rows[m].get("value") is not None else None
     if v("resting_hr") is not None:
-        out.append(("Resting HR", f"{v('resting_hr'):.0f} bpm"))
+        # Garmin's resting HR from a day the watch measured no sleep is a daytime value, not an overnight one
+        out.append(("Resting HR", f"{v('resting_hr'):.0f} bpm" + (" (daytime only: the watch wasn't worn overnight)"
+                                                                  if v("asleep_measured_s") == 0 else "")))
     if v("hrv_overnight_avg") is not None:
         lab = (rows["hrv_overnight_avg"].get("label") or "").replace("_", " ").lower()
-        out.append(("HRV last night", f"{v('hrv_overnight_avg'):.0f} ms" + (f" ({lab})" if lab else "")))
+        lo, hi = v("hrv_baseline_low"), v("hrv_baseline_high")
+        band = ""
+        if lo is not None and hi is not None:
+            x = v("hrv_overnight_avg")
+            band = f", {'within' if lo <= x <= hi else 'below' if x < lo else 'above'} Garmin's baseline {lo:.0f}–{hi:.0f} ms"
+        out.append(("HRV last night", f"{v('hrv_overnight_avg'):.0f} ms" + (f" ({lab})" if lab else "") + band))
     if v("hrv_weekly_avg") is not None:
         out.append(("HRV 7-day average", f"{v('hrv_weekly_avg'):.0f} ms"))
     if v("sleep_duration") is not None:
@@ -157,7 +164,9 @@ def recovery_context(conn, source: str, a: dict, s) -> list[tuple[str, str]]:
         out.append(("Sleep score", f"{v('garmin_sleep_score'):.0f}"))
     if v("garmin_training_readiness") is not None:
         lab = (rows["garmin_training_readiness"].get("label") or "").replace("_", " ").lower()
-        out.append(("Training readiness (Garmin)", f"{v('garmin_training_readiness'):.0f} / 100" + (f" ({lab})" if lab else "")))
+        basis = rp.readiness_basis(conn, rows)  # when, and whether it had a night's sleep and HRV to go on
+        out.append(("Training readiness (Garmin)", f"{v('garmin_training_readiness'):.0f} / 100" + (f" ({lab})" if lab else "")
+                    + (f", {basis}" if basis else "")))
     bb = [x for x in ((s.dyn or {}).get("bb") or []) if x is not None] if s is not None else []
     if bb:
         out.append(("Body Battery", f"{bb[0]:.0f} at the start → {bb[-1]:.0f} at the end"))
@@ -423,8 +432,10 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             continue
         rows.append(f"| {label} | {num(avg, fmt, unit)} | {num(mx, fmt, unit) if mx else '–'} | "
                     + (f"{fmt.format(hv[0])}{unit} | {fmt.format(hv[1])}{unit} |" if hv else "– | – |"))
-    if rows:
+    extra = [x for x in r.get("garmin_extra") or [] if not x["label"].startswith("Average HR")]  # Garmin's in-run reads
+    if rows or extra:
         add("## Running dynamics")
+    if rows:
         add("| Metric | Average | Max | First half | Second half |")
         add("|---|---:|---:|---:|---:|")
         L.extend(rows)
@@ -439,6 +450,11 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             + (f" Cadence: {app} repeats the watch's last reading in every record, so repeats past 5 s are left out; "
                f"the remaining readings cover {covered / sum(w):.0%} of moving time and average "
                f"{sum(w[i] * s.cad[i] for i in cov) / covered:.0f} spm (time-weighted)." if app == "Watchletic" and covered else ""))
+        add("")
+    if extra:
+        L.extend(f"{x['label']}: **{x['value']}**  " for x in extra)
+        add("Garmin's estimates during the run: performance condition is its read of how you're running against your "
+            "fitness (from about 6 minutes in; first → last value), stamina what it thought was left.")
         add("")
 
     # 11. Recovery context (no reliable heart-rate recovery after the stop, so that section is left out)
@@ -535,6 +551,45 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         if lines:
             add("## From Garmin")
             L.extend(lines)
+            add("")
+
+    # 15b. Garmin's training load and thresholds as of the run's day (a Garmin run only: its load doesn't see the others)
+    if not samsung and not gtii:
+        day = a["local_date"]
+        st = [h for h in get_setting(conn, "garmin_status_history", None) or [] if h.get("date") and h["date"] <= day]
+        st = st[-1] if st and st[-1]["date"] >= (date.fromisoformat(day) - timedelta(days=3)).isoformat() else None
+        lt = [p for p in (get_setting(conn, "garmin_threshold", None) or {}).get("points") or [] if p.get("hr") and p["date"] <= day]
+        pr = [p for p in get_setting(conn, "garmin_predictions", None) or [] if p.get("5k") and p["date"] <= day]
+        out = []
+        if st:
+            bits = []
+            if st.get("phrase"):
+                bits.append(f"Training status: **{st['phrase'].split('_')[0].capitalize()}**")
+            if st.get("acute_load") is not None:
+                bits.append(f"Acute load: **{st['acute_load']:.0f}**" + (f" (Garmin's range {st['chronic_min']:.0f}–{st['chronic_max']:.0f})"
+                                                                        if st.get("chronic_min") is not None and st.get("chronic_max") is not None else ""))
+            if st.get("load_focus"):
+                bits.append(f"Load focus: **{st['load_focus'].replace('_', ' ').lower()}**")
+            if bits:
+                out.append(f"As of {st['date']}: " + " · ".join(bits) + "  ")
+            since = (date.fromisoformat(day) - timedelta(days=27)).isoformat()
+            others = conn.activity.count_documents({"source": source, "local_date": {"$gte": since, "$lte": day}, "manufacturer": "Samsung"})
+            if others:
+                out.append(f"Caveat: Garmin didn't record **{others} of your runs** in the 28 days to this one (another watch), so "
+                           "its load and load focus undercount them.  ")
+        if lt:
+            p = lt[-1]
+            pace_txt = f" · {pace(1000 / p['speed_m_s'])}" if p.get("speed_m_s") else ""
+            share = f" This run averaged {a['avg_hr']:.0f} bpm ({a['avg_hr'] / p['hr']:.0%} of it)." if a.get("avg_hr") else ""
+            out.append(f"Lactate threshold (Garmin, {p['date']}): **{p['hr']:.0f} bpm{pace_txt}**.{share}  ")
+        if pr:
+            p = pr[-1]
+            out.append(f"Race prediction (Garmin, {p['date']}): " + " · ".join(
+                f"{lab} **{clock(p[k])}**" for k, lab in (("5k", "5K"), ("10k", "10K"), ("half", "Half"), ("marathon", "Marathon")) if p.get(k)) + "  ")
+        if out:
+            add("## Training load and thresholds (Garmin)")
+            add("Garmin's estimates, not Runner Sidekick's.  ")
+            L.extend(out)
             add("")
 
     # 16. The week
@@ -683,6 +738,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             ("VO₂ source", "Samsung (the watch's estimate for the day, not from this run)" if samsung else "Garmin (device estimate)"),
             ("Training effect, training load", "Runner Sidekick training load (no Training Effect from Samsung)" if samsung else "Garmin"),
             ("HR-zone threshold source", "Garmin-derived (your Garmin profile)"),
+            ("Performance condition, stamina, training status, load, lactate threshold, race predictions",
+             "Garmin estimates" if not samsung and not gtii else None),
             ("Recovery context source", ("Samsung watch daily data and Runner Sidekick's resting HR estimate" if samsung
                                          else "Garmin daily data") if rc else None),
             ("Weather", f"{wx['source']} (external estimate)" if wx else None),

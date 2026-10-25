@@ -177,8 +177,10 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
             b.fact("acute_load", "Garmin acute load", f"{int(st['acute_load'])}", st["acute_load"])
             b.fact("load_range", "Garmin optimal load range", f"{int(st['chronic_min'])}–{int(st['chronic_max'])}",
                    [st["chronic_min"], st["chronic_max"]])
+        from .numbers import current_predictions
+        current = current_predictions(conn)
         for k, label in (("5k", "5K"), ("10k", "10K"), ("half", "half marathon")):
-            v = (g.get("race_predictions") or {}).get(k)
+            v = current.get(k)
             if v:
                 b.fact(f"predicted_{k}", f"Garmin predicted {label} time", rp.fmt_duration_s(v), v)
 
