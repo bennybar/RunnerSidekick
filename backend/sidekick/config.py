@@ -85,5 +85,5 @@ def load_config() -> Config:
         backfill_days=int(os.getenv("RSK_BACKFILL_DAYS", "90")),
         refetch_days=int(os.getenv("RSK_REFETCH_DAYS", "3")),
         raw_retention_days=int(os.getenv("RSK_RAW_RETENTION_DAYS", "120")),
-        request_spacing_s=float(os.getenv("RSK_REQUEST_SPACING_S", "1.0")),
+        request_spacing_s=float(os.getenv("RSK_REQUEST_SPACING_S", "0.3")),  # was 1 s: most of a sync was this wait
     )
