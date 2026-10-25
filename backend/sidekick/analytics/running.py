@@ -38,6 +38,33 @@ class Split:
     complete: bool
 
 
+MIN_SPLIT_PACE_M = 100.0  # a stretch shorter than this gets no pace: a few seconds of GPS make it anything
+AUTO_LAPS = ((950.0, 1050.0), (1530.0, 1690.0))  # the watch's automatic 1 km or 1 mile laps
+
+
+def merge_short_tail(laps: list[dict]) -> list[dict]:
+    """On a run of automatic 1 km (or mile) laps, the short laps after the last full one become one partial: the watch
+    can end a run with several metres-long laps (a lap press just before stopping), which aren't extra kilometres.
+    Stored laps are left as they are; other lap patterns (intervals) are returned unchanged."""
+    dists = [l.get("distance_m") or 0 for l in laps]
+    full = [d for d in dists if any(lo <= d <= hi for lo, hi in AUTO_LAPS)]
+    if len(full) < 2 or len(laps) - len(full) < 2:
+        return laps
+    last = max(i for i, d in enumerate(dists) if any(lo <= d <= hi for lo, hi in AUTO_LAPS))
+    tail = laps[last + 1:]
+    if len(tail) < 2:
+        return laps
+    def total(k):
+        vals = [l.get(k) for l in tail if l.get(k) is not None]
+        return sum(vals) if vals else None
+    hr_w = [(l.get("moving_s") or l.get("elapsed_s") or 0, l["avg_hr"]) for l in tail if l.get("avg_hr")]
+    merged = {**tail[0], "distance_m": total("distance_m"), "elapsed_s": total("elapsed_s"), "moving_s": total("moving_s"),
+              "elevation_gain_m": total("elevation_gain_m"), "elevation_loss_m": total("elevation_loss_m"),
+              "max_hr": max((l["max_hr"] for l in tail if l.get("max_hr")), default=None),
+              "avg_hr": round(sum(w * h for w, h in hr_w) / sum(w for w, _ in hr_w), 1) if hr_w and sum(w for w, _ in hr_w) else None}
+    return laps[:last + 1] + [merged]
+
+
 def splits_from_laps(laps: list[dict]) -> list[Split]:
     dists = [l["distance_m"] for l in laps if l.get("distance_m")]
     typical = median(dists) if dists else None
@@ -46,7 +73,7 @@ def splits_from_laps(laps: list[dict]) -> list[Split]:
         d, mv = l.get("distance_m"), l.get("moving_s")
         complete = bool(d and typical and d >= COMPLETE_LAP_RATIO * typical)
         out.append(Split(l["idx"], d, mv, l.get("elapsed_s"), l.get("avg_hr"), l.get("elevation_gain_m"),
-                         (mv / (d / 1000.0)) if d and mv else None, complete))
+                         (mv / (d / 1000.0)) if d and mv and d >= MIN_SPLIT_PACE_M else None, complete))
     return out
 
 
@@ -396,7 +423,8 @@ def split_details(s: Samples | None, laps: list[dict], floors: list[float] | Non
                 if h is not None and 60 <= h <= 220:
                     zt[sum(1 for f in floors if h >= f)] += w[i]
             zone = max(range(6), key=lambda k: zt[k]) if sum(zt) else None
-        out.append({"idx": lap["idx"], "gap_pace_s_per_km": round(1000.0 / gsp, 1) if gsp else None,
+        short = (lap.get("distance_m") or 0) < MIN_SPLIT_PACE_M  # seconds long: no pace worth showing
+        out.append({"idx": lap["idx"], "gap_pace_s_per_km": round(1000.0 / gsp, 1) if gsp and not short else None,
                     "cadence_spm": round(sum(a * c for a, c in cads) / sum(a for a, _ in cads)) if cads else None, "zone": zone,
                     "elevation_loss_m": lap.get("elevation_loss_m")})
         t_start = t_end

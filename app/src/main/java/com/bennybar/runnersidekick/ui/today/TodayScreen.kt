@@ -699,7 +699,7 @@ private fun ScorePage(title: String, tint: Tint, scope: String?, sc: com.bennyba
                     // Garmin's VO2 max is a device estimate: a dip is an estimate trend, not a decline
                     val dip = g.id == "vo2" && g.direction == "declining"
                     VerdictChip(if (dip) "ok" else when (g.direction) { "improving" -> "good"; "stable" -> "ok"; "declining" -> "low"; else -> null },
-                        label = if (dip) "Estimate dipped" else when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; else -> null })
+                        label = if (dip) "Estimate dipped" else when (g.direction) { "improving" -> "Improving"; "stable" -> "Stable"; "declining" -> "Declining"; "inconclusive" -> "Inconclusive"; else -> null })
                 }) }
             }
         }

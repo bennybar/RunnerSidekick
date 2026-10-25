@@ -102,7 +102,8 @@ def activity_by_source_id(conn, source: str, sid: str) -> dict | None:
 
 
 def laps_for(conn, aid: int) -> list[dict]:
-    return many(conn.activity_lap, {"activity_id": aid}, sort=[("idx", 1)])
+    """The run's laps as stored, with a run of 1 km auto-laps ending in one partial (rn.merge_short_tail)."""
+    return rn.merge_short_tail(many(conn.activity_lap, {"activity_id": aid}, sort=[("idx", 1)]))
 
 
 def samples_for(conn, aid: int) -> Samples | None:
@@ -825,6 +826,21 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
         odd = rn.uneven_halves([{"distance_m": s.distance_m, "elevation_gain_m": s.elevation_gain_m,
                                  "elevation_loss_m": d.get("elevation_loss_m")} for s, d in pairs])
         if fade > rn.FADE_S_PER_KM and not odd:
+            # A slower second half is a pacing problem only when nothing else explains it: heat, the runner's own report
+            # of a good run, or km-to-km variation as big as the fade itself
+            spread = pstdev(paces)
+            felt_fine = said and said.get("feel") in ("great", "good") and said.get("effort") not in ("hard", "very_hard")
+            if heat and heat.get("hot"):
+                return (f"The second half was about {fade:.0f} s/km slower (hill-adjusted) on a warm, humid day ({heat['say']}); "
+                        "heat makes the same pace cost more as a run goes on, so this isn't clearly a pacing problem. "
+                        "Compare with your next cooler run of the same kind.")
+            if felt_fine:
+                return (f"The second half was about {fade:.0f} s/km slower (hill-adjusted), but you felt "
+                        f"{said['feel']} at a {said.get('effort', 'moderate').replace('_', '-')} effort: no change needed. "
+                        "Watch whether the same pattern shows on your next run of this kind.")
+            if fade <= spread:
+                return (f"The second half was about {fade:.0f} s/km slower (hill-adjusted), within this run's usual "
+                        f"km-to-km variation (±{spread:.0f} s/km): not a clear fade.")
             return (f"You faded by about {fade:.0f} s/km (hill-adjusted). Next time, try starting 5–10 s/km slower than "
                     f"{fmt_pace(first)} and see if the second half holds.")
     if zones and sum(1 for z in zones if z >= 4) >= 0.8 * len(zones):

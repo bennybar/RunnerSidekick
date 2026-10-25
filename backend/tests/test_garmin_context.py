@@ -91,7 +91,7 @@ def test_export_carries_garmin_context_for_a_garmin_run():
     assert "Training status: **Maintaining**" in sec and "Acute load: **202** (Garmin's range 175–329)" in sec
     assert "Load focus: **aerobic low shortage**" in sec and "Lactate threshold (Garmin, 2026-09-01): **166 bpm · 5:24 /km**" in sec
     assert "Race prediction (Garmin, " in sec and "5K **26:18**" in sec
-    assert "Caveat" not in sec  # no other watch's runs here
+    assert "Partial history" not in sec  # no other watch's runs here
     assert "Export schema: **Runner Sidekick LLM Export v2.1**" in md
 
 

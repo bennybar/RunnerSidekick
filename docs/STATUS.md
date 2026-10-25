@@ -1146,3 +1146,18 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   shown ("Daytime only · not compared", status `not_compared`), never compared with the usual nor part of it
   (`reports.rhr_series`, also used by readiness, fitness age and the comparison sheet). Readiness: "Not counted".
   No "switch days" exist (the user switches watches fully), so mixed-day handling isn't needed.
+
+## Export polish (2026-10-26, v0.76.2)
+- Splits: Garmin ended the 25 Oct run with two laps of 10.6 m and 7.5 m (a lap press before stopping); each showed as a
+  "km" with a 4:26–4:42 pace. On a run of 1 km (or mile) auto-laps, the short laps after the last full one are read as
+  one partial (`rn.merge_short_tail`, in `reports.laps_for`; stored laps untouched); a stretch under 100 m gets no pace
+  (actual or hill-adjusted). The export prints the partial's distance ("8* (0.02 km)").
+- Efficiency trend audit (25 Oct): 7 Venu X1 runs, 24 Sep–25 Oct, all good HR quality, 7.8–9.0 m/km climbing, no
+  Samsung run in it; band paces 351, 355, 359, 369, 339, 364, 357 s/km. Halves 5:55 → 6:00 (5 s) within the runs'
+  own ±6 s/km spread (median absolute deviation): now "inconclusive", not "declining" (progress-1.4); inconclusive
+  doesn't count toward the verdict. The insight itself said no clear pattern across watches.
+- Pacing advice: a hill-adjusted fade becomes "start slower" only when it isn't explained by heat, the runner's own
+  report (felt good/great at a not-hard effort) or km-to-km variation as large as the fade. Run AI prompt run-ai-1.3
+  says the same and to speak to the named limiter.
+- Garmin context downstream: the AI coach marks Garmin's status/load/focus "partial" when Garmin missed runs in the
+  last 28 days and never bases advice on them alone (coach-1.7); the export says "Partial history".

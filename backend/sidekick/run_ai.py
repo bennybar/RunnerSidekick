@@ -21,7 +21,7 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "run-ai-1.2"
+PROMPT_VERSION = "run-ai-1.3"  # 1.3: pacing advice weighs heat, terrain and the runner's own report
 MAX_POINTS = 3
 # Written automatically after a sync, only for new runs: never for history pulled in by a first sync or a backfill
 AUTO_WINDOW_H = 36        # a new run: started within the last 36 hours
@@ -59,6 +59,12 @@ analysis and its context. Write:
 When meant_to_be_source is "user", the runner said what the run was for: judge the run against that, never against
 data_based_type. run:athlete, when present, is the runner's own report (effort, feel, what limited them, how they were);
 take it at face value and weigh it with the data.
+
+Pacing: a second half a few seconds per km slower is often terrain, heat or ordinary variation, not poor pacing. Suggest
+starting slower only when run:this next_focus calls it a fade, and never when the runner reports feeling good or great
+and the effort was not hard, or when conditions were hot. When the runner names a limiter (heat, hills, legs...), speak to
+it. Don't contradict the runner's own report without clear data, and don't repeat generic advice after a run that went
+as intended.
 
 Hard rules:
 - Use only the bundle. Cite the evidence ids each point relies on, only in "evidence_ids"; never write ids in text.

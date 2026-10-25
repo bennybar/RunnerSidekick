@@ -10,7 +10,7 @@ from statistics import median
 
 from . import reports as rp
 
-PROGRESS_VERSION = "progress-1.3"  # 1.3: one moving signal is an early sign; signal agreement; 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
+PROGRESS_VERSION = "progress-1.4"  # 1.4: efficiency inconclusive within its runs' own spread; 1.3: one moving signal is an early sign; signal agreement; 1.2: distinct dated VO2 readings, efficiency halves must agree, newest revision only; 1.1: a VO2 estimate dip alone never makes "declining"
 from .analytics.insights import TREND_MEANINGFUL_S_PER_KM_PER_MONTH as EFFICIENCY_S_PER_MONTH  # the efficiency insight's own step
 EFFICIENCY_MIN_RUNS = 6
 EFFICIENCY_MAX_AGE_DAYS = 45   # the trend must reach into the last 6 weeks
@@ -23,7 +23,8 @@ VO2_OLDEST_DAYS = 56           # the older one no more than 8 weeks back
 
 
 def signal(sid: str, title: str, direction: str | None, say: str, note: str) -> dict:
-    """direction: improving | stable | declining, or None when there isn't enough evidence."""
+    """direction: improving | stable | declining; inconclusive when the data moved but not beyond its own noise; None
+    when there isn't enough evidence. Inconclusive and None don't count toward the verdict."""
     return {"id": sid, "title": title, "direction": direction, "say": say, "note": note}
 
 
@@ -63,9 +64,16 @@ def efficiency_signal(conn, source: str, today: date) -> dict:
         "declining" if slope >= EFFICIENCY_S_PER_MONTH and slower else "stable"
     lo, hi = eff["effect"]["band_bpm"]
     word = "faster" if slope < 0 else "slower"
-    return signal("efficiency", "Efficiency", direction,
-                  f"At {lo}–{hi} bpm: {rp.fmt_pace(e['first_half_median_pace'])} → {rp.fmt_pace(e['second_half_median_pace'])} "
-                  f"({abs(slope):.0f} s/km a month {word}, {e['runs']} runs)", note)
+    say = (f"At {lo}–{hi} bpm: {rp.fmt_pace(e['first_half_median_pace'])} → {rp.fmt_pace(e['second_half_median_pace'])} "
+           f"({abs(slope):.0f} s/km a month {word}, {e['runs']} runs)")
+    # A change no bigger than the runs' own spread (median absolute deviation of their paces) isn't a trend either way
+    paces = [p["pace_s_per_km"] for p in e.get("points") or []]
+    spread = median(abs(p - median(paces)) for p in paces) if paces else 0
+    gap = abs(e["second_half_median_pace"] - e["first_half_median_pace"])
+    if direction != "stable" and gap <= spread:
+        return signal("efficiency", "Efficiency", "inconclusive",
+                      say + f"; a {gap:.0f} s/km change within the runs' usual ±{spread:.0f} s/km spread, so no direction yet", note)
+    return signal("efficiency", "Efficiency", direction, say, note)
 
 
 def drift_signal(conn, source: str, today: date) -> dict:
@@ -99,7 +107,7 @@ def drift_signal(conn, source: str, today: date) -> dict:
 
 def build(conn, source: str, today: date) -> dict:
     sigs = [vo2_signal(conn, source, today), efficiency_signal(conn, source, today), drift_signal(conn, source, today)]
-    known = [s for s in sigs if s["direction"]]
+    known = [s for s in sigs if s["direction"] not in (None, "inconclusive")]
     up = sum(s["direction"] == "improving" for s in known)
     down = sum(s["direction"] == "declining" for s in known)
     if len(known) < 2:

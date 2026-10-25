@@ -350,12 +350,13 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("| Km | Pace | Flat-equivalent | HR | Zone | Cadence | Climb |" + (" Descent |" if descent else ""))
         add("|---:|---:|---:|---:|---|---:|---:|" + ("---:|" if descent else ""))
         for x in splits:
-            add(f"| {x['idx'] + 1}{'' if x.get('complete') else '*'} | {pace(x.get('pace_s_per_km'))} | {pace(x.get('gap_pace_s_per_km'))} | "
+            label = f"{x['idx'] + 1}" if x.get("complete") else f"{x['idx'] + 1}* ({(x.get('distance_m') or 0) / 1000:.2f} km)"
+            add(f"| {label} | {pace(x.get('pace_s_per_km'))} | {pace(x.get('gap_pace_s_per_km'))} | "
                 f"{num(x.get('avg_hr'))} | {('Z' + str(x['zone'])) if x.get('zone') else '–'} | {num(x.get('cadence_spm'))} | "
                 f"+{num(x.get('elevation_gain_m'), unit=' m')} |" + (f" −{num(x.get('elevation_loss_m'), unit=' m')} |" if descent else ""))
         add("")
         add("Flat-equivalent: the pace this effort would give on flat ground (Runner Sidekick, Minetti's energy cost of "
-            "running on slopes). * Partial km.")
+            "running on slopes). * Partial km, with its distance; no pace for a stretch under 100 m.")
         add("")
 
     # 8. Decoupling, with the numbers behind it
@@ -575,8 +576,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             since = (date.fromisoformat(day) - timedelta(days=27)).isoformat()
             others = conn.activity.count_documents({"source": source, "local_date": {"$gte": since, "$lte": day}, "manufacturer": "Samsung"})
             if others:
-                out.append(f"Caveat: Garmin didn't record **{others} of your runs** in the 28 days to this one (another watch), so "
-                           "its load and load focus undercount them.  ")
+                out.append(f"Partial history: Garmin didn't record **{others} of your runs** in the 28 days to this one (another "
+                           "watch), so its training status, load and load focus cover only part of your training.  ")
         if lt:
             p = lt[-1]
             pace_txt = f" · {pace(1000 / p['speed_m_s'])}" if p.get("speed_m_s") else ""
