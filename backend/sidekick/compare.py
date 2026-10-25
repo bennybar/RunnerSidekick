@@ -198,7 +198,7 @@ def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
     population ranking: a watch's resting heart rate is the day's lowest stretch, mostly asleep, while survey values are
     a seated pulse, so ranking one against the other would mislead. The survey's middle is given for orientation only."""
     base = {"id": "resting_hr", "title": "Resting heart rate", "source": "your own nights"}
-    series = rp.series(conn, source, "resting_hr", today.isoformat())
+    series = rp.rhr_series(conn, source, today.isoformat())
 
     def med_from(end: date) -> tuple[float | None, int]:
         vals = [v for k, v in series.items() if (end - timedelta(days=27)).isoformat() <= k <= end.isoformat()]

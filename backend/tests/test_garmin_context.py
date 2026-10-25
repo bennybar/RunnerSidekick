@@ -105,3 +105,33 @@ def test_run_rows_from_garmin():
     assert rows == {"Performance condition (Garmin)": "+3 → -1 (lowest -2)", "Stamina left at the end (Garmin)": "51%",
                     "Average HR vs Garmin's threshold": "93% of 166 bpm"}  # the threshold as of the run's day, not a later one
     assert rp.garmin_extra(conn, {"local_date": "2026-09-01", "avg_hr": 155}, None) == []  # nothing from Garmin: no rows
+
+
+def test_daytime_resting_hr_is_shown_but_not_compared():
+    from datetime import date, timedelta
+    conn, _ = synced()
+    d = date(2026, 9, 30)
+    for i in range(1, 21):  # three weeks of ordinary overnight values
+        k = (d - timedelta(days=i)).isoformat()
+        conn.daily_observation.replace_one({"source": "fixture", "local_date": k, "metric": "resting_hr"},
+                                           {"source": "fixture", "local_date": k, "metric": "resting_hr", "value": 50.0, "unit": "bpm",
+                                            "state": "measured", "method": "garmin_daily_rhr", "label": None, "source_record_id": None}, upsert=True)
+    for k, v in ((d.isoformat(), 62.0), ((d - timedelta(days=3)).isoformat(), 70.0)):  # two days without a night on the watch
+        conn.daily_observation.replace_one({"source": "fixture", "local_date": k, "metric": "resting_hr"},
+                                           {"source": "fixture", "local_date": k, "metric": "resting_hr", "value": v, "unit": "bpm",
+                                            "state": "measured", "method": "garmin_daily_rhr", "label": None, "source_record_id": None}, upsert=True)
+        conn.daily_observation.replace_one({"source": "fixture", "local_date": k, "metric": "asleep_measured_s"},
+                                           {"source": "fixture", "local_date": k, "metric": "asleep_measured_s", "value": 0, "unit": "s",
+                                            "state": "measured"}, upsert=True)
+    row = conn.daily_observation.find_one({"source": "fixture", "local_date": d.isoformat(), "metric": "resting_hr"})
+    f = rp.metric_finding(conn, "fixture", "resting_hr", d, row)
+    assert f["status"] == "not_compared" and f["observed"]["value"] == 62 and f["comparison"] is None  # shown, not compared
+    assert (d - timedelta(days=3)).isoformat() not in rp.rhr_series(conn, "fixture", d.isoformat())  # nor part of the usual
+    # An ordinary day the next day is compared against the usual without the daytime values
+    k = (d + timedelta(days=1)).isoformat()
+    conn.daily_observation.replace_one({"source": "fixture", "local_date": k, "metric": "resting_hr"},
+                                       {"source": "fixture", "local_date": k, "metric": "resting_hr", "value": 51.0, "unit": "bpm",
+                                        "state": "measured", "method": "garmin_daily_rhr", "label": None, "source_record_id": None}, upsert=True)
+    f2 = rp.metric_finding(conn, "fixture", "resting_hr", d + timedelta(days=1),
+                           conn.daily_observation.find_one({"source": "fixture", "local_date": k, "metric": "resting_hr"}))
+    assert f2["status"] != "not_compared" and f2["comparison"]["median"] == 50

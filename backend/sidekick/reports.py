@@ -69,6 +69,21 @@ def series(conn, source: str, metric: str, until: str, method: str | None = None
     return {r["local_date"]: r["value"] for r in conn.daily_observation.find(q, {"_id": 0, "local_date": 1, "value": 1})}
 
 
+def daytime_rhr_days(conn, source: str, until: str) -> set[str]:
+    """Days whose resting heart rate is Garmin's from a day it measured no sleep (the watch wasn't worn overnight): a
+    daytime value, so it's never compared with the usual nor part of it."""
+    off = [r["local_date"] for r in conn.daily_observation.find(
+        {"source": source, "metric": "asleep_measured_s", "state": "measured", "value": 0, "local_date": {"$lte": until}}, {"local_date": 1})]
+    return {r["local_date"] for r in conn.daily_observation.find(
+        {"source": source, "metric": "resting_hr", "method": "garmin_daily_rhr", "local_date": {"$in": off}}, {"local_date": 1})}
+
+
+def rhr_series(conn, source: str, until: str) -> dict[str, float]:
+    """Resting heart rate by day, without the daytime-only days (see daytime_rhr_days)."""
+    skip = daytime_rhr_days(conn, source, until)
+    return {k: v for k, v in series(conn, source, "resting_hr", until).items() if k not in skip}
+
+
 def day_obs(conn, source: str, d: str) -> dict[str, dict]:
     return {r["metric"]: r for r in many(conn.daily_observation, {"source": source, "local_date": d})}
 
@@ -179,7 +194,7 @@ def metric_finding(conn, source: str, metric: str, d: date, obs_row) -> dict | N
                 "algorithm_version": bl.BASELINE_VERSION, "derived": False}
     value, method = obs_row["value"], obs_row["method"]
     # HRV comparability: only compare measurements of the same method
-    s = series(conn, source, metric, ds, method if metric == "hrv_overnight_avg" else None)
+    s = rhr_series(conn, source, ds) if metric == "resting_hr" else series(conn, source, metric, ds, method if metric == "hrv_overnight_avg" else None)
     era = device_era_start(conn, source, d)
     b = bl.compute_baseline(s, d, era_start=era)
     window_days = bl.WINDOW_DAYS
@@ -205,6 +220,12 @@ def metric_finding(conn, source: str, metric: str, d: date, obs_row) -> dict | N
     # Raw 14-day trend (descriptive), shown even while the personal range is still being learned
     base["sparkline"] = [{"date": k, "value": s[k]} for k in sorted(s)
                          if k >= (d - timedelta(days=13)).isoformat() and (era is None or k >= era.isoformat())]
+    if metric == "resting_hr" and ds not in s:  # today's is a daytime value (no night on the watch): shown, not compared
+        base.update(status="not_compared", priority=8, comparison=None, delta=None,
+                    statement=f"{METRIC_TITLES[metric]} {fmt_value(metric, value)}, a daytime value: the watch wasn't worn "
+                              "overnight, so it isn't compared with your usual.")
+        base["limitations"].append("Garmin's resting heart rate from a day without a night on the watch is left out of your usual and of comparisons.")
+        return base
     if not b.sufficient:
         base.update(status="learning", priority=8, comparison=None, delta=None,
                     statement=f"{METRIC_TITLES[metric]} {fmt_value(metric, value)}. Still learning your usual range ({b.n} of {bl.MIN_VALID} days needed).")

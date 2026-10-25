@@ -389,6 +389,7 @@ private fun tileValue(f: Finding): Pair<String, String?> {
 private fun tileStatus(f: Finding): String = when {
     f.metric == "running_moving_time_7d" -> if (f.status == "outside") "Well above recent weeks" else "Similar to recent weeks"
     f.status == "learning" -> "Learning · ${f.sampleSize ?: 0}/14 days"
+    f.status == "not_compared" -> "Daytime only · not compared"
     f.status == "missing" -> f.last?.let { if (it.date == java.time.LocalDate.now().minusDays(1).toString()) "Yesterday's" else "From ${Format.shortDate(it.date)}" } ?: "Not in yet"
     f.status == "sustained" -> "Unusual 3 days running"
     f.status == "outside" -> if ((f.delta?.abs ?: 0.0) > 0) "Above your usual" else "Below your usual"

@@ -69,7 +69,7 @@ def hunt_part(conn, source: str, sex: str | None, age: int | None, today: date) 
     seated, seated_at = _dated(conn, "resting_pulse_seated")
     ans = {k: get_setting(conn, k, None) for k in ("hunt_frequency", "hunt_intensity", "hunt_duration")}
     since = (today - timedelta(days=27)).isoformat()
-    rhr = [v for k, v in rp.series(conn, source, "resting_hr", today.isoformat()).items() if k >= since]
+    rhr = [v for k, v in rp.rhr_series(conn, source, today.isoformat()).items() if k >= since]
     missing = [w for w, ok in (("sex and birth date", sex and age), ("waist", waist), ("the three activity answers", all(ans.values())),
                                ("a resting pulse", seated or len(rhr) >= 7)) if not ok]
     caveat = ("A population formula from who you are and how active you say you are, not from a run. Activity points "
@@ -320,7 +320,7 @@ def rest_on(conn, source: str, day: str) -> float | None:
     """The resting heart rate around a day: the median of the 28 days up to it, from 7 days, whichever watch measured
     them (Samsung's is our own estimate)."""
     since = (date.fromisoformat(day) - timedelta(days=28)).isoformat()
-    vals = [v for k, v in rp.series(conn, source, "resting_hr", day).items() if k >= since]
+    vals = [v for k, v in rp.rhr_series(conn, source, day).items() if k >= since]
     return median(vals) if len(vals) >= 7 else None
 
 

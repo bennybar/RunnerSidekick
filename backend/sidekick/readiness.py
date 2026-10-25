@@ -193,7 +193,10 @@ def build(conn, source: str, today: date, morning: dict) -> dict:
     f = by.get("resting_hr")
     v, when = reading("resting_hr")
     base, against = usual(f, today) if v is not None else (None, "")
-    if base:
+    if (f or {}).get("status") == "not_compared":  # a daytime value: no night on the watch, so it doesn't count
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm" if v else None, "points": None,
+                      "say": "Not counted", "note": "A daytime value: the watch wasn't worn overnight"})
+    elif base:
         d = v - base
         parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm",
                       "points": round(100 if d <= RHR_FREE_BPM else clamp(100 - RHR_SLOPE * (d - RHR_FREE_BPM))),

@@ -1142,3 +1142,7 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   with performance condition/stamina. Export schema v2.1; every earlier line of the 25 Oct export kept, two qualified.
 - Briefing: Garmin's labels show under the name (subtitle) instead of squeezed beside the number.
 - Not done (need a decision): resting HR from a no-night day still enters the baseline comparison; switch-day nights.
+- (v0.76.1) Garmin's resting HR from a day without a night on the watch (`asleep_measured_s` 0) is a daytime value:
+  shown ("Daytime only · not compared", status `not_compared`), never compared with the usual nor part of it
+  (`reports.rhr_series`, also used by readiness, fitness age and the comparison sheet). Readiness: "Not counted".
+  No "switch days" exist (the user switches watches fully), so mixed-day handling isn't needed.
