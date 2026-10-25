@@ -66,7 +66,7 @@ def test_watchletic_run_export_names_its_sources_and_splits():
     rp.build_post_run(conn, "garmin", sid, False)
     md = run_export.markdown(conn, "garmin", sid, fetch=lambda *a, **k: None)[1]
     splits = md[md.index("## Pace and splits"):md.index("## Aerobic decoupling")]
-    assert [f"\n| {k} |" in splits for k in range(1, 6)] == [True] * 5 and "\n| 6* |" in splits  # 5 km and what's left
+    assert [f"\n| {k} |" in splits for k in range(1, 6)] == [True] * 5 and "\n| 6* (0.03 km) | – |" in splits  # 5 km, then the 35 m left (no pace)
     dyn = md[md.index("## Running dynamics"):md.index("## Recovery context") if "## Recovery context" in md else None]
     assert "from Garmin" not in dyn and "Averages and maxima from Watchletic" in dyn and "warm-up included" in dyn
     assert "repeats past 5 s are left out" in dyn
