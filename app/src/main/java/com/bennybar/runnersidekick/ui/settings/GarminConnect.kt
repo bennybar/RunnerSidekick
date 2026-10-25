@@ -16,7 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -111,7 +111,7 @@ fun GarminConnectScreen(onDone: () -> Unit, onSkip: (() -> Unit)?, onClose: () -
             when {
                 linking -> Tile(Modifier.padding(12.dp), spacing = 12.dp) {
                     Text("Connecting to Garmin…", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    LoadingIndicator(Modifier.align(Alignment.CenterHorizontally))
                 }
                 error != null -> Tile(Modifier.padding(12.dp), tint = Tint.ORANGE, spacing = 16.dp) {
                     Text(error!!, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)

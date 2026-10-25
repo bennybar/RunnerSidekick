@@ -1101,3 +1101,16 @@ After the round-4 review:
   sensor dropout logged): kept as recorded. Export: no "from Garmin" on a Watchletic run, halves say warm-up included
   and how they're weighted, a zone caveat and an HR sensitivity check when HR quality isn't good, provenance per field.
   Regression fixture: tests/data/watchletic_2026-10-22.fit (the real file without positions).
+
+## Material 3 Expressive touches (2026-10-25, v0.74.0)
+- One choice from a few is a connected button group (`ChoiceGroup`): the VO₂ progress range, Trends' Summary/Compare/
+  Charts, the Runs filter, Journal's tabs, Appearance, Units, VO₂ and fitness-age source, week start, HR zones, sex.
+- Options that turn on and off, or a choice that can be cleared, are toggle buttons that change shape when on
+  (`ToggleRow`): running days, main goal, race distance, today's plan and its minutes. Unchosen buttons get a fill a
+  step stronger than the card, or they vanish on a plain card.
+- Loading: the Garmin sign-in uses the Expressive loading indicator; the sync's measured progress is a wavy bar; an
+  unmeasured refresh shows the contained loading indicator; the pull-down shows the Expressive pull indicator.
+- Shape badges: each reading tile on Today (sleep, resting HR, HRV, running time, VO₂ max), the latest run, and each run
+  in Runs (a trophy on a sun shape for a run that set a record, replacing the trophy at the row's end). Still shapes only.
+- Expressive APIs are opted into once in app/build.gradle.kts. Lint: the run day's name reads the locale from the
+  configuration (the one lint error, from 0.70.0).

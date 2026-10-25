@@ -1,5 +1,9 @@
 package com.bennybar.runnersidekick.ui.today
 
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
@@ -102,6 +106,11 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 
 private val TILE_METRICS = listOf("sleep_duration", "resting_hr", "hrv_overnight_avg", "running_moving_time_7d")
+private val TILE_BADGES = mapOf(
+    "sleep_duration" to (Icons.Outlined.Bedtime to MaterialShapes.Clover4Leaf),
+    "resting_hr" to (Icons.Outlined.FavoriteBorder to MaterialShapes.Heart),
+    "hrv_overnight_avg" to (Icons.Outlined.MonitorHeart to MaterialShapes.SoftBurst),
+    "running_moving_time_7d" to (Icons.AutoMirrored.Outlined.DirectionsRun to MaterialShapes.Cookie6Sided))
 private val TILE_TINTS = mapOf("sleep_duration" to Tint.INDIGO, "resting_hr" to Tint.PINK, "hrv_overnight_avg" to Tint.PINK,
     "running_moving_time_7d" to Tint.ORANGE)
 
@@ -408,17 +417,8 @@ private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Poi
     val pts = series.filter { !java.time.LocalDate.parse(it.date).isBefore(from) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Progress", style = MaterialTheme.typography.titleSmall)
-        // The range as one segmented control
-        Row(Modifier.fillMaxWidth().background(cs.surfaceContainerHighest, CircleShape).padding(3.dp)) {
-            listOf(3 to "3 months", 6 to "6 months", 12 to "1 year").forEach { (m, l) ->
-                Surface(selected = months == m, onClick = { months = m }, shape = CircleShape,
-                    color = if (months == m) cs.surface else Color.Transparent, modifier = Modifier.weight(1f).height(40.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(l, style = MaterialTheme.typography.labelLarge, color = if (months == m) cs.onSurface else cs.onSurfaceVariant)
-                    }
-                }
-            }
-        }
+        val ranges = listOf(3, 6, 12)
+        com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("3 months", "6 months", "1 year"), ranges.indexOf(months), { months = ranges[it] })
         if (pts.size < 2) {
             Text("Not enough $maker readings in this period yet.", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
             return@Column
@@ -487,7 +487,7 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
                             statusIcon = ch?.let { if (it > 0.05) Icons.AutoMirrored.Outlined.TrendingUp else if (it < -0.05) Icons.AutoMirrored.Outlined.TrendingDown
                                 else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false, tint = Tint.TEAL,
                             modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, %s".format(vo2, maker) },
-                            onClick = onOpenFitness,
+                            onClick = onOpenFitness, badge = Icons.Outlined.Speed to MaterialShapes.Sunny,
                             chart = if (series.size >= 2) {
                                 { Sparkline(series.takeLast(14).map { it.value }, Modifier.fillMaxWidth().height(32.dp),
                                     color = ink(Tint.TEAL), description = "VO2 max, recent $maker readings") }
@@ -510,7 +510,7 @@ private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data
                         label = if (f.metric == "running_moving_time_7d") "Running, 7 days" else f.title,
                         value = value, unit = unit, status = tileStatus(f), statusIcon = icon, flagged = flagged, tint = tint,
                         modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "${f.title}. ${f.statement}" },
-                        onClick = { onTap(f) },
+                        onClick = { onTap(f) }, badge = TILE_BADGES[f.metric],
                         chart = if (!f.sparkline.isNullOrEmpty()) {
                             { Sparkline(dailySeries(f, r.localDate), Modifier.fillMaxWidth().height(32.dp), band = band, color = lineColor,
                                 description = "${f.title}, last 14 days") }
@@ -820,6 +820,9 @@ private fun LastRunCard(run: com.bennybar.runnersidekick.data.remote.RecentRun, 
         SectionLabel("Latest run")
         Tile(onClick = onOpen) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                com.bennybar.runnersidekick.ui.components.ShapeBadge(Icons.AutoMirrored.Outlined.DirectionsRun, MaterialShapes.Cookie9Sided,
+                    Modifier.size(40.dp), container = Tint.ORANGE.hue.copy(alpha = 0.22f), content = ink(Tint.ORANGE), iconSize = 22.dp)
+                Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("${Format.shortDate(run.localDate)} · ${Format.duration(run.movingS)}", style = MaterialTheme.typography.labelLarge,
                         color = cs.onSurfaceVariant)

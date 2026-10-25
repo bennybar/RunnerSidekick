@@ -20,7 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ToggleButton
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -114,6 +119,43 @@ private fun GroupRow(
     }
 }
 
+/** One choice from a few, as a connected button group: the chosen button fills in and its corners round
+ *  (M3 Expressive). [selected] null shows none chosen. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ChoiceGroup(labels: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier.fillMaxWidth(),
+                enabled: Boolean = true) {
+    Row(modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+        labels.forEachIndexed { i, l ->
+            ToggleButton(checked = selected == i, onCheckedChange = { onSelect(i) }, enabled = enabled, colors = offFill(),
+                modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                shapes = when (i) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    labels.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
+                Text(l, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Options that each turn on and off (or one choice that can be cleared): toggle buttons whose shape changes when on. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun ToggleRow(labels: List<String>, checked: (Int) -> Boolean, onToggle: (Int) -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        labels.forEachIndexed { i, l -> ToggleButton(checked = checked(i), onCheckedChange = { onToggle(i) }, colors = offFill()) { Text(l) } }
+    }
+}
+
+/** Toggle colours with the "off" fill a step stronger than the card's, so unchosen buttons still show on a plain card. */
+@Composable
+private fun offFill() = androidx.compose.material3.ToggleButtonDefaults.colors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+
 /** An icon on an Expressive shape (cookie, sunny, burst…), tinted with a container colour. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -144,12 +186,20 @@ fun MetricTile(
     tint: com.bennybar.runnersidekick.ui.theme.Tint = com.bennybar.runnersidekick.ui.theme.Tint.NEUTRAL,
     onClick: () -> Unit,
     chart: (@Composable () -> Unit)? = null,
+    badge: Pair<ImageVector, RoundedPolygon>? = null,  // the reading's icon on its own Expressive shape
 ) {
     val on = MaterialTheme.colorScheme.onSurface
     val sub = MaterialTheme.colorScheme.onSurfaceVariant
-    Tile(modifier, tint = if (flagged) com.bennybar.runnersidekick.ui.theme.Tint.ORANGE else tint, onClick = onClick, spacing = 4.dp) {
+    val shown = if (flagged) com.bennybar.runnersidekick.ui.theme.Tint.ORANGE else tint
+    Tile(modifier, tint = shown, onClick = onClick, spacing = 4.dp) {
         Column(Modifier.heightIn(min = 104.dp)) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = on)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelLarge, color = on, modifier = Modifier.weight(1f))
+                badge?.let { (icon, shape) ->
+                    ShapeBadge(icon, shape, Modifier.size(30.dp), container = shown.hue.copy(alpha = 0.24f),
+                        content = com.bennybar.runnersidekick.ui.theme.ink(shown), iconSize = 17.dp)
+                }
+            }
             Spacer(Modifier.weight(1f, fill = false))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(value, style = MaterialTheme.typography.headlineMedium, color = on, maxLines = 1)

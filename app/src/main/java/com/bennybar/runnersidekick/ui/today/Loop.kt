@@ -24,7 +24,6 @@ import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,15 +64,11 @@ fun PlanCard(plan: DayPlan?, onSet: (String?, Int?) -> Unit) {
                     modifier = Modifier.weight(1f))
                 if (plan != null) TextButton(onClick = { onSet(null, null) }) { Text("Clear") }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                PLAN_KINDS.forEach { (k, l) -> FilterChip(selected = plan?.kind == k, onClick = { onSet(k, plan?.minutes) }, label = { Text(l) }) }
-            }
+            com.bennybar.runnersidekick.ui.components.ToggleRow(PLAN_KINDS.map { it.second }, { plan?.kind == PLAN_KINDS[it].first }, { onSet(PLAN_KINDS[it].first, plan?.minutes) })
             if (plan != null && plan.kind != "rest") {
                 Text("About how long?", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MINUTES.forEach { m -> FilterChip(selected = plan.minutes == m, onClick = { onSet(plan.kind, if (plan.minutes == m) null else m) },
-                        label = { Text("$m min") }) }
-                }
+                com.bennybar.runnersidekick.ui.components.ToggleRow(MINUTES.map { "$it min" }, { plan.minutes == MINUTES[it] },
+                    { i -> onSet(plan.kind, if (plan.minutes == MINUTES[i]) null else MINUTES[i]) })
             }
         }
     }

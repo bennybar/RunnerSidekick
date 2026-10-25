@@ -25,9 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -97,11 +94,7 @@ fun JournalScreen(onOpenReport: (Long) -> Unit, onBack: () -> Unit, vm: JournalV
             LazyColumn(contentPadding = PageList, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // The app no longer asks for check-ins; the tab only stays for people who logged some earlier
                 if (checkins.isNotEmpty()) item {
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        listOf("Reports", "Check-ins").forEachIndexed { i, l ->
-                            SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
-                        }
-                    }
+                    com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Reports", "Check-ins"), tab, { tab = it })
                 }
                 if (tab == 0 || checkins.isEmpty()) {
                     if (reports.isEmpty()) item { EmptyState(Icons.Outlined.MenuBook, "No reports yet", "Reports appear here after your first sync.") }

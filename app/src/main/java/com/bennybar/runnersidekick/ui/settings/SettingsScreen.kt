@@ -1,5 +1,6 @@
 package com.bennybar.runnersidekick.ui.settings
 
+import androidx.compose.foundation.layout.width
 import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,15 +29,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -341,22 +337,18 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                         row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
                                 "Your watch's estimate" else "Runner Sidekick's experimental estimate, from your steady runs on any watch (needs 3 in 60 days)",
                             trailing = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("watch" to "Watch", "sidekick" to "Sidekick").forEach { (k, l) ->
-                                        FilterChip(r.vo2Source == k, enabled = !busy,
-                                            onClick = { if (r.vo2Source != k) vm.saveRemote(r.copy(vo2Source = k)) }, label = { Text(l) })
-                                    }
-                                }
+                                val keys = listOf("watch", "sidekick")
+                                com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Watch", "Sidekick"), keys.indexOf(r.vo2Source).takeIf { it >= 0 }, enabled = !busy,
+                                    modifier = Modifier.width(184.dp),
+                                    onSelect = { if (r.vo2Source != keys[it]) vm.saveRemote(r.copy(vo2Source = keys[it])) })
                             })
                         row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
                                 "Runner Sidekick's: the age your VO₂ max (as chosen above) is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
                             trailing = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("garmin" to "Garmin", "sidekick" to "Sidekick").forEach { (k, l) ->
-                                        FilterChip(r.fitnessAgeSource == k, enabled = !busy,
-                                            onClick = { if (r.fitnessAgeSource != k) vm.saveRemote(r.copy(fitnessAgeSource = k)) }, label = { Text(l) })
-                                    }
-                                }
+                                val keys = listOf("garmin", "sidekick")
+                                com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Garmin", "Sidekick"), keys.indexOf(r.fitnessAgeSource).takeIf { it >= 0 }, enabled = !busy,
+                                    modifier = Modifier.width(184.dp),
+                                    onSelect = { if (r.fitnessAgeSource != keys[it]) vm.saveRemote(r.copy(fitnessAgeSource = keys[it])) })
                             })
                     }
                 }
@@ -366,20 +358,12 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onSamsungCheck: () -> Unit 
                     custom {
                         Text("Appearance", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
                         val now = Appearance.of(local?.appearance)
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            Appearance.entries.forEachIndexed { i, a ->
-                                SegmentedButton(now == a, { vm.setAppearance(a) }, SegmentedButtonDefaults.itemShape(i, 3), icon = {}) { Text(a.label) }
-                            }
-                        }
+                        com.bennybar.runnersidekick.ui.components.ChoiceGroup(Appearance.entries.map { it.label }, now.ordinal, { vm.setAppearance(Appearance.entries[it]) })
                     }
                     custom {
                         Text("Units", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
-                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                            Units.entries.forEachIndexed { i, u ->
-                                SegmentedButton(local?.units == u, { vm.setUnits(u) }, SegmentedButtonDefaults.itemShape(i, 2),
-                                    icon = {}) { Text(if (u == Units.METRIC) "Metric (km)" else "Imperial (mi)") }
-                            }
-                        }
+                        com.bennybar.runnersidekick.ui.components.ChoiceGroup(Units.entries.map { if (it == Units.METRIC) "Metric (km)" else "Imperial (mi)" },
+                            local?.units?.ordinal, { vm.setUnits(Units.entries[it]) })
                     }
                 }
             }
@@ -587,28 +571,19 @@ private fun TrainingSheet(r: SettingsDto, busy: Boolean, error: String?, onClose
         weekStartDay = weekStart, hrZoneSource = zones, timezone = tz.trim())
     SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose, error = error) {
         Label("Running days")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            DAYS.forEachIndexed { i, d -> FilterChip(i in days, { days = if (i in days) days - i else days + i }, { Text(d) }) }
-        }
+        com.bennybar.runnersidekick.ui.components.ToggleRow(DAYS, { it in days }, { i -> days = if (i in days) days - i else days + i })
         Label("Main goal", "Orders the weekly focus suggestions.")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            GOALS.forEach { (k, l) -> FilterChip(goalType == k, { goalType = if (goalType == k) null else k }, { Text(l) }) }
-        }
+        com.bennybar.runnersidekick.ui.components.ToggleRow(GOALS.map { it.second }, { goalType == GOALS[it].first }, { i -> val k = GOALS[i].first; goalType = if (goalType == k) null else k })
         OutlinedTextField(goal, { goal = it.take(200) }, label = { Text("Goal in your words (optional)") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, label = { Text("Usual time per run (min)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         Label("Week starts on", if (weekStart == null) "Now: ${r.weekStartEffective.replaceFirstChar(Char::uppercase)} (from Garmin, or Monday)."
             else "Used for weekly reviews, the weekly focus, Activities and charts.")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
-                .forEach { (k, l) -> FilterChip(weekStart == k, { weekStart = k }, { Text(l) }) }
-        }
+        val starts = listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
+        com.bennybar.runnersidekick.ui.components.ToggleRow(starts.map { it.second }, { weekStart == starts[it].first }, { weekStart = starts[it].first })
         Label("Heart-rate zones")
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf("garmin" to "From Garmin", "none" to "Don't use").forEachIndexed { i, (k, l) ->
-                SegmentedButton(zones == k, { zones = k }, SegmentedButtonDefaults.itemShape(i, 2), icon = {}) { Text(l) }
-            }
-        }
+        val zoneKeys = listOf("garmin", "none")
+        com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("From Garmin", "Don't use"), zoneKeys.indexOf(zones).takeIf { it >= 0 }, { zones = zoneKeys[it] })
         Label("Time zone", "Decides when your day starts and ends.")
         OutlinedTextField(tz, { tz = it }, singleLine = true, isError = !tzOk, modifier = Modifier.fillMaxWidth(),
             supportingText = { if (!tzOk) Text("Not a time zone name, e.g. Europe/London") })
@@ -635,9 +610,7 @@ private fun RaceSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: ()
         Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Label("Distance")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            RACES.forEach { (k, l) -> FilterChip(dist == k, { dist = if (dist == k) null else k }, { Text(l) }) }
-        }
+        com.bennybar.runnersidekick.ui.components.ToggleRow(RACES.map { it.second }, { dist == RACES[it].first }, { i -> val k = RACES[i].first; dist = if (dist == k) null else k })
         Label("Date")
         OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
             Text(date?.let { Format.longDate(it) } ?: "Choose the race date")
@@ -671,9 +644,8 @@ private fun AboutYouSheet(r: SettingsDto, busy: Boolean, error: String?, onClose
             else "Garmin didn't provide these; set them to see age and sex comparisons.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Label("Sex")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(null to "As in Garmin", "male" to "Male", "female" to "Female").forEach { (k, l) -> FilterChip(sex == k, { sex = k }, { Text(l) }) }
-        }
+        val sexes = listOf(null to "As in Garmin", "male" to "Male", "female" to "Female")
+        com.bennybar.runnersidekick.ui.components.ChoiceGroup(sexes.map { it.second }, sexes.indexOfFirst { it.first == sex }.takeIf { it >= 0 }, { sex = sexes[it].first })
         Label("Birth date")
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f)) { Text(birth?.let { Format.longDate(it) } ?: "As in Garmin") }

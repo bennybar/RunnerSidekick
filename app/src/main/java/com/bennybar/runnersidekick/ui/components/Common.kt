@@ -202,8 +202,8 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
         if (isRefreshing && p != null) {
             // A real share of the work, with what's being done and the percentage
             val shown by androidx.compose.animation.core.animateFloatAsState(p.fraction, label = "progress")
-            androidx.compose.material3.LinearProgressIndicator(progress = { shown },
-                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))
+            androidx.compose.material3.LinearWavyProgressIndicator(progress = { shown },
+                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().padding(horizontal = 12.dp))
             // What's being done, just above the floating tab bar (the page's own header buttons sit at the top)
             Column(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = LocalNavBarPadding.current + 8.dp),
                 horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
@@ -220,9 +220,9 @@ fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier 
                     }
                 }
             }
-        } else if (isRefreshing) androidx.compose.material3.LinearProgressIndicator(
-            Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().height(3.dp))
-        else if (state.distanceFraction > 0f) androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator(
+        } else if (isRefreshing) androidx.compose.material3.ContainedLoadingIndicator(
+            Modifier.align(androidx.compose.ui.Alignment.TopCenter).padding(top = 12.dp))
+        else if (state.distanceFraction > 0f) androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
             state = state, isRefreshing = false, modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter))
     }, content = content)
 }

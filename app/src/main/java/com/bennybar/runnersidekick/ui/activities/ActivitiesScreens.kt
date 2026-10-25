@@ -15,7 +15,6 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.ui.semantics.Role
@@ -32,14 +31,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.ui.semantics.contentDescription
@@ -175,9 +172,7 @@ fun ActivitiesScreen(onOpen: (String) -> Unit, onTrophies: () -> Unit = {}, vm: 
             LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 weeks.entries.firstOrNull()?.let { (start, runs) -> item { WeekHero(start, runs, units, firstDay) } }
                 item {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Filter.entries.forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) }) }
-                    }
+                    com.bennybar.runnersidekick.ui.components.ChoiceGroup(Filter.entries.map { it.label }, filter.ordinal, { filter = Filter.entries[it] })
                 }
                 if (shown.isEmpty()) item {
                     EmptyState(Icons.AutoMirrored.Outlined.DirectionsRun, if (acts == null) "No runs loaded" else "No runs here",
@@ -211,6 +206,13 @@ private fun RunRow(a: ActivitySummary, units: Units, onClick: () -> Unit) {
     val sub = MaterialTheme.colorScheme.onSurfaceVariant
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
+        val best = a.records.isNotEmpty()
+        com.bennybar.runnersidekick.ui.components.ShapeBadge(
+            if (best) Icons.Outlined.EmojiEvents else Icons.AutoMirrored.Outlined.DirectionsRun,
+            if (best) androidx.compose.material3.MaterialShapes.Sunny else androidx.compose.material3.MaterialShapes.Cookie6Sided,
+            Modifier.size(36.dp).then(if (best) Modifier.semantics { contentDescription = "Set a record" } else Modifier), container = (if (best) Tint.AMBER else Tint.ORANGE).hue.copy(alpha = 0.22f),
+            content = ink(if (best) Tint.AMBER else Tint.ORANGE), iconSize = 20.dp)
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(Format.activityTime(a.startUtc, a.utcOffsetS), style = MaterialTheme.typography.labelMedium, color = sub)
             Text("${Format.distance(a.distanceM, units)} · ${Format.pace(a.paceMovingSPerKm, units)}", style = MaterialTheme.typography.titleMedium)
@@ -219,7 +221,6 @@ private fun RunRow(a: ActivitySummary, units: Units, onClick: () -> Unit) {
             if (a.records.isNotEmpty()) Text("New best: " + a.records.joinToString(", ") { "${it.title.removePrefix("Fastest ")} ${it.value}" },
                 style = MaterialTheme.typography.labelLarge, color = ink(Tint.AMBER))
         }
-        if (a.records.isNotEmpty()) Icon(Icons.Outlined.EmojiEvents, "Set a record", Modifier.padding(start = 8.dp), tint = ink(Tint.AMBER))
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = sub)
     }
 }
@@ -480,7 +481,7 @@ private fun RunTitle(r: PostRunReport) {
     val a = r.activity
     val day = LocalDate.parse(a.localDate)
     Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 6.dp).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()) + " run",
+        Text(day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, androidx.compose.ui.platform.LocalConfiguration.current.locales[0]) + " run",
             style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
         Text(listOfNotNull(day.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM")),
             Format.activityTime(a.startUtc, a.utcOffsetS).substringAfter(" · "), displayName(a.name),

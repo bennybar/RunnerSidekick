@@ -3,9 +3,7 @@ package com.bennybar.runnersidekick.ui.insights
 import androidx.compose.material.icons.outlined.Psychology
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -21,8 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
@@ -52,15 +48,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -80,7 +73,6 @@ import com.bennybar.runnersidekick.ui.components.SectionLabel
 import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.components.animatedItem
 import com.bennybar.runnersidekick.ui.factory
-import com.bennybar.runnersidekick.ui.theme.LocalDark
 import com.bennybar.runnersidekick.ui.theme.Tint
 import com.bennybar.runnersidekick.ui.theme.accentFor
 import com.bennybar.runnersidekick.ui.theme.ink
@@ -147,7 +139,7 @@ fun InsightsScreen(
                         if (data?.value?.synthetic == true) DemoBadge()
                     }
                 }
-                animatedItem(key = "tabs") { TabSwitch(listOf("Summary", "Compare", "Charts"), tab) { tab = it } }
+                animatedItem(key = "tabs") { com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Summary", "Compare", "Charts"), tab, { tab = it }) }
                 if (tab == 1) {
                     animatedItem(key = "compare") { CompareSection(compare?.value, onOpenSettings = onOpenSettings, onOpenRun = onOpenRun) }
                     return@LazyColumn
@@ -208,23 +200,6 @@ fun InsightsScreen(
         CardioSheet(c, answers, onSave = vm::saveAnswer, onOpenRun = { id -> cardioOpen = false; onOpenRun(id) }, onDismiss = { cardioOpen = false })
     }
     method?.let { m -> MethodSheet(data?.value?.insights?.firstOrNull { it.id == m.id } ?: m, onState = { st -> vm.setInsightState(m.id, st) }) { method = null } }
-}
-
-/** The screen's three tabs as one rounded track; the chosen one is a raised pill. */
-@Composable
-private fun TabSwitch(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val raised = if (LocalDark.current) cs.surfaceContainerHighest else cs.surfaceContainer
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cs.onSurface.copy(alpha = 0.05f)).padding(3.dp).selectableGroup()) {
-        labels.forEachIndexed { i, l ->
-            val on = selected == i
-            Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp)).background(if (on) raised else Color.Transparent)
-                .selectable(on, role = Role.Tab) { onSelect(i) }, contentAlignment = Alignment.Center) {
-                Text(l, style = MaterialTheme.typography.labelLarge, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                    color = if (on) cs.onSurface else cs.onSurfaceVariant)
-            }
-        }
-    }
 }
 
 @Composable
