@@ -343,6 +343,9 @@ data class ActivitySummary(
 )
 
 @Serializable
+data class LabelValue(val label: String, val value: String)
+
+@Serializable
 data class RunRecord(val id: String, val title: String, val value: String)
 
 @Serializable
@@ -433,6 +436,8 @@ data class PostRunReport(
     val activity: RunActivity,
     @SerialName("pace_moving_s_per_km") val paceMovingSPerKm: Double? = null,
     @SerialName("garmin_metrics") val garminMetrics: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
+    /** Garmin's own reads of the run (performance condition, stamina left, HR vs its threshold), as label/value rows */
+    @SerialName("garmin_extra") val garminExtra: List<LabelValue> = emptyList(),
     @SerialName("garmin_vo2max_day") val garminVo2maxDay: Point? = null,
     /** The app's own training load for the run (Edwards, from heart-rate zones) */
     val load: Int? = null,

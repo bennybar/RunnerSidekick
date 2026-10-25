@@ -530,9 +530,9 @@ private fun BriefingPage(r: MorningReport, onBack: () -> Unit, onFinding: (Findi
         if (r.garminContext.isNotEmpty()) {
             val origins = r.garminContext.map { it.origin }.distinct()
             Group(title = "From " + (origins.singleOrNull() ?: "your watches")) {
-                r.garminContext.forEach { g -> row(garminName(g.metric), trailing = {
-                    Text("${g.value.roundToInt()}" + (g.label?.let { " · $it" } ?: ""), style = MaterialTheme.typography.titleSmall)
-                }) }
+                // The label (Garmin's level, and for readiness what it was built from) under the name, the number on the right
+                r.garminContext.forEach { g -> row(garminName(g.metric), supporting = g.label?.let { l -> if (l == l.uppercase()) l.replace('_', ' ').lowercase() else l }?.replaceFirstChar { it.uppercase() },
+                    trailing = { Text("${g.value.roundToInt()}", style = MaterialTheme.typography.titleSmall) }) }
             }
             Text("The watch's own scores, shown for context. They don't feed the suggestion, which avoids counting sleep and HRV twice.",
                 style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))

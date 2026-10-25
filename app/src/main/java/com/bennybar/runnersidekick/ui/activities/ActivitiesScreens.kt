@@ -453,7 +453,8 @@ fun ActivityDetailScreen(id: String, onBack: () -> Unit, onOpenRun: (String) -> 
                     ?: r.garminMetrics["vO2MaxValue"]?.let { listOf("VO₂ max (this run's estimate)" to it.toString().trim('"')) }.orEmpty()
                 val ours = r.vo2Ours?.let { o -> listOf("VO₂ max (Runner Sidekick, this run${if (o.hillAdjusted) ", hill-adjusted" else ""})" to
                     (o.value?.let { "%.1f".format(it) } ?: "—")) }.orEmpty()
-                val fromWatch = vo2 + ours + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } }
+                val fromWatch = vo2 + ours + r.garminMetrics.mapNotNull { (k, v) -> GARMIN_LABELS[k]?.let { it to garminValue(k, v.toString().trim('"')) } } +
+                    r.garminExtra.map { it.label to it.value }
                 if (fromWatch.isNotEmpty()) item {
                     Group(title = "VO₂ max and the watch's numbers", tint = Tint.TEAL) {
                         fromWatch.forEach { (label, v) -> row(label, trailing = { Text(v, style = MaterialTheme.typography.titleMedium) }) }

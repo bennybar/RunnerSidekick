@@ -1123,3 +1123,22 @@ After the round-4 review:
 - Garmin sync: 0.3 s between Garmin requests instead of 1 s (measured: a quiet sync 15.6 s → 6.3 s; the wait was most
   of it). The app checks a running sync every 1–2 s instead of backing off to 8 s.
 - Garmin data coverage audit: ~/Downloads/garmin_data_coverage_audit_findings.md (findings only, nothing changed).
+
+## Garmin's numbers with their context (2026-10-25, v0.76.0)
+From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_findings.md), the top 5 plus its bug:
+- What Garmin's readiness was built from: `garmin_readiness_inputs` (1 with a valid night; label = each input's
+  feedback) and `garmin_recovery_time_min` (minutes, with Garmin's time). Export and briefing: "94 / 100 (high), at
+  13:09, without sleep or HRV (no night on this watch), recovery time then 0 h". `asleep_measured_s` (0 kept: no
+  overnight wear) qualifies resting HR as "daytime only".
+- HRV against Garmin's own baseline band (`hrv_baseline_low/high`): "42 ms (balanced), within Garmin's baseline 35–47 ms".
+- Garmin's training status, acute load vs its range and load focus kept per day (`garmin_status_history`), in a new
+  export section "Training load and thresholds (Garmin)" with a count of the runs Garmin didn't record (other watch).
+- In-run Performance Condition (0 kept; first → last, lowest) and stamina left at the end (`dyn.pc`, `dyn.stamina`),
+  and the run's average HR as a share of Garmin's lactate threshold as of that day: `garmin_extra` rows on the run
+  report (report-2.15), shown in the app's "watch's numbers" group and the export.
+- Bug: the race goal and the AI coach read a stale Garmin prediction (10 Oct snapshot) while the Numbers sheet used the
+  daily history; both now use `numbers.current_predictions` (the newer of the two).
+- Backfilled from stored raw payloads (no Garmin calls): 62 days of readiness context, 59 nights of HRV band, 21 runs
+  with performance condition/stamina. Export schema v2.1; every earlier line of the 25 Oct export kept, two qualified.
+- Briefing: Garmin's labels show under the name (subtitle) instead of squeezed beside the number.
+- Not done (need a decision): resting HR from a no-night day still enters the baseline comparison; switch-day nights.
