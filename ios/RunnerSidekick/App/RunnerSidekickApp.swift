@@ -28,6 +28,7 @@ struct RunnerSidekickApp: App {
         WindowGroup {
             AppRoot()
                 .environment(store)
+                .tint(Palette.primary)
                 .preferredColorScheme(store.local.appearance == .light ? .light : store.local.appearance == .dark ? .dark : nil)
                 .tint(Palette.primary)
         }
@@ -140,6 +141,7 @@ struct MainTabs: View {
                 }
             }
         }
+        .tabBarMinimizeBehavior(.onScrollDown)
         .screenBackground()
         .environment(nav)
         // Signed in without Garmin connected: Connect Garmin opens by itself, once, until it's connected or skipped
@@ -200,21 +202,24 @@ struct StatusPills: View {
     var body: some View {
         VStack(spacing: 4) {
             if let p = store.progress {
-                Text("\(p.label) · \(Int(p.fraction * 100))%").font(Typo.labelSmall)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Capsule().fill(Palette.cardHighest))
+                HStack(spacing: 8) {
+                    ProgressView(value: p.fraction).frame(width: 60)
+                    Text("\(p.label) · \(Int(p.fraction * 100))%").font(Typo.labelMedium)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .glassEffect(.regular, in: .capsule)
                 if let h = p.hint {
                     Text(h).font(Typo.labelSmall).foregroundStyle(Palette.onSurfaceVariant).multilineTextAlignment(.center)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Palette.cardHigh))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 14))
                         .padding(.horizontal, 48)
                 }
             }
             if let t = store.toast {
-                Text(t).font(Typo.bodyMedium).foregroundStyle(Palette.onPrimary).multilineTextAlignment(.leading)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                Text(t).font(Typo.bodyMedium).foregroundStyle(Palette.onSurface).multilineTextAlignment(.leading)
+                    .padding(.horizontal, 18).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Palette.primary))
+                    .glassEffect(.regular, in: .rect(cornerRadius: 22))
                     .padding(.horizontal, 16)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .onTapGesture { store.toast = nil }

@@ -23,11 +23,7 @@ struct MeView: View {
         let r = store.settings?.value
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Me").font(Typo.headlineLarge).frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-                    if s?.synthetic == true { DemoBadge() }
-                }
-                .padding(.horizontal, 12).padding(.top, 40).padding(.bottom, 6)
+                if s?.synthetic == true { DemoBadge().padding(.leading, 8) }
                 // Only a Garmin problem is shown up here; everything else lives in its own section
                 if let st = s?.connection.state, ["reauth_required", "not_configured", "error"].contains(st) {
                     CardGroup(tint: .orange) {
@@ -63,7 +59,7 @@ struct MeView: View {
         }
         .refreshable { await load() }
         .screenBackground()
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Me")
         .task { await load() }
         .sheet(item: $sheet) { which in
             Group {

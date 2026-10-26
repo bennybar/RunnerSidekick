@@ -11,20 +11,20 @@ extension Color {
     }
 }
 
-/// The neutral base (light grey / true black) with plain cards; colour lives on the tiles, never the background.
-/// The Android app's colour scheme, one for one.
+/// iOS's own grouped colours (they follow light/dark and Increase Contrast); the accent is the icon's teal. Colour lives
+/// on the tiles, never the background.
 enum Palette {
-    static let background = Color.dyn(0xF3F4F7, 0x000000)
-    static let onSurface = Color.dyn(0x1C1C1E, 0xF2F2F4)
-    static let onSurfaceVariant = Color.dyn(0x55555C, 0xA1A1A8)
-    static let card = Color.dyn(0xFFFFFF, 0x1C1C1E)           // surfaceContainer
-    static let cardHigh = Color.dyn(0xFFFFFF, 0x232326)       // surfaceContainerHigh
-    static let cardHighest = Color.dyn(0xE9E9EE, 0x2C2C30)    // surfaceContainerHighest
-    static let primary = Color.dyn(0x1C1C1E, 0xF2F2F4)
-    static let onPrimary = Color.dyn(0xFFFFFF, 0x000000)
-    static let outline = Color.dyn(0x8E8E95, 0x7C7C84)
-    static let outlineVariant = Color.dyn(0xD4D4DA, 0x3A3A3F)
-    static let error = Color.dyn(0xB3261E, 0xF2B8B5)
+    static let background = Color(.systemGroupedBackground)
+    static let onSurface = Color(.label)
+    static let onSurfaceVariant = Color(.secondaryLabel)
+    static let card = Color(.secondarySystemGroupedBackground)
+    static let cardHigh = Color(.secondarySystemGroupedBackground)
+    static let cardHighest = Color(.tertiarySystemFill)
+    static let primary = Color.dyn(0x0A8A85, 0x18A79D)
+    static let onPrimary = Color.white
+    static let outline = Color(.systemGray3)
+    static let outlineVariant = Color(.separator)
+    static let error = Color(.systemRed)
 }
 
 /// The tile colours, one per kind of data: hue tints the tile, ink is the readable colour for text and icons on it.
@@ -89,23 +89,42 @@ enum DataColors {
     static let attention = Tint.orange.ink
 }
 
-/// Google Sans throughout (a variable font, 400–700), on the Material type scale the Android app uses.
+/// San Francisco on iOS's text styles, so Dynamic Type scales everything; big numbers in SF Rounded, as Apple's
+/// health and fitness apps show them. The names keep the Android type scale's, so screens read the same in both.
 enum Typo {
-    static func sans(_ size: CGFloat, _ weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
-        .custom("Google Sans", size: size, relativeTo: style).weight(weight)
+    private static func numbers(_ size: CGFloat, relativeTo style: Font.TextStyle) -> Font {
+        .system(size: UIFontMetrics(forTextStyle: style.uiKit).scaledValue(for: size), weight: .bold, design: .rounded)
     }
-    static let displayMedium = sans(44, .bold, relativeTo: .largeTitle)
-    static let displaySmall = sans(34, .bold, relativeTo: .largeTitle)
-    static let headlineLarge = sans(32, .bold, relativeTo: .largeTitle)
-    static let headlineMedium = sans(26, .bold, relativeTo: .title)
-    static let headlineSmall = sans(22, .bold, relativeTo: .title2)
-    static let titleLarge = sans(22, .bold, relativeTo: .title2)
-    static let titleMedium = sans(16, .semibold, relativeTo: .headline)
-    static let titleSmall = sans(14, .semibold, relativeTo: .subheadline)
-    static let bodyLarge = sans(16, .regular, relativeTo: .body)
-    static let bodyMedium = sans(14, .regular, relativeTo: .callout)
-    static let bodySmall = sans(12, .regular, relativeTo: .footnote)
-    static let labelLarge = sans(14, .semibold, relativeTo: .subheadline)
-    static let labelMedium = sans(12, .semibold, relativeTo: .caption)
-    static let labelSmall = sans(11, .medium, relativeTo: .caption2)
+    static let displayMedium = numbers(44, relativeTo: .largeTitle)
+    static let displaySmall = numbers(34, relativeTo: .largeTitle)
+    static let headlineLarge = Font.largeTitle.bold()
+    static let headlineMedium = numbers(26, relativeTo: .title)
+    static let headlineSmall = Font.title2.bold()
+    static let titleLarge = Font.title2.bold()
+    static let titleMedium = Font.headline
+    static let titleSmall = Font.subheadline.weight(.semibold)
+    static let bodyLarge = Font.body
+    static let bodyMedium = Font.subheadline
+    static let bodySmall = Font.footnote
+    static let labelLarge = Font.subheadline.weight(.semibold)
+    static let labelMedium = Font.caption.weight(.semibold)
+    static let labelSmall = Font.caption2
+}
+
+private extension Font.TextStyle {
+    var uiKit: UIFont.TextStyle {
+        switch self {
+        case .largeTitle: .largeTitle
+        case .title: .title1
+        case .title2: .title2
+        case .title3: .title3
+        case .headline: .headline
+        case .subheadline: .subheadline
+        case .callout: .callout
+        case .footnote: .footnote
+        case .caption: .caption1
+        case .caption2: .caption2
+        default: .body
+        }
+    }
 }

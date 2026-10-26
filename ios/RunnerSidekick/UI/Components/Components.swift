@@ -10,19 +10,14 @@ struct Tile<Content: View>: View {
     var spacing: CGFloat = 8
     var onTap: (() -> Void)? = nil
     @ViewBuilder var content: Content
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
-        let edge: Color = scheme == .dark ? (tint == .neutral ? .white.opacity(0.07) : tint.hue.opacity(0.22)) : .white.opacity(0.9)
-        let glow = tint == .neutral ? Color(hex: 0x1E2846) : tint.hue
+        // Flat, as iOS draws grouped content: no outline or shadow, the tint carries the meaning
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
         let body = VStack(alignment: .leading, spacing: spacing) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            // The shadow belongs to the background shape alone: on the whole tile it re-renders the contents off-screen
-            // every frame, which made scrolling stutter
-            .background(shape.fill(tint.fill).shadow(color: scheme == .dark ? .clear : glow.opacity(0.13), radius: 6, y: 2))
-            .overlay(shape.strokeBorder(edge, lineWidth: 1))
+            .background(shape.fill(tint.fill))
             .contentShape(shape)
         if let onTap {
             Button(action: onTap) { body }.buttonStyle(PressStyle())
@@ -156,8 +151,7 @@ struct TagChip: View {
     }
 }
 
-/// One choice from a few, as a connected group: the chosen one fills in and rounds (the Android app's Expressive
-/// button group). selected nil shows none chosen.
+/// One choice from a few: iOS's segmented control. selected nil shows none chosen.
 struct ChoiceGroup: View {
     var labels: [String]
     var selected: Int?
@@ -165,53 +159,33 @@ struct ChoiceGroup: View {
     var onSelect: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(labels.enumerated()), id: \.offset) { i, l in
-                let on = selected == i
-                let inner: CGFloat = on ? 20 : 6
-                let shape = UnevenRoundedRectangle(
-                    topLeadingRadius: i == 0 || on ? 20 : inner, bottomLeadingRadius: i == 0 || on ? 20 : inner,
-                    bottomTrailingRadius: i == labels.count - 1 || on ? 20 : inner, topTrailingRadius: i == labels.count - 1 || on ? 20 : inner,
-                    style: .continuous)
-                Button { onSelect(i) } label: {
-                    Text(l).font(Typo.labelLarge).lineLimit(1).minimumScaleFactor(0.8)
-                        .foregroundStyle(on ? Palette.onPrimary : Palette.onSurface)
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                        .padding(.horizontal, 6)
-                        .background(shape.fill(on ? Palette.primary : Palette.cardHighest))
-                        .contentShape(shape)
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
-            }
+        Picker("", selection: Binding(get: { selected ?? -1 }, set: { if $0 >= 0 { onSelect($0) } })) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { i, l in Text(l).tag(i) }
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: selected)
+        .pickerStyle(.segmented)
+        .labelsHidden()
         .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.5)
     }
 }
 
-/// Options that each turn on and off (or one choice that can be cleared): toggle buttons whose shape changes when on.
+/// Options that each turn on and off (or one choice that can be cleared): glass capsules, filled with the accent when on.
 struct ToggleRow: View {
     var labels: [String]
     var checked: (Int) -> Bool
     var onToggle: (Int) -> Void
 
     var body: some View {
-        FlowLayout(spacing: 8, lineSpacing: 6) {
+        FlowLayout(spacing: 8, lineSpacing: 8) {
             ForEach(Array(labels.enumerated()), id: \.offset) { i, l in
                 let on = checked(i)
-                Button { onToggle(i) } label: {
-                    Text(l).font(Typo.labelLarge)
-                        .foregroundStyle(on ? Palette.onPrimary : Palette.onSurface)
-                        .padding(.horizontal, 16).frame(minHeight: 40)
-                        .background(RoundedRectangle(cornerRadius: on ? 12 : 20, style: .continuous).fill(on ? Palette.primary : Palette.cardHighest))
+                Group {
+                    if on { Button { onToggle(i) } label: { Text(l).font(Typo.labelLarge) }.buttonStyle(.glassProminent) }
+                    else { Button { onToggle(i) } label: { Text(l).font(Typo.labelLarge).foregroundStyle(Palette.onSurface) }.buttonStyle(.glass) }
                 }
-                .buttonStyle(PressStyle())
                 .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: on)
             }
         }
+        .sensoryFeedback(.selection, trigger: labels.indices.map(checked))
     }
 }
 
@@ -245,7 +219,7 @@ struct FlowLayout: Layout {
     }
 }
 
-/// A filled or tonal button in the app's style.
+/// A Liquid Glass button: filled with the accent (prominent) or clear glass.
 struct PillButton: View {
     var title: String
     var icon: String? = nil
@@ -253,42 +227,32 @@ struct PillButton: View {
     var busy = false
     var action: () -> Void
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if busy { ProgressView().controlSize(.small).tint(filled ? Palette.onPrimary : Palette.onSurface) }
-                else if let icon { Image(systemName: icon) }
-                Text(title).font(Typo.labelLarge)
-            }
-            .foregroundStyle(filled ? Palette.onPrimary : Palette.onSurface)
-            .padding(.horizontal, 18).frame(minHeight: 44)
-            .background(Capsule().fill(filled ? Palette.primary : Palette.cardHighest))
+        let label = HStack(spacing: 6) {
+            if busy { ProgressView().controlSize(.small) } else if let icon { Image(systemName: icon) }
+            Text(title).font(Typo.labelLarge)
         }
-        .buttonStyle(PressStyle())
+        if filled { Button(action: action) { label }.buttonStyle(.glassProminent).controlSize(.large) }
+        else { Button(action: action) { label.foregroundStyle(Palette.onSurface) }.buttonStyle(.glass).controlSize(.large) }
     }
 }
 
-/// An outlined full-width button (the Android app's OutlinedButton).
+/// A full-width secondary action, in clear glass.
 struct OutlineButton: View {
     var title: String
     var action: () -> Void
     var body: some View {
-        Button(action: action) {
-            Text(title).font(Typo.labelLarge).foregroundStyle(Palette.onSurface)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .overlay(Capsule().strokeBorder(Palette.outline, lineWidth: 1))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(PressStyle())
+        Button(action: action) { Text(title).font(Typo.labelLarge).foregroundStyle(Palette.onSurface).frame(maxWidth: .infinity) }
+            .buttonStyle(.glass).controlSize(.large)
     }
 }
 
-/// A text-only button (the Android app's TextButton).
+/// A text-only button in the accent colour.
 struct LinkButton: View {
     var title: String
     var action: () -> Void
     var body: some View {
-        Button(action: action) { Text(title).font(Typo.labelLarge).foregroundStyle(Palette.onSurface).padding(.vertical, 8) }
-            .buttonStyle(PressStyle())
+        Button(action: action) { Text(title).font(Typo.labelLarge).foregroundStyle(Palette.primary).padding(.vertical, 8) }
+            .buttonStyle(.borderless)
     }
 }
 

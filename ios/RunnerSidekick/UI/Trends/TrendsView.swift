@@ -26,11 +26,7 @@ struct TrendsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Trends").font(Typo.headlineLarge).frame(maxWidth: .infinity, alignment: .leading).accessibilityAddTraits(.isHeader)
-                    if store.insights?.value.synthetic == true { DemoBadge() }
-                }
-                .padding(.horizontal, 12).padding(.top, 40).padding(.bottom, 6)
+                if store.insights?.value.synthetic == true { DemoBadge().padding(.leading, 8) }
                 ChoiceGroup(labels: ["Summary", "Compare", "Charts"], selected: tab) { tab = $0 }
                 switch tab {
                 case 1: CompareSection(r: store.compare?.value) { nav.tab = .me }
@@ -43,7 +39,7 @@ struct TrendsView: View {
         }
         .refreshable { await refresh() }
         .screenBackground()
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Trends")
         .onAppear { if let t = nav.trendsTab { tab = t; nav.trendsTab = nil } }
         .onChange(of: nav.trendsTab) { _, t in if let t { tab = t; nav.trendsTab = nil } }
         .task { await refresh() }

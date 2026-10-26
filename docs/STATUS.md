@@ -1181,3 +1181,7 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   Background refresh is also scheduled at launch, logs to os_log (subsystem com.bennybarak.runnersidekick, category
   background), and notifications post with provisional permission too. A plain BGAppRefreshTask (no continued-processing
   task, no progress to stall, nothing marked running before it starts).
+- (v0.78.0) iOS redesign, Liquid Glass and native: large navigation titles with the actions (sync, records) as glass
+  toolbar buttons, the tab bar minimises on scroll, San Francisco on the system text styles (Dynamic Type; numbers in
+  SF Rounded) instead of Google Sans, iOS grouped colours with the icon's teal as accent, flat tiles (no outline or
+  shadow), segmented controls, glass buttons/chips and glass toasts. Tile colours and all content unchanged.

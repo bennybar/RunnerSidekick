@@ -24,14 +24,15 @@ struct TodayView: View {
         let report = store.today?.value
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                Header(busy: busy, offline: offline, onSync: { Task { await sync() } })
+                Header(offline: offline)
                 if let r = report { content(r) } else { noReport }
             }
             .padding(.horizontal, 12)
         }
         .refreshable { await refresh() }
         .screenBackground()
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Today")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { SyncButton(busy: busy, ready: "Sync Garmin") { Task { await sync() } } } }
         .sheet(item: $evidence) { f in EvidenceSheet(finding: f, note: store.today?.value.note(for: f.metric)) }
         .task { if refreshedAt == nil { await refresh() } }
     }
@@ -134,35 +135,25 @@ extension Score {
     }
 }
 
-/// "Today", the briefing's date and when the watch last synced, with the sync button top right.
+/// The briefing's date and when the watch last synced, under the large title.
 private struct Header: View {
-    var busy: Bool
     var offline: Bool
-    var onSync: () -> Void
     @Environment(Store.self) private var store
 
     var body: some View {
         let status = store.status?.value
         let report = store.today?.value
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Spacer()
-                if status?.synthetic == true { DemoBadge() }
-                // Garmin syncs at most every 15 minutes (the server's cooldown); the button says when the next one can run
-                TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                    let wait = syncWait(status?.syncNextAllowedAt, now: ctx.date)
-                    PillButton(title: busy ? "Syncing…" : wait.map { "Next sync \($0)" } ?? "Sync Garmin", icon: "arrow.triangle.2.circlepath",
-                               filled: false, busy: busy, action: onSync)
-                        .disabled(busy || wait != nil)
-                }
-            }
-            .padding(.top, 8)
+            // The title is the navigation bar's large title; the date and how fresh the data is sit under it
             VStack(alignment: .leading, spacing: 6) {
-                Text("Today").font(Typo.headlineLarge)
-                if let d = report?.localDate { Text(Fmt.longDate(d)).font(Typo.bodyLarge).foregroundStyle(Palette.onSurfaceVariant) }
+                HStack {
+                    if let d = report?.localDate { Text(Fmt.longDate(d)).font(Typo.bodyLarge).foregroundStyle(Palette.onSurfaceVariant) }
+                    Spacer()
+                    if status?.synthetic == true { DemoBadge() }
+                }
                 if let r = report { Freshness(status: status, report: r) }
             }
-            .padding(.horizontal, 12).padding(.top, 22).padding(.bottom, 8)
+            .padding(.horizontal, 8).padding(.bottom, 8)
             if offline {
                 Label("Offline: showing the briefing saved \(Fmt.ago(store.today?.fetchedAt)).", systemImage: "icloud.slash")
                     .font(Typo.labelMedium).foregroundStyle(Palette.onSurfaceVariant).padding(.horizontal, 16).padding(.vertical, 4)
@@ -239,13 +230,7 @@ struct ReadinessCard: View {
                 Text(why).font(Typo.bodyMedium).foregroundStyle(Palette.onSurfaceVariant)
             }
             // Context the watch can't see; one tap for the day, tap again to undo. Never asked for.
-            Button(action: onUnwell) {
-                Text(unwell ? "Not feeling well today · undo" : "Not feeling well?").font(Typo.labelLarge)
-                    .foregroundStyle(unwell ? Palette.onPrimary : Palette.onSurface)
-                    .padding(.horizontal, 16).frame(minHeight: 40)
-                    .background(Capsule().fill(unwell ? Palette.primary : Palette.card.opacity(0.8)))
-            }
-            .buttonStyle(PressStyle())
+            PillButton(title: unwell ? "Not feeling well today · undo" : "Not feeling well?", filled: unwell, action: onUnwell)
             if pending { Text("Saved on your phone; the score updates once it syncs.").font(Typo.labelMedium).foregroundStyle(Palette.onSurfaceVariant) }
         }
         .accessibilityElement(children: .contain)
@@ -637,5 +622,25 @@ struct EvidenceSheet: View {
             Text(v).frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(Typo.bodyMedium).padding(.vertical, 2)
+    }
+}
+
+/// The sync button in the navigation bar (Liquid Glass). Garmin syncs at most every 15 minutes (the server's
+/// cooldown), so while it waits the button says when the next one can run.
+struct SyncButton: View {
+    var busy: Bool
+    var ready: String
+    var action: () -> Void
+    @Environment(Store.self) private var store
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            let wait = syncWait(store.status?.value.syncNextAllowedAt, now: ctx.date)
+            Button(action: action) {
+                if busy { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing") } }
+                else if let w = wait { Text("Next sync \(w)") }
+                else { Label(ready, systemImage: "arrow.triangle.2.circlepath").labelStyle(.titleAndIcon) }
+            }
+            .disabled(busy || wait != nil)
+        }
     }
 }

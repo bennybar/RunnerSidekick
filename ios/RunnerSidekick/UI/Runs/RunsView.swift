@@ -33,20 +33,7 @@ struct RunsView: View {
         let weeks = Dictionary(grouping: shown) { Fmt.weekStart($0.localDate, store.firstWeekday) }.sorted { $0.key > $1.key }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text("Runs").font(Typo.headlineLarge).frame(maxWidth: .infinity, alignment: .leading)
-                    if all.contains(where: \.synthetic) { DemoBadge() }
-                    Button { nav.open(.trophies) } label: { Image(systemName: "trophy").font(.title3) }
-                        .buttonStyle(PressStyle()).foregroundStyle(Palette.onSurface).accessibilityLabel("Your records")
-                    // Fetch a run you just finished from Garmin without waiting for the hourly sync
-                    TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                        let wait = syncWait(store.status?.value.syncNextAllowedAt, now: ctx.date)
-                        PillButton(title: busy ? "Syncing…" : wait.map { "Next sync \($0)" } ?? "Get new runs", icon: "arrow.triangle.2.circlepath",
-                                   filled: false, busy: busy) { Task { await sync() } }
-                            .disabled(busy || wait != nil)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.top, 40).padding(.bottom, 6)
+                if all.contains(where: \.synthetic) { DemoBadge().padding(.leading, 8) }
                 if let (start, runs) = weeks.first { WeekHero(start: start, runs: runs, units: units, thisWeek: start == Fmt.weekStart(Fmt.todayISO(), store.firstWeekday)) }
                 ChoiceGroup(labels: RunFilter.allCases.map(\.label), selected: filter.rawValue) { filter = RunFilter(rawValue: $0)! }
                 if shown.isEmpty {
@@ -64,7 +51,15 @@ struct RunsView: View {
         }
         .refreshable { if let m = await store.attempt({ try await store.refreshAll() }) { store.toast = m } }
         .screenBackground()
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Runs")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { nav.open(.trophies) } label: { Label("Your records", systemImage: "trophy") }
+            }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            // Fetch a run you just finished from Garmin without waiting for the hourly sync
+            ToolbarItem(placement: .topBarTrailing) { SyncButton(busy: busy, ready: "New runs") { Task { await sync() } } }
+        }
         // The newest run, if nothing's been said about it and it hasn't been asked about: a few questions, once (Me turns it off)
         .task(id: store.activities?.value.first?.sourceId) { await askAboutNewest() }
         .sheet(item: $wizard) { run in

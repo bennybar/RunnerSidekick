@@ -9,7 +9,7 @@ settings:
     DEVELOPMENT_TEAM: 57L2ULXB7Z
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.77.1"
+    MARKETING_VERSION: "0.78.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   RunnerSidekick:
@@ -28,7 +28,6 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        UIAppFonts: [GoogleSans.ttf]
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         # The server's Garmin callback page hands Garmin's answer back to the app; Google sign-in returns on its own scheme
