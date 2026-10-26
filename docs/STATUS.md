@@ -1185,3 +1185,5 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   toolbar buttons, the tab bar minimises on scroll, San Francisco on the system text styles (Dynamic Type; numbers in
   SF Rounded) instead of Google Sans, iOS grouped colours with the icon's teal as accent, flat tiles (no outline or
   shadow), segmented controls, glass buttons/chips and glass toasts. Tile colours and all content unchanged.
+- (v0.78.1) iOS scrolling: date formatters are made once and reused (every run row made several new ones as it
+  scrolled in), and saved runs/charts/days read from disk once instead of on every redraw.

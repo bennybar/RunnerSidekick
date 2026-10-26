@@ -74,12 +74,33 @@ enum Fmt {
     static func iso(_ d: Date) -> String { isoDay.string(from: d) }
     static func todayISO() -> String { iso(Date()) }
 
+    // Formatters are slow to make and every list row shows dates, so each one is made once and kept
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var formatters: [String: DateFormatter] = [:]
+
     private static func pattern(_ p: String, _ d: Date, tz: TimeZone = .current) -> String {
+        let key = p + "|" + tz.identifier
+        lock.lock()
+        defer { lock.unlock() }
+        if let f = formatters[key] { return f.string(from: d) }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_GB")
         f.timeZone = tz
         f.dateFormat = p
+        formatters[key] = f
         return f.string(from: d)
+    }
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+    private static let utcPatterns: [DateFormatter] = ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss"].map { p in
+        let g = DateFormatter()
+        g.locale = Locale(identifier: "en_US_POSIX")
+        g.timeZone = TimeZone(identifier: "UTC")
+        g.dateFormat = p
+        return g
     }
 
     /// "Monday, 26 October"
@@ -96,23 +117,12 @@ enum Fmt {
 
     static func instant(_ iso: String?) -> Date? {
         guard let iso else { return nil }
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: iso) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        if let d = f.date(from: iso) { return d }
+        if let d = isoFractional.date(from: iso) ?? isoPlain.date(from: iso) { return d }
         // Server times without a zone are UTC
-        let g = DateFormatter()
-        g.locale = Locale(identifier: "en_US_POSIX")
-        g.timeZone = TimeZone(identifier: "UTC")
-        for p in ["yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss"] {
-            g.dateFormat = p
-            if let d = g.date(from: iso) { return d }
-        }
-        return nil
+        return utcPatterns.lazy.compactMap { $0.date(from: iso) }.first
     }
 
-    static func nowISO() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func nowISO() -> String { isoPlain.string(from: Date()) }
 
     /// Activity start in the activity's own offset (not the phone's current zone), so travel history stays true.
     static func activityTime(_ startUtc: String, _ offsetS: Int?) -> String {

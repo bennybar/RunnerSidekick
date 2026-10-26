@@ -85,6 +85,16 @@ final class Store {
         return Cached(value: v, fetchedAt: at)
     }
 
+    /// Saved data a screen asks for while it draws (a run, a range of charts, a day), read from disk once and then kept:
+    /// reading and decoding it on every redraw made scrolling stutter. Not observed; a fresh fetch replaces it.
+    @ObservationIgnored private var memo: [String: Any] = [:]
+    private func remembered<T: Decodable>(_ key: String, _ t: T.Type) -> Cached<T>? {
+        if let v = memo[key] as? Cached<T> { return v }
+        let v = cached(key, t)
+        if let v { memo[key] = v }
+        return v
+    }
+
     private func loadFromDisk() {
         status = cached("status", Status.self)
         today = cached("today", MorningReport.self)
@@ -117,11 +127,11 @@ final class Store {
 
     func detail(_ id: String) -> Cached<ActivityDetail>? {
         if let d = details[id] { return d }
-        return cached("activity:\(id)", ActivityDetail.self)
+        return remembered("activity:\(id)", ActivityDetail.self)
     }
-    func runAi(_ id: String) -> Cached<RunAi>? { runAis[id] ?? cached("runai:\(id)", RunAi.self) }
-    func trend(_ days: Int) -> Cached<Trends>? { trends[days] ?? cached("trends:\(days)", Trends.self) }
-    func day(_ date: String) -> Cached<MorningReport>? { days[date] ?? cached("day:\(date)", MorningReport.self) }
+    func runAi(_ id: String) -> Cached<RunAi>? { runAis[id] ?? remembered("runai:\(id)", RunAi.self) }
+    func trend(_ days: Int) -> Cached<Trends>? { trends[days] ?? remembered("trends:\(days)", Trends.self) }
+    func day(_ date: String) -> Cached<MorningReport>? { days[date] ?? remembered("day:\(date)", MorningReport.self) }
     func reportBody(_ id: Int) -> Data? { DiskCache.read("report:\(id)")?.0 }
 
     // MARK: Errors
@@ -222,6 +232,7 @@ final class Store {
 
     func clearLocal(includeCheckins: Bool) {
         DiskCache.clear()
+        memo = [:]
         Task { await API.shared.forget() }
         status = nil; today = nil; activities = nil; insights = nil; weekly = nil; fitness = nil; me = nil; focus = nil
         coach = nil; routes = nil; numbers = nil; cardio = nil; trophies = nil; compare = nil; settings = nil; settingsRaw = [:]
