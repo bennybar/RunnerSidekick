@@ -15,8 +15,8 @@ android {
         applicationId = "com.bennybar.runnersidekick"
         minSdk = 35
         targetSdk = 36
-        versionCode = 118
-        versionName = "0.77.0"
+        versionCode = 119
+        versionName = "0.77.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Google Sign-In: the *Web* OAuth client ID (same value as GOOGLE_WEB_CLIENT_ID in backend/sidekick/config.py).

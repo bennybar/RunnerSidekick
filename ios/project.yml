@@ -9,7 +9,7 @@ settings:
     DEVELOPMENT_TEAM: 57L2ULXB7Z
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.77.0"
+    MARKETING_VERSION: "0.77.1"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   RunnerSidekick:

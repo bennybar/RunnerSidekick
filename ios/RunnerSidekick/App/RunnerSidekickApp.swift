@@ -15,6 +15,12 @@ struct RunnerSidekickApp: App {
         if let t = env["RSK_TAB"].flatMap(Int.init).flatMap(AppTab.init(rawValue:)) { Nav.shared.tab = t }
         Nav.shared.trendsTab = env["RSK_TRENDS"].flatMap(Int.init)
         if let r = env["RSK_RUN"] { Nav.shared.open(.run(r), tab: .runs) }
+        // RSK_NOTIFY=1: notifications on, with quiet (provisional) permission, so background runs can be tested unattended
+        if env["RSK_NOTIFY"] == "1" {
+            Store.shared.local.notificationsEnabled = true
+            Store.shared.local.save()
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .provisional]) { _, _ in }
+        }
     }
     #endif
 
@@ -33,6 +39,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         Background.register()
+        Background.schedule()  // also when the app is never sent to the background (closed from the switcher, say)
         return true
     }
 
@@ -71,7 +78,6 @@ enum AppTab: Int, CaseIterable {
     case today, runs, trends, me
     var label: String { switch self { case .today: "Today"; case .runs: "Runs"; case .trends: "Trends"; case .me: "Me" } }
     var icon: String { switch self { case .today: "house"; case .runs: "figure.run"; case .trends: "chart.line.uptrend.xyaxis"; case .me: "person" } }
-    var iconOn: String { switch self { case .today: "house.fill"; case .runs: "figure.run"; case .trends: "chart.line.uptrend.xyaxis"; case .me: "person.fill" } }
 }
 
 /// The tab and each tab's stack of pages, so anything (a notification, a link on Today) can open a page anywhere.
@@ -123,23 +129,16 @@ struct MainTabs: View {
     @State private var prompted = false
 
     var body: some View {
-        let onRoot = (nav.paths[nav.tab] ?? []).isEmpty
-        ZStack(alignment: .bottom) {
-            TabView(selection: $nav.tab) {
-                ForEach(AppTab.allCases, id: \.self) { t in
+        // The system tab bar: Liquid Glass on iOS 26. Status messages float just above it, on every page.
+        TabView(selection: $nav.tab) {
+            ForEach(AppTab.allCases, id: \.self) { t in
+                Tab(t.label, systemImage: t.icon, value: t) {
                     NavigationStack(path: nav.binding(t)) {
                         root(t).navigationDestination(for: Route.self) { RouteView(route: $0) }
                     }
-                    .tag(t)
-                    .toolbar(.hidden, for: .tabBar)
+                    .overlay(alignment: .bottom) { StatusPills().padding(.bottom, 8) }
                 }
             }
-            VStack(spacing: 8) {
-                StatusPills()
-                if onRoot { FloatingNav(selected: $nav.tab) }
-            }
-            .padding(.bottom, onRoot ? 0 : 12)
-            .animation(.easeInOut(duration: 0.2), value: onRoot)
         }
         .screenBackground()
         .environment(nav)
@@ -195,59 +194,6 @@ struct RouteView: View {
     }
 }
 
-/// The tab bar: a centred pill of tabs; the current one fills in with its label (with a little bounce). Lifted and
-/// outlined so it reads apart from the tiles behind it. Sliding a finger along it moves from tab to tab.
-struct FloatingNav: View {
-    @Binding var selected: AppTab
-    @Environment(\.colorScheme) private var scheme
-    @State private var frames: [AppTab: CGRect] = [:]
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(AppTab.allCases, id: \.self) { t in
-                let on = selected == t
-                Button { select(t) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: on ? t.iconOn : t.icon).font(.system(size: 19, weight: .semibold))
-                        if on { Text(t.label).font(Typo.labelLarge).lineLimit(1).fixedSize() }
-                    }
-                    .foregroundStyle(on ? Palette.onPrimary : Palette.onSurfaceVariant)
-                    .padding(.horizontal, on ? 18 : 12)
-                    .frame(height: 48)
-                    .background(Capsule().fill(on ? Palette.primary : .clear))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(t.label)
-                .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
-                .background(GeometryReader { g in Color.clear.onAppear { frames[t] = g.frame(in: .named("nav")) }
-                    .onChange(of: g.frame(in: .named("nav"))) { _, f in frames[t] = f } })
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 64)
-        .background(Capsule().fill(scheme == .dark ? Palette.cardHigh : Palette.card))
-        .overlay(Capsule().strokeBorder(Palette.outlineVariant, lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 14, y: 4)
-        .coordinateSpace(name: "nav")
-        .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .named("nav")).onChanged { v in
-            // Only switch once the finger is inside another tab, so a tab growing under it can't bounce back
-            if let t = frames.first(where: { $0.value.minX <= v.location.x && v.location.x <= $0.value.maxX })?.key, t != selected { select(t) }
-        })
-        .animation(.spring(response: 0.35, dampingFraction: 0.72), value: selected)
-        .padding(.bottom, 8)
-    }
-
-    private func select(_ t: AppTab) {
-        guard t != selected else {
-            Nav.shared.paths[t] = []  // tapping the current tab goes back to its first page
-            return
-        }
-        UISelectionFeedbackGenerator().selectionChanged()
-        selected = t
-    }
-}
-
 /// What a refresh or sync is doing, and one-off messages, just above the tab bar.
 struct StatusPills: View {
     @Environment(Store.self) private var store
@@ -281,9 +227,4 @@ struct StatusPills: View {
         .animation(.easeInOut(duration: 0.2), value: store.toast)
         .animation(.easeInOut(duration: 0.2), value: store.progress)
     }
-}
-
-/// Room for the floating tab bar at the bottom of a tab's list: pages scroll underneath it.
-extension View {
-    func navBarRoom() -> some View { safeAreaPadding(.bottom, 88) }
 }

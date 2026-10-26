@@ -29,7 +29,6 @@ struct TodayView: View {
             }
             .padding(.horizontal, 12)
         }
-        .navBarRoom()
         .refreshable { await refresh() }
         .screenBackground()
         .toolbar(.hidden, for: .navigationBar)

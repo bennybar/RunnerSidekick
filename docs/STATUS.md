@@ -1177,3 +1177,7 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
 - Build: `cd ios && xcodegen generate`, then Xcode or `xcodebuild … -destination 'id=<UDID>' -allowProvisioningUpdates`
   and `xcrun devicectl device install app`. Debug builds read RSK_TOKEN / RSK_TAB / RSK_TRENDS / RSK_RUN from the launch
   environment (simulator screenshots); release builds don't.
+- (v0.77.1) iOS: the system tab bar (Liquid Glass) replaces the Android-style pill; status messages float above it.
+  Background refresh is also scheduled at launch, logs to os_log (subsystem com.bennybarak.runnersidekick, category
+  background), and notifications post with provisional permission too. A plain BGAppRefreshTask (no continued-processing
+  task, no progress to stall, nothing marked running before it starts).

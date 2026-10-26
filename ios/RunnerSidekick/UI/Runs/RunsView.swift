@@ -62,7 +62,6 @@ struct RunsView: View {
             }
             .padding(.horizontal, 12)
         }
-        .navBarRoom()
         .refreshable { if let m = await store.attempt({ try await store.refreshAll() }) { store.toast = m } }
         .screenBackground()
         .toolbar(.hidden, for: .navigationBar)

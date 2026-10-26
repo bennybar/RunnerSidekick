@@ -61,7 +61,6 @@ struct MeView: View {
             }
             .padding(.horizontal, 12)
         }
-        .navBarRoom()
         .refreshable { await load() }
         .screenBackground()
         .toolbar(.hidden, for: .navigationBar)

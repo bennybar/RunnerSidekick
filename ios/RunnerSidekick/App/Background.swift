@@ -1,19 +1,23 @@
 import BackgroundTasks
 import Foundation
+import os
 import UserNotifications
 
 /// Best-effort background refresh (iOS decides when): keeps today's briefing and runs fresh and posts the
 /// notifications. The server syncs Garmin itself, so this only fetches.
 enum Background {
     static let id = "com.bennybarak.runnersidekick.refresh"
+    static let log = Logger(subsystem: "com.bennybarak.runnersidekick", category: "background")
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: nil) { task in
             schedule()  // the next one
+            log.info("Background refresh started")
             let work = Task { @MainActor in
                 let store = Store.shared
-                _ = await store.attempt { try await store.backgroundRefresh() }
+                let m = await store.attempt { try await store.backgroundRefresh() }
                 await Notifier.check(store)
+                log.info("Background refresh done: \(m ?? "ok", privacy: .public)")
             }
             task.expirationHandler = { work.cancel() }
             Task { _ = await work.result; task.setTaskCompleted(success: true) }
@@ -31,7 +35,8 @@ enum Background {
         }
         let r = BGAppRefreshTaskRequest(identifier: id)
         r.earliestBeginDate = Date().addingTimeInterval(s.notificationsEnabled ? 3600 : 3 * 3600)
-        try? BGTaskScheduler.shared.submit(r)
+        do { try BGTaskScheduler.shared.submit(r); log.info("Background refresh scheduled from \(r.earliestBeginDate!, privacy: .public)") }
+        catch { log.error("Background refresh not scheduled: \(error.localizedDescription, privacy: .public)") }
     }
 }
 
@@ -49,7 +54,7 @@ enum Notifier {
     static func check(_ store: Store, now: Date = Date()) async {
         guard store.local.notificationsEnabled else { return }
         let center = UNUserNotificationCenter.current()
-        guard await center.notificationSettings().authorizationStatus == .authorized else { return }
+        guard [.authorized, .provisional, .ephemeral].contains(await center.notificationSettings().authorizationStatus) else { return }
         var state = NotifyState.load()
         let remote = store.settings?.value
         let zone = remote.flatMap { TimeZone(identifier: $0.timezone) } ?? .current
@@ -77,6 +82,7 @@ enum Notifier {
                 c.body = text + ((r.nextRun?.why ?? []).isEmpty ? "" : "\n" + r.nextRun!.why.joined(separator: " · "))
                 if first { c.sound = .default }  // a revision updates quietly
                 try? await center.add(UNNotificationRequest(identifier: "morning", content: c, trigger: nil))
+                Background.log.info("Posted the morning briefing for \(r.localDate, privacy: .public)")
                 state.morningDate = r.localDate
                 state.morningState = key
             }
@@ -92,6 +98,7 @@ enum Notifier {
             c.body = "This week's focus: \(focus ?? "pick one in Today")\nNext week from the review: \(w.nextWeekFocus.text)"
             c.userInfo = ["report": w.id]
             try? await center.add(UNNotificationRequest(identifier: "weekly", content: c, trigger: nil))
+            Background.log.info("Posted the weekly digest")
             state.weeklyWeek = weekStart
         }
 
@@ -110,6 +117,7 @@ enum Notifier {
             c.body = "\(Fmt.distance(a.distanceM, store.units)) · \(Fmt.pace(a.paceMovingSPerKm, store.units)) · \(Fmt.shortDate(a.localDate))"
             c.userInfo = ["run": a.sourceId]
             try? await center.add(UNNotificationRequest(identifier: "run-\(a.sourceId)", content: c, trigger: nil))
+            Background.log.info("Posted the run report for \(a.sourceId, privacy: .public)")
         }
         if !acts.isEmpty { state.runsSeen = Array((state.runsSeen + acts.map(\.sourceId)).suffix(200)) }
         state.save()
