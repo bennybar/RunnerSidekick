@@ -19,9 +19,10 @@ struct Tile<Content: View>: View {
         let body = VStack(alignment: .leading, spacing: spacing) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            .background(shape.fill(tint.fill))
+            // The shadow belongs to the background shape alone: on the whole tile it re-renders the contents off-screen
+            // every frame, which made scrolling stutter
+            .background(shape.fill(tint.fill).shadow(color: scheme == .dark ? .clear : glow.opacity(0.13), radius: 6, y: 2))
             .overlay(shape.strokeBorder(edge, lineWidth: 1))
-            .shadow(color: scheme == .dark ? .clear : glow.opacity(0.13), radius: 6, y: 2)
             .contentShape(shape)
         if let onTap {
             Button(action: onTap) { body }.buttonStyle(PressStyle())
