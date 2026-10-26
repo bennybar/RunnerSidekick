@@ -1161,3 +1161,19 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   says the same and to speak to the named limiter.
 - Garmin context downstream: the AI coach marks Garmin's status/load/focus "partial" when Garmin missed runs in the
   last 28 days and never bases advice on them alone (coach-1.7); the export says "Partial history".
+
+## iOS app (2026-10-26, v0.77.0)
+- `ios/`: a SwiftUI port of the Android app (iOS 26, XcodeGen `project.yml`, team 57L2ULXB7Z, bundle
+  `com.bennybarak.runnersidekick`). Garmin only: no Samsung Health, Watchletic or watch choice; their history from the
+  server still shows. Same screens and wording: Today (readiness, next run, race week, focus, scores, coach, stands out,
+  readings, latest run) and its pages, Runs with the newest-run wizard, run detail (verdict, decoupling, AI input,
+  run type sheet, route, splits, similar runs, VO₂ hold-out, Markdown export via the share sheet, delete), records and
+  routes, Trends (Summary, Compare, Charts; numbers, cardio with its answers, insights), Me (Garmin connect/disconnect,
+  training/race/about/window/key sheets, appearance, units, notifications, background refresh, AI, weather, data,
+  account), reports with versions, day view. Offline cache in Application Support (no iCloud backup), token and own
+  OpenAI key in the keychain, BGAppRefresh + local notifications. App icon with a dark-mode variant.
+- Sign-in: device token now; Google needs an iOS OAuth client (Backend.googleIOSClientID in the app,
+  GOOGLE_IOS_CLIENT_ID in `config.py`, which the server now also accepts as an ID token audience).
+- Build: `cd ios && xcodegen generate`, then Xcode or `xcodebuild … -destination 'id=<UDID>' -allowProvisioningUpdates`
+  and `xcrun devicectl device install app`. Debug builds read RSK_TOKEN / RSK_TAB / RSK_TRENDS / RSK_RUN from the launch
+  environment (simulator screenshots); release builds don't.

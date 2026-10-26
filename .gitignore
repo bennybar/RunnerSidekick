@@ -32,3 +32,7 @@ docs/data-audit.md
 
 # Samsung Health Data SDK: licensed download from developer.samsung.com, kept out of this public repo
 /app/libs/samsung-health-data-api-*.aar
+
+# iOS: per-user Xcode state and local build output
+ios/**/xcuserdata/
+ios/build/

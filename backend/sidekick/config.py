@@ -43,6 +43,7 @@ DATA_DIR = REPO_DIR / "data"
 
 # Google Sign-In: the *Web* OAuth client ID from Google Cloud (not a secret). Android sign-in requests ID tokens for it.
 GOOGLE_WEB_CLIENT_ID = "162421419636-deds89pjaleairjrbj6brdn29ldkhvh9.apps.googleusercontent.com"  # Google Cloud OAuth Web client (the app's Android clients match by package + signing key)
+GOOGLE_IOS_CLIENT_ID = ""  # Google Cloud OAuth iOS client (bundle com.bennybarak.runnersidekick); its ID tokens carry it as audience
 
 PUBLIC_BASE_URL = "https://runnersidekick.ibarak.org"
 GARMIN_REDIRECT_URI = f"{PUBLIC_BASE_URL}/v1/garmin/oauth/callback"

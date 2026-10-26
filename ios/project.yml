@@ -1,0 +1,45 @@
+name: RunnerSidekick
+options:
+  bundleIdPrefix: com.bennybarak
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: 57L2ULXB7Z
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.77.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  RunnerSidekick:
+    type: application
+    platform: iOS
+    sources:
+      - path: RunnerSidekick
+    info:
+      path: RunnerSidekick/Info.plist
+      properties:
+        CFBundleDisplayName: Runner Sidekick
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIAppFonts: [GoogleSans.ttf]
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.healthcare-fitness
+        # The server's Garmin callback page hands Garmin's answer back to the app; Google sign-in returns on its own scheme
+        CFBundleURLTypes:
+          - CFBundleURLName: com.bennybarak.runnersidekick
+            CFBundleURLSchemes: [runnersidekick]
+        BGTaskSchedulerPermittedIdentifiers: [com.bennybarak.runnersidekick.refresh]
+        UIBackgroundModes: [fetch]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bennybarak.runnersidekick
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: true

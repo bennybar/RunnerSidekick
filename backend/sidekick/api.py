@@ -23,7 +23,7 @@ from dataclasses import replace
 from . import accounts
 from . import garmin_oauth as goauth
 from . import garmin_link
-from .config import GARMIN_REDIRECT_URI, GOOGLE_WEB_CLIENT_ID, WATCHLETIC_REDIRECT_URI, secrets, server_openai_key
+from .config import GARMIN_REDIRECT_URI, GOOGLE_IOS_CLIENT_ID, GOOGLE_WEB_CLIENT_ID, WATCHLETIC_REDIRECT_URI, secrets, server_openai_key
 from fastapi.responses import HTMLResponse
 from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
@@ -203,7 +203,7 @@ def verify_google_id_token(token: str) -> dict:
     if not GOOGLE_WEB_CLIENT_ID:
         raise HTTPException(503, "Google sign-in isn't configured on this server yet")
     try:
-        return id_token.verify_oauth2_token(token, grequests.Request(), audience=GOOGLE_WEB_CLIENT_ID)
+        return id_token.verify_oauth2_token(token, grequests.Request(), audience=[c for c in (GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID) if c])
     except ValueError:
         raise HTTPException(401, "Google sign-in could not be verified")
 
