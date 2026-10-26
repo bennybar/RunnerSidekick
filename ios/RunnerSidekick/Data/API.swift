@@ -40,7 +40,7 @@ enum Backend {
     static let url = "https://runnersidekick.ibarak.org"
     /// Google sign-in: the iOS OAuth client ID (Google Cloud console → Credentials → iOS client for this bundle id).
     /// Empty until it's created; the sign-in screen then offers the device token only.
-    static let googleIOSClientID = ""
+    static let googleIOSClientID = "162421419636-rj38evk6329k0es0r4oni08qa7ak0sm3.apps.googleusercontent.com"
 }
 
 /// Secrets on this device (the app token, the runner's own OpenAI key), in the Keychain.

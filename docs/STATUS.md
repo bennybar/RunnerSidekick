@@ -1172,7 +1172,7 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   training/race/about/window/key sheets, appearance, units, notifications, background refresh, AI, weather, data,
   account), reports with versions, day view. Offline cache in Application Support (no iCloud backup), token and own
   OpenAI key in the keychain, BGAppRefresh + local notifications. App icon with a dark-mode variant.
-- Sign-in: device token now; Google needs an iOS OAuth client (Backend.googleIOSClientID in the app,
+- Sign-in: Google with the iOS OAuth client (Backend.googleIOSClientID in the app,
   GOOGLE_IOS_CLIENT_ID in `config.py`, which the server now also accepts as an ID token audience).
 - Build: `cd ios && xcodegen generate`, then Xcode or `xcodebuild … -destination 'id=<UDID>' -allowProvisioningUpdates`
   and `xcrun devicectl device install app`. Debug builds read RSK_TOKEN / RSK_TAB / RSK_TRENDS / RSK_RUN from the launch
