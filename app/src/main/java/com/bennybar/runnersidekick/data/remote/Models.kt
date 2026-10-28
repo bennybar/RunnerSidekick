@@ -223,7 +223,17 @@ data class MorningReport(
     @SerialName("next_run") val nextRun: NextRun? = null,
     val decision: Decision? = null,
     @SerialName("reading_notes") val readingNotes: Map<String, ReadingNote> = emptyMap(),
+    val health: HealthCard? = null,
 )
+
+/** Last night's health on Today, written by the server: a headline, then one row per measure. status is good, usual,
+ *  watch, learning or missing; metric names the finding behind a row (its evidence), null for the watch's own scores. */
+@Serializable
+data class HealthCard(val headline: String, val rows: List<HealthRow> = emptyList())
+
+@Serializable
+data class HealthRow(val id: String, val title: String, val value: String? = null, val detail: String? = null,
+                     val status: String = "missing", val metric: String? = null, val spark: List<Double?> = emptyList())
 
 /** How good a reading is and what it means, in one plain sentence each. */
 @Serializable

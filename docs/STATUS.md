@@ -1187,3 +1187,13 @@ From the Garmin data coverage audit (~/Downloads/garmin_data_coverage_audit_find
   shadow), segmented controls, glass buttons/chips and glass toasts. Tile colours and all content unchanged.
 - (v0.78.1) iOS scrolling: date formatters are made once and reused (every run row made several new ones as it
   scrolled in), and saved runs/charts/days read from disk once instead of on every redraw.
+
+## Your health card (2026-10-28, v0.79.0, both apps)
+- Today: "Your health · last night" replaces the Readings grid. The server writes it (`health.py`, health-1.0, added in
+  `today_view.enrich`, so no report version bump): a headline ("Slept well, recovered as usual.") and rows for sleep
+  (with Garmin's sleep score and its band), HRV, resting heart rate, Body Battery (low → high) and stress, each with a
+  status in words (good / usual / watch / learning / not in yet) and its last 7 days. Direction decides good vs watch
+  (higher HRV good, higher resting HR not). Garmin's bands: stress 0–25 restful, 26–50 low, 51–75 medium, 76+ high;
+  sleep score 90+ excellent, 80+ good, 60+ fair; Body Battery charged to 75+ is a good recharge, under 50 low.
+- A row with evidence opens it; Body Battery and stress open the full briefing. VO₂ max moved to the Fitness score
+  page ("VO₂ max and its progress"); 7-day running time stays on Runs. MetricTile removed from both apps.

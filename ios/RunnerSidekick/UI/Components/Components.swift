@@ -354,44 +354,6 @@ struct BigValue: View {
     }
 }
 
-/// Big-numeral tile for a reading, tinted for its kind of data. Colour is never the only signal: the status line has
-/// text and an icon, and a flagged reading also says so in words.
-struct MetricTile<ChartView: View>: View {
-    var label: String
-    var value: String
-    var unit: String?
-    var status: String
-    var statusIcon: String?
-    var flagged: Bool
-    var tint: Tint = .neutral
-    var badge: (String, BadgeShape)? = nil
-    var onTap: () -> Void
-    @ViewBuilder var chart: ChartView
-
-    var body: some View {
-        let shown: Tint = flagged ? .orange : tint
-        Tile(tint: shown, spacing: 4, onTap: onTap) {
-            HStack {
-                Text(label).font(Typo.labelLarge).foregroundStyle(Palette.onSurface).frame(maxWidth: .infinity, alignment: .leading)
-                if let (icon, shape) = badge {
-                    ShapeBadge(symbol: icon, shape: shape, size: 30, container: shown.hue.opacity(0.24), content: shown.ink, iconSize: 14)
-                }
-            }
-            Spacer(minLength: 0)
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(value).font(Typo.headlineMedium).foregroundStyle(Palette.onSurface).lineLimit(1).minimumScaleFactor(0.7)
-                if let unit { Text(unit).font(Typo.bodyMedium).foregroundStyle(Palette.onSurfaceVariant) }
-            }
-            HStack(spacing: 4) {
-                if let statusIcon { Image(systemName: statusIcon).font(.caption).foregroundStyle(Palette.onSurfaceVariant) }
-                Text(status).font(Typo.labelMedium).foregroundStyle(Palette.onSurfaceVariant).lineLimit(2)
-            }
-            chart.padding(.top, 8)
-        }
-        .frame(minHeight: 104)
-    }
-}
-
 /// A thin rounded progress bar.
 struct ProgressBar: View {
     var fraction: Double

@@ -9,7 +9,7 @@ from datetime import date
 
 def enrich(conn, source: str, d: date, body: dict) -> dict:
     """Adds the live parts of Today to a morning report body (in place) and returns it."""
-    from . import changes, compare, highlights, readings, scores
+    from . import changes, compare, health, highlights, readings, scores
     from . import focus as fc
     from .decide import decide
     dec = decide(conn, source, d, body)
@@ -21,4 +21,5 @@ def enrich(conn, source: str, d: date, body: dict) -> dict:
     cmp = compare.build(conn, source, d)
     body["highlights"] = highlights.build(conn, source, d, cmp, fc.current(conn, source, d), body["race"])
     body["reading_notes"] = readings.notes(body["findings"], cmp)
+    body["health"] = health.build(body, conn, source, d)
     return body

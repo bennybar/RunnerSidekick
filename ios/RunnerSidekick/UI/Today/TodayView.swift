@@ -1,10 +1,9 @@
 import SwiftUI
 
-let tileMetrics = ["sleep_duration", "resting_hr", "hrv_overnight_avg", "running_moving_time_7d"]
-let tileBadges: [String: (String, BadgeShape)] = [
-    "sleep_duration": ("bed.double", .clover4), "resting_hr": ("heart", .heart),
-    "hrv_overnight_avg": ("waveform.path.ecg", .softBurst), "running_moving_time_7d": ("figure.run", .cookie6)]
-let tileTints: [String: Tint] = ["sleep_duration": .indigo, "resting_hr": .pink, "hrv_overnight_avg": .pink, "running_moving_time_7d": .orange]
+private let healthBadges: [String: (String, BadgeShape)] = [
+    "sleep": ("bed.double", .clover4), "hrv": ("waveform.path.ecg", .softBurst), "resting_hr": ("heart", .heart),
+    "body_battery": ("battery.75percent", .cookie6), "stress": ("figure.mind.and.body", .flower)]
+private let healthTints: [String: Tint] = ["sleep": .indigo, "hrv": .pink, "resting_hr": .pink, "body_battery": .green, "stress": .teal]
 
 /// The time a manual Garmin sync is next allowed, while it's still ahead ("14:30"); nil once it's allowed.
 func syncWait(_ nextAllowedAt: String?, now: Date) -> String? {
@@ -67,7 +66,12 @@ struct TodayView: View {
         if let sc = r.scores, sc.status == "ok" { ScoresCard(s: sc) { nav.open(.score($0)) } }
         coachTeaser(pending: pending)
         if !r.highlights.isEmpty { StandsOut(items: Array(r.highlights.prefix(3)), onOpen: openHighlight) }
-        Readings(r: r, fitness: store.fitness?.value, onOpenVo2: { nav.open(.vo2) }) { evidence = $0 }
+        if let h = r.health {
+            // A row with evidence opens it; the watch's own scores (Body Battery, stress) open the full briefing
+            HealthCardView(h: h) { row in
+                if let f = row.metric.flatMap({ m in r.findings.first { $0.metric == m } }) { evidence = f } else { nav.open(.briefing) }
+            }
+        }
         if let n = r.overnight { LastNight(n: n) }
         if let run = r.recentRun { LastRunCard(run: run, units: store.units) { nav.open(.run(run.sourceId)) } }
     }
@@ -424,98 +428,50 @@ private struct StandsOut: View {
     }
 }
 
-private func tileValue(_ f: Finding) -> (String, String?) {
-    guard let v = f.observed?.value ?? f.last?.value else { return ("—", nil) }
-    switch f.metric {
-    case "sleep_duration", "running_moving_time_7d": let m = Int((v / 60).rounded()); return (String(format: "%dh %02dm", m / 60, m % 60), nil)
-    case "resting_hr": return ("\(Int(v.rounded()))", "bpm")
-    default: return ("\(Int(v.rounded()))", "ms")
-    }
-}
-
-private func tileStatus(_ f: Finding) -> String {
-    if f.metric == "running_moving_time_7d" { return f.status == "outside" ? "Well above recent weeks" : "Similar to recent weeks" }
-    switch f.status {
-    case "learning": return "Learning · \(f.sampleSize ?? 0)/14 days"
-    case "not_compared": return "Daytime only · not compared"
-    case "missing":
-        guard let l = f.last else { return "Not in yet" }
-        return l.date == Fmt.addDays(Fmt.todayISO(), -1) ? "Yesterday's" : "From \(Fmt.shortDate(l.date))"
-    case "sustained": return "Unusual 3 days running"
-    case "outside": return (f.delta?.abs ?? 0) > 0 ? "Above your usual" : "Below your usual"
-    default: return f.comparison?.median != nil ? "Usual · \(Fmt.signedDelta(f.metric, f.delta?.abs))" : "Usual"
-    }
-}
-
-private func dailySeries(_ f: Finding, _ end: String) -> [Double?] {
-    let by = Dictionary((f.sparkline ?? []).map { ($0.date, $0.value) }, uniquingKeysWith: { a, _ in a })
-    return (0...13).reversed().map { by[Fmt.addDays(end, -$0)] }
-}
-
 /// The VO2 max chosen in Settings: Runner Sidekick's (its series), else Garmin's current one, or the watch's latest
 func chosenVo2(_ f: Fitness?) -> Double? {
     ((f?.maker == "Runner Sidekick") ? nil : f?.garmin?.vo2max?.value) ?? f?.vo2maxSeries.last?.value
 }
 
-private struct Readings: View {
-    var r: MorningReport
-    var fitness: Fitness?
-    var onOpenVo2: () -> Void
-    var onTap: (Finding) -> Void
-
+/// Last night's health in one card: the server's headline, then sleep, HRV, resting heart rate, Body Battery and stress,
+/// each with its value, a few words, its last 7 days and a status said in words (colour is never the only signal).
+private struct HealthCardView: View {
+    var h: HealthCard
+    var onRow: (HealthRow) -> Void
     var body: some View {
-        let found = tileMetrics.compactMap { m in r.findings.first { $0.metric == m } }
-        let vo2 = chosenVo2(fitness)
-        // nil marks the VO2 max tile's slot, right after the overnight readings
-        let tiles: [Finding?] = found + (vo2 != nil ? [nil] : [])
-        VStack(alignment: .leading, spacing: 10) {
-            SectionLabel(text: "Readings")
-            ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { i in
-                // An odd last tile (usually VO2 max) takes the whole row
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(i..<min(i + 2, tiles.count), id: \.self) { k in
-                        if let f = tiles[k] { readingTile(f) } else if let v = vo2 { vo2Tile(v) }
-                    }
+        CardGroup(title: "Your health · last night") {
+            GroupCustom { Text(h.headline).font(Typo.titleLarge) }
+            ForEach(h.rows) { r in
+                let tint = healthTints[r.id] ?? .neutral
+                let (verdict, label) = switch r.status {
+                case "good": ("good", "Good")
+                case "watch": ("low", "Watch")
+                case "usual": ("info", "Usual")
+                case "learning": ("info", "Learning")
+                default: ("info", "Not in yet")
                 }
-                .fixedSize(horizontal: false, vertical: true)
+                Button { onRow(r) } label: {
+                    HStack(spacing: 14) {
+                        if let (icon, shape) = healthBadges[r.id] {
+                            ShapeBadge(symbol: icon, shape: shape, size: 36, container: tint.hue.opacity(0.24), content: tint.ink, iconSize: 17)
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(r.title).font(Typo.labelLarge).foregroundStyle(Palette.onSurfaceVariant)
+                            Text(r.value ?? "—").font(Typo.titleMedium).foregroundStyle(Palette.onSurface)
+                            if let d = r.detail { Text(d).font(Typo.bodySmall).foregroundStyle(Palette.onSurfaceVariant) }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if r.spark.compactMap({ $0 }).count >= 2 {
+                            Sparkline(values: r.spark, color: tint.ink, description: "\(r.title), last 7 days").frame(width: 56, height: 28)
+                        }
+                        VerdictChip(verdict: verdict, label: label)
+                    }
+                    .padding(.horizontal, 18).padding(.vertical, 10).frame(minHeight: 64).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityElement(children: .combine)
             }
         }
-    }
-
-    private func readingTile(_ f: Finding) -> some View {
-        let (value, unit) = tileValue(f)
-        let flagged = f.status == "outside" || f.status == "sustained"
-        let d = f.delta?.abs
-        let icon: String? = d.map { $0 > 0 ? "arrow.up.right" : $0 < 0 ? "arrow.down.right" : "arrow.right" }
-        let tint = tileTints[f.metric] ?? .neutral
-        let band = f.comparison.flatMap { c in c.q1.flatMap { a in c.q3.map { (a, $0) } } }
-        return MetricTile(label: f.metric == "running_moving_time_7d" ? "Running, 7 days" : f.title, value: value, unit: unit,
-                          status: tileStatus(f), statusIcon: icon, flagged: flagged, tint: tint, badge: tileBadges[f.metric], onTap: { onTap(f) }) {
-            if !(f.sparkline ?? []).isEmpty {
-                Sparkline(values: dailySeries(f, r.localDate), band: band, color: flagged ? Tint.orange.ink : tint.ink, description: "\(f.title), last 14 days")
-                    .frame(height: 32)
-            }
-        }
-        .frame(maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(f.title). \(f.statement)")
-    }
-
-    private func vo2Tile(_ v: Double) -> some View {
-        let series = fitness?.vo2maxSeries ?? []
-        let maker = fitness?.maker ?? "Garmin"
-        let old = series.last { $0.date <= Fmt.addDays(r.localDate, -28) }
-        let ch = old.map { v - $0.value }
-        let status = ch.map { abs($0) < 0.05 ? "Same as 4 weeks ago" : String(format: "%+.1f in 4 weeks", $0) } ?? maker
-        let icon: String? = ch.map { $0 > 0.05 ? "arrow.up.right" : $0 < -0.05 ? "arrow.down.right" : "arrow.right" }
-        return MetricTile(label: "VO₂ max", value: Fmt.f1(v), unit: nil, status: status, statusIcon: icon, flagged: false, tint: .teal,
-                          badge: ("speedometer", .sunny), onTap: onOpenVo2) {
-            if series.count >= 2 {
-                Sparkline(values: series.suffix(14).map { $0.value }, color: Tint.teal.ink, description: "VO2 max, recent \(maker) readings").frame(height: 32)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("VO2 max \(Fmt.f1(v)), \(maker)")
     }
 }
 

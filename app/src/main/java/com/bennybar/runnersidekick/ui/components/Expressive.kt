@@ -172,52 +172,6 @@ fun ShapeBadge(
     }
 }
 
-/** Big-numeral tile for a reading, tinted for its kind of data. Colour is never the only signal: the status line has
- *  text and an icon, and a flagged reading also says so in words. */
-@Composable
-fun MetricTile(
-    label: String,
-    value: String,
-    unit: String?,
-    status: String,
-    statusIcon: ImageVector?,
-    flagged: Boolean,
-    modifier: Modifier = Modifier,
-    tint: com.bennybar.runnersidekick.ui.theme.Tint = com.bennybar.runnersidekick.ui.theme.Tint.NEUTRAL,
-    onClick: () -> Unit,
-    chart: (@Composable () -> Unit)? = null,
-    badge: Pair<ImageVector, RoundedPolygon>? = null,  // the reading's icon on its own Expressive shape
-) {
-    val on = MaterialTheme.colorScheme.onSurface
-    val sub = MaterialTheme.colorScheme.onSurfaceVariant
-    val shown = if (flagged) com.bennybar.runnersidekick.ui.theme.Tint.ORANGE else tint
-    Tile(modifier, tint = shown, onClick = onClick, spacing = 4.dp) {
-        Column(Modifier.heightIn(min = 104.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, style = MaterialTheme.typography.labelLarge, color = on, modifier = Modifier.weight(1f))
-                badge?.let { (icon, shape) ->
-                    ShapeBadge(icon, shape, Modifier.size(30.dp), container = shown.hue.copy(alpha = 0.24f),
-                        content = com.bennybar.runnersidekick.ui.theme.ink(shown), iconSize = 17.dp)
-                }
-            }
-            Spacer(Modifier.weight(1f, fill = false))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, style = MaterialTheme.typography.headlineMedium, color = on, maxLines = 1)
-                unit?.let {
-                    Spacer(Modifier.width(4.dp))
-                    Text(it, style = MaterialTheme.typography.bodyMedium, color = sub, modifier = Modifier.padding(bottom = 4.dp))
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                statusIcon?.let { Icon(it, null, Modifier.size(16.dp), tint = sub); Spacer(Modifier.width(4.dp)) }
-                Text(status, style = MaterialTheme.typography.labelMedium, color = sub, maxLines = 2)
-            }
-            chart?.let { Spacer(Modifier.padding(top = 8.dp)); it() }
-        }
-    }
-}
-
-
 /** A lazy-list item that fades in, fades out and moves into place when the list changes (a tab or range switch,
  *  a card appearing), using Material's emphasized timing. */
 fun androidx.compose.foundation.lazy.LazyListScope.animatedItem(key: Any, content: @Composable () -> Unit) =
@@ -225,5 +179,3 @@ fun androidx.compose.foundation.lazy.LazyListScope.animatedItem(key: Any, conten
         Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, 60),
             fadeOutSpec = androidx.compose.animation.core.tween(90))) { content() }
     }
-
-

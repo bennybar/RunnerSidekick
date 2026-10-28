@@ -72,6 +72,7 @@ struct BriefingPage: View {
 struct ScorePage: View {
     var which: String
     @Environment(Store.self) private var store
+    @Environment(Nav.self) private var nav
     @State private var how = false
 
     var body: some View {
@@ -98,6 +99,8 @@ struct ScorePage: View {
                     }
                 }
                 OutlineButton(title: how ? "Hide how it's calculated" : "How it's calculated") { how.toggle() }
+                // VO2 max and its progress live under Fitness (Today's health card is about last night)
+                if which == "fitness", chosenVo2(store.fitness?.value) != nil { OutlineButton(title: "VO₂ max and its progress") { nav.open(.vo2) } }
                 if let p = s.progress {
                     // Is it improving? Separate signals from different data, with how much they agree
                     CardGroup(title: "Progress · " + (p.verdict == "insufficient" ? "not enough evidence yet" : p.verdict)

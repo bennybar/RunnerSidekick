@@ -187,7 +187,22 @@ struct MorningReport: Codable {
     /// Keyed by metric, converted to camelCase by the decoder: look up with `note(for:)`
     @D var readingNotes: [String: ReadingNote]
 
+    var health: HealthCard?
+
     func note(for metric: String) -> ReadingNote? { readingNotes[JSON.camel(metric)] ?? readingNotes[metric] }
+}
+
+/// Last night's health on Today, written by the server: a headline, then one row per measure. status is good, usual,
+/// watch, learning or missing; metric names the finding behind a row (its evidence), nil for the watch's own scores.
+struct HealthCard: Codable { var headline: String; @D var rows: [HealthRow] }
+struct HealthRow: Codable, Identifiable {
+    var id: String
+    var title: String
+    var value: String?
+    var detail: String?
+    var status: String?
+    var metric: String?
+    @D var spark: [Double?]
 }
 
 /// How good a reading is and what it means, in one plain sentence each.

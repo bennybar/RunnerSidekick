@@ -1,6 +1,10 @@
 package com.bennybar.runnersidekick.ui.today
 
+import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.foundation.clickable
+import com.bennybar.runnersidekick.ui.components.ShapeBadge
+import androidx.compose.material.icons.outlined.SelfImprovement
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Speed
@@ -94,7 +98,6 @@ import com.bennybar.runnersidekick.ui.components.Group
 import com.bennybar.runnersidekick.ui.components.SectionLabel
 import com.bennybar.runnersidekick.ui.components.Tile
 import com.bennybar.runnersidekick.ui.components.animatedItem
-import com.bennybar.runnersidekick.ui.components.MetricTile
 import com.bennybar.runnersidekick.ui.components.OfflineBanner
 import com.bennybar.runnersidekick.ui.components.Sparkline
 import com.bennybar.runnersidekick.ui.factory
@@ -105,14 +108,14 @@ import java.time.Instant
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
-private val TILE_METRICS = listOf("sleep_duration", "resting_hr", "hrv_overnight_avg", "running_moving_time_7d")
-private val TILE_BADGES = mapOf(
-    "sleep_duration" to (Icons.Outlined.Bedtime to MaterialShapes.Clover4Leaf),
+private val HEALTH_ICONS = mapOf(
+    "sleep" to (Icons.Outlined.Bedtime to MaterialShapes.Clover4Leaf),
+    "hrv" to (Icons.Outlined.MonitorHeart to MaterialShapes.SoftBurst),
     "resting_hr" to (Icons.Outlined.FavoriteBorder to MaterialShapes.Heart),
-    "hrv_overnight_avg" to (Icons.Outlined.MonitorHeart to MaterialShapes.SoftBurst),
-    "running_moving_time_7d" to (Icons.AutoMirrored.Outlined.DirectionsRun to MaterialShapes.Cookie6Sided))
-private val TILE_TINTS = mapOf("sleep_duration" to Tint.INDIGO, "resting_hr" to Tint.PINK, "hrv_overnight_avg" to Tint.PINK,
-    "running_moving_time_7d" to Tint.ORANGE)
+    "body_battery" to (Icons.Outlined.BatteryChargingFull to MaterialShapes.Cookie6Sided),
+    "stress" to (Icons.Outlined.SelfImprovement to MaterialShapes.Flower))
+private val HEALTH_TINTS = mapOf("sleep" to Tint.INDIGO, "hrv" to Tint.PINK, "resting_hr" to Tint.PINK, "body_battery" to Tint.GREEN,
+    "stress" to Tint.TEAL)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -129,6 +132,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     val snackbar = remember { SnackbarHostState() }
     var evidence by remember { mutableStateOf<Finding?>(null) }
     var sheet by rememberSaveable { mutableStateOf<String?>(null) } // the open detail page: readiness | briefing | health | fitness | vo2 | race | focus
+    var briefingBack by rememberSaveable { mutableStateOf<String?>("readiness") } // where back from the full briefing goes
     val listState = rememberLazyListState()
     val coach by vm.coach.collectAsStateWithLifecycle()
     val aiOn = com.bennybar.runnersidekick.ui.components.LocalAiEnabled.current
@@ -195,8 +199,14 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
                         }
                     }
                 }
-                animatedItem(key = "readings") {
-                    Readings(report, fitness?.value, onOpenFitness = { sheet = "vo2" }) { evidence = it }
+                report.health?.let { h ->
+                    animatedItem(key = "health") {
+                        // A row with evidence opens it; the watch's own scores (Body Battery, stress) open the full briefing
+                        HealthCard(h) { row ->
+                            val f = row.metric?.let { m -> report.findings.firstOrNull { it.metric == m } }
+                            if (f != null) evidence = f else { briefingBack = null; sheet = "briefing" }
+                        }
+                    }
                 }
                 report.overnight?.let { n -> animatedItem(key = "night") { LastNight(n) } }
                 report.recentRun?.let { run -> animatedItem(key = "lastrun") { LastRunCard(run, units) { onOpenRun(run.sourceId) } } }
@@ -207,10 +217,12 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
     when (sheet) {
         "health", "fitness" -> report?.scores?.let { sc -> (if (sheet == "health") sc.health else sc.fitness)?.let {
             ScorePage(if (sheet == "health") "Healthy habits" else "Fitness", if (sheet == "health") Tint.PURPLE else Tint.BLUE,
-                sc.scope[sheet!!], it, sc.basis, onBack = { sheet = null }) } }
-        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessPage(shownReadiness(it), r.changes, onBack = { sheet = null }, onBriefing = { sheet = "briefing" }) } }
+                sc.scope[sheet!!], it, sc.basis, onBack = { sheet = null },
+                // VO2 max and its progress live under Fitness (Today's health card is about last night)
+                onVo2 = if (sheet == "fitness" && chosenVo2(fitness?.value) != null) ({ sheet = "vo2" }) else null) } }
+        "readiness" -> report?.let { r -> r.readiness?.let { ReadinessPage(shownReadiness(it), r.changes, onBack = { sheet = null }, onBriefing = { briefingBack = "readiness"; sheet = "briefing" }) } }
         "vo2" -> report?.let { r ->
-            DetailPage("VO₂ max", onBack = { sheet = null }) {
+            DetailPage("VO₂ max", onBack = { sheet = "fitness" }) {
                 fitness?.value?.let { f -> chosenVo2(f)?.let { v ->
                     PageHead("%.1f".format(v), "ml/kg/min",
                         if (f.vo2Maker == "Runner Sidekick") "Runner Sidekick's estimate" else "${f.vo2Maker}'s latest reading")
@@ -222,7 +234,7 @@ fun TodayScreen(onOpenRun: (String) -> Unit, onOpenSettings: () -> Unit, onOpenI
             }
         }
         // Back from the full briefing returns to readiness, where it opens from; a finding's "Show why" opens over it
-        "briefing" -> report?.let { BriefingPage(it, onBack = { sheet = "readiness" }) { f -> evidence = f } }
+        "briefing" -> report?.let { BriefingPage(it, onBack = { sheet = briefingBack }) { f -> evidence = f } }
         "race" -> report?.race?.let { r -> r.week?.let { w -> DetailPage("Race week", onBack = { sheet = null }) {
             RaceWeekCard(r, w) { id -> sheet = null; onOpenRun(id) } } } }
         "focus" -> focus?.value?.let { f -> DetailPage("This week's focus", onBack = { sheet = null }) {
@@ -377,32 +389,6 @@ private fun CoachTeaser(summary: String, note: String, onOpen: () -> Unit) {
     }
 }
 
-private fun tileValue(f: Finding): Pair<String, String?> {
-    val v = f.observed?.value ?: f.last?.value ?: return "—" to null
-    return when (f.metric) {
-        "sleep_duration", "running_moving_time_7d" -> { val m = (v / 60).roundToInt(); "${m / 60}h ${"%02d".format(m % 60)}m" to null }
-        "resting_hr" -> "${v.roundToInt()}" to "bpm"
-        else -> "${v.roundToInt()}" to "ms"
-    }
-}
-
-private fun tileStatus(f: Finding): String = when {
-    f.metric == "running_moving_time_7d" -> if (f.status == "outside") "Well above recent weeks" else "Similar to recent weeks"
-    f.status == "learning" -> "Learning · ${f.sampleSize ?: 0}/14 days"
-    f.status == "not_compared" -> "Daytime only · not compared"
-    f.status == "missing" -> f.last?.let { if (it.date == java.time.LocalDate.now().minusDays(1).toString()) "Yesterday's" else "From ${Format.shortDate(it.date)}" } ?: "Not in yet"
-    f.status == "sustained" -> "Unusual 3 days running"
-    f.status == "outside" -> if ((f.delta?.abs ?: 0.0) > 0) "Above your usual" else "Below your usual"
-    f.comparison?.median != null -> "Usual · ${Format.signedDelta(f.metric, f.delta?.abs)}"
-    else -> "Usual"
-}
-
-private fun dailySeries(f: Finding, endDate: String): List<Double?> {
-    val byDate = f.sparkline.orEmpty().associate { it.date to it.value }
-    val end = LocalDate.parse(endDate)
-    return (13 downTo 0).map { byDate[end.minusDays(it.toLong()).toString()] }
-}
-
 /** The VO2 max chosen in Settings: Runner Sidekick's (its series), else Garmin's current one, or the Samsung watch's latest */
 private fun chosenVo2(fitness: com.bennybar.runnersidekick.data.remote.Fitness?): Double? {
     val maker = fitness?.vo2Maker ?: "Garmin"
@@ -465,58 +451,43 @@ private fun Vo2Progress(series: List<com.bennybar.runnersidekick.data.remote.Poi
     }
 }
 
+/** Last night's health in one card: the server's headline, then sleep, HRV, resting heart rate, Body Battery and stress,
+ *  each with its value, a few words, its last 7 days and a status said in words (colour is never the only signal). */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun Readings(r: MorningReport, fitness: com.bennybar.runnersidekick.data.remote.Fitness?, onOpenFitness: () -> Unit,
-                     onTap: (Finding) -> Unit) {
-    val maker = fitness?.vo2Maker ?: "Garmin"
-    val vo2 = chosenVo2(fitness)
-    // null marks the VO2 max tile's slot, right after the overnight readings
-    val tiles: List<Finding?> = TILE_METRICS.mapNotNull { m -> r.findings.firstOrNull { it.metric == m } } + (if (vo2 != null) listOf(null) else emptyList())
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionLabel("Readings")
-        tiles.chunked(2).forEach { pair ->
-            // An odd last tile (usually VO2 max) takes the whole row
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { f ->
-                    if (f == null) {
-                        // The chosen VO2 max (one decimal), with the change over about four weeks
-                        val series = fitness!!.vo2maxSeries
-                        val old = series.lastOrNull { java.time.LocalDate.parse(it.date) <= java.time.LocalDate.parse(r.localDate).minusDays(28) }
-                        val ch = old?.let { vo2!! - it.value }
-                        MetricTile(label = "VO₂ max", value = "%.1f".format(vo2!!), unit = null,
-                            status = ch?.let { if (kotlin.math.abs(it) < 0.05) "Same as 4 weeks ago" else "%+.1f in 4 weeks".format(it) } ?: maker,
-                            statusIcon = ch?.let { if (it > 0.05) Icons.AutoMirrored.Outlined.TrendingUp else if (it < -0.05) Icons.AutoMirrored.Outlined.TrendingDown
-                                else Icons.AutoMirrored.Outlined.TrendingFlat }, flagged = false, tint = Tint.TEAL,
-                            modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "VO2 max %.1f, %s".format(vo2, maker) },
-                            onClick = onOpenFitness, badge = Icons.Outlined.Speed to MaterialShapes.Sunny,
-                            chart = if (series.size >= 2) {
-                                { Sparkline(series.takeLast(14).map { it.value }, Modifier.fillMaxWidth().height(32.dp),
-                                    color = ink(Tint.TEAL), description = "VO2 max, recent $maker readings") }
-                            } else null)
-                        return@forEach
+private fun HealthCard(h: com.bennybar.runnersidekick.data.remote.HealthCard, onRow: (com.bennybar.runnersidekick.data.remote.HealthRow) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionLabel("Your health · last night")
+        Tile(contentPadding = PaddingValues(top = 16.dp, bottom = 4.dp), spacing = 0.dp) {
+            Text(h.headline, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 8.dp))
+            h.rows.forEachIndexed { i, r ->
+                if (i > 0) androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp), color = cs.onSurface.copy(alpha = 0.07f))
+                val tint = HEALTH_TINTS[r.id] ?: Tint.NEUTRAL
+                val (verdict, label) = when (r.status) {
+                    "good" -> "good" to "Good"
+                    "watch" -> "low" to "Watch"
+                    "usual" -> "info" to "Usual"
+                    "learning" -> "info" to "Learning"
+                    else -> "info" to "Not in yet"
+                }
+                Row(Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button) { onRow(r) }.heightIn(min = 64.dp)
+                    .padding(horizontal = 18.dp, vertical = 10.dp).semantics(mergeDescendants = true) {},
+                    verticalAlignment = Alignment.CenterVertically) {
+                    HEALTH_ICONS[r.id]?.let { (icon, shape) ->
+                        ShapeBadge(icon, shape, Modifier.size(36.dp), container = tint.hue.copy(alpha = 0.24f), content = ink(tint), iconSize = 18.dp)
+                        Spacer(Modifier.width(14.dp))
                     }
-                    val (value, unit) = tileValue(f)
-                    val flagged = f.status == "outside" || f.status == "sustained"
-                    val d = f.delta?.abs
-                    val icon = when {
-                        d == null -> null
-                        d > 0 -> Icons.AutoMirrored.Outlined.TrendingUp
-                        d < 0 -> Icons.AutoMirrored.Outlined.TrendingDown
-                        else -> Icons.AutoMirrored.Outlined.TrendingFlat
+                    Column(Modifier.weight(1f)) {
+                        Text(r.title, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                        Text(r.value ?: "—", style = MaterialTheme.typography.titleMedium)
+                        r.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
                     }
-                    val band = f.comparison?.let { c -> if (c.q1 != null && c.q3 != null) c.q1 to c.q3 else null }
-                    val tint = TILE_TINTS[f.metric] ?: Tint.NEUTRAL
-                    val lineColor = if (flagged) ink(Tint.ORANGE) else ink(tint)
-                    MetricTile(
-                        label = if (f.metric == "running_moving_time_7d") "Running, 7 days" else f.title,
-                        value = value, unit = unit, status = tileStatus(f), statusIcon = icon, flagged = flagged, tint = tint,
-                        modifier = Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "${f.title}. ${f.statement}" },
-                        onClick = { onTap(f) }, badge = TILE_BADGES[f.metric],
-                        chart = if (!f.sparkline.isNullOrEmpty()) {
-                            { Sparkline(dailySeries(f, r.localDate), Modifier.fillMaxWidth().height(32.dp), band = band, color = lineColor,
-                                description = "${f.title}, last 14 days") }
-                        } else null,
-                    )
+                    if (r.spark.count { it != null } >= 2) {
+                        Sparkline(r.spark, Modifier.width(56.dp).height(28.dp), color = ink(tint), description = "${r.title}, last 7 days")
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    VerdictChip(verdict, label)
                 }
             }
         }
@@ -668,7 +639,8 @@ private fun ScoreTile(title: String, scope: String?, horizon: String?, sc: com.b
 }
 
 @Composable
-private fun ScorePage(title: String, tint: Tint, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onBack: () -> Unit) {
+private fun ScorePage(title: String, tint: Tint, scope: String?, sc: com.bennybar.runnersidekick.data.remote.Score, basis: String?, onBack: () -> Unit,
+                      onVo2: (() -> Unit)? = null) {
     var how by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     DetailPage(title, onBack) {
@@ -690,6 +662,7 @@ private fun ScorePage(title: String, tint: Tint, scope: String?, sc: com.bennyba
             }
         }
         OutlinedButton(onClick = { how = !how }, modifier = Modifier.height(48.dp)) { Text(if (how) "Hide how it's calculated" else "How it's calculated") }
+        onVo2?.let { OutlinedButton(onClick = it, modifier = Modifier.height(48.dp)) { Text("VO₂ max and its progress") } }
         sc.progress?.let { p ->
             // Is it improving? Separate signals from different data, with how much they agree
             Group(title = "Progress · " + when (p.verdict) { "insufficient" -> "not enough evidence yet"; else -> p.verdict } +
