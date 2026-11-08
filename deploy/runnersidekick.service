@@ -1,0 +1,33 @@
+# /etc/systemd/system/runnersidekick.service
+# Runner Sidekick API, run as root. Listens on loopback only; TLS and the public hostname are handled by nginx
+# (deploy/nginx-runnersidekick.conf). Data and Garmin tokens: /var/www/RunnerSidekick/data (<repo>/data, the default).
+[Unit]
+Description=Runner Sidekick API (api.example.com)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/RunnerSidekick/backend
+Environment=PYTHONUNBUFFERED=1
+# The public https address (only Garmin's official OAuth callback needs it); put it here or in the env file below
+Environment=RSK_PUBLIC_BASE_URL=https://api.example.com
+# Optional settings and secrets (see .env.example), e.g. OPENAI_API_KEY for AI summaries. Mode 0600.
+EnvironmentFile=-/etc/runnersidekick.env
+ExecStart=/var/www/RunnerSidekick/backend/.venv/bin/python -m sidekick serve --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+# Hardening (still useful as root): read-only system, writable data dir only
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/RunnerSidekick/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

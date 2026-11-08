@@ -1,0 +1,657 @@
+package com.bennybar.runnersidekick.data
+
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.async
+import androidx.room.withTransaction
+
+import com.bennybar.runnersidekick.data.local.CachedBlob
+import com.bennybar.runnersidekick.data.local.CheckinEntity
+import com.bennybar.runnersidekick.data.local.ReportEntity
+import com.bennybar.runnersidekick.data.local.SettingsStore
+import com.bennybar.runnersidekick.data.local.SidekickDb
+import com.bennybar.runnersidekick.data.remote.ActivityDetail
+import com.bennybar.runnersidekick.data.remote.ActivitySummary
+import com.bennybar.runnersidekick.data.remote.ApiClient
+import com.bennybar.runnersidekick.data.remote.ApiException
+import com.bennybar.runnersidekick.data.remote.CheckinDto
+import com.bennybar.runnersidekick.data.remote.AuthResult
+import com.bennybar.runnersidekick.data.remote.CoachView
+import com.bennybar.runnersidekick.data.remote.DayPlanIn
+import com.bennybar.runnersidekick.data.remote.Fitness
+import com.bennybar.runnersidekick.data.remote.FocusState
+import com.bennybar.runnersidekick.data.remote.RunIntent
+import com.bennybar.runnersidekick.data.remote.RunIntentIn
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import com.bennybar.runnersidekick.data.remote.GoogleSignInBody
+import com.bennybar.runnersidekick.data.remote.InsightsReport
+import com.bennybar.runnersidekick.data.remote.Me
+import com.bennybar.runnersidekick.data.remote.RevisionInfo
+import com.bennybar.runnersidekick.data.remote.Trends
+import com.bennybar.runnersidekick.data.remote.WeeklyReport
+import com.bennybar.runnersidekick.data.remote.MorningReport
+import com.bennybar.runnersidekick.data.remote.ReportListItem
+import com.bennybar.runnersidekick.data.remote.SettingsDto
+import com.bennybar.runnersidekick.data.remote.Status
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.encodeToString
+import java.time.Instant
+import java.util.UUID
+
+/** A cached value plus when this device last fetched it, so the UI can be honest about staleness. */
+data class Cached<T>(val value: T, val fetchedAt: Instant)
+
+class Repository(
+    private val db: SidekickDb,
+    private val api: ApiClient,
+    val settings: SettingsStore,
+) {
+    private val json = api.json
+    // encodeDefaults: without it, a value equal to its default (ai_enabled = false, a cleared goal = null) is left out of
+    // the request, so the server could never turn AI off or clear a field
+    private val withNulls = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; explicitNulls = true; encodeDefaults = true }
+
+    /** Big reports are decoded off the main thread (the callers' coroutines resume on Main after the network call). */
+    private suspend fun <T> offMain(block: suspend () -> T): T = kotlinx.coroutines.withContext(Dispatchers.Default) { block() }
+
+    private fun <T> observe(key: String, decode: (String) -> T): Flow<Cached<T>?> =
+        settings.settings.map { it.currentMode }.flatMapLatest { mode ->
+            if (mode == null) flowOf(null)
+            else db.cache().observe(key, mode).map { b ->
+                b?.let { runCatching { Cached(decode(it.json), Instant.ofEpochMilli(it.fetchedAt)) }.getOrNull() }
+            }
+        }.flowOn(Dispatchers.Default) // decoding large reports must not block the main thread
+
+    val status: Flow<Cached<Status>?> = observe("status") { json.decodeFromString<Status>(it) }
+    /** The day weeks start on (Settings, else Garmin's profile, else Monday), as the backend reports it. */
+    val weekStart: Flow<java.time.DayOfWeek> = status.map { com.bennybar.runnersidekick.ui.Format.firstDay(it?.value?.weekStartDay) }
+    val today: Flow<Cached<MorningReport>?> = observe("today") { json.decodeFromString<MorningReport>(it) }
+    val activities: Flow<Cached<List<ActivitySummary>>?> =
+        observe("activities") { json.decodeFromString(ListSerializer(ActivitySummary.serializer()), it) }
+
+    val insights: Flow<Cached<InsightsReport>?> = observe("insights") { json.decodeFromString<InsightsReport>(it) }
+    val weekly: Flow<Cached<WeeklyReport>?> = observe("weekly") { json.decodeFromString<WeeklyReport>(it) }
+    val fitness: Flow<Cached<Fitness>?> = observe("fitness") { json.decodeFromString<Fitness>(it) }
+    val me: Flow<Cached<Me>?> = observe("me") { json.decodeFromString<Me>(it) }
+
+    suspend fun refreshFitness() = put("fitness", api.getRaw("/v1/fitness"))
+
+    val focus: Flow<Cached<FocusState>?> = observe("focus") { json.decodeFromString<FocusState>(it) }
+    val coach: Flow<Cached<CoachView>?> = observe("coach") { json.decodeFromString<CoachView>(it) }
+    val routes: Flow<Cached<com.bennybar.runnersidekick.data.remote.RoutesReport>?> =
+        observe("routes") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(it) }
+    suspend fun refreshRoutes() = put("routes", api.getRaw("/v1/routes"))
+    /** "Different route": this run leaves the route it was grouped with, for good. */
+    /** Deletes a run on the server (kept aside there, never imported again), then refreshes what lists it. */
+    suspend fun deleteRun(sid: String) {
+        api.delete("/v1/activities/$sid", emptyMap())
+        put("activities", api.getRaw("/v1/activities"))
+        runCatching { refreshAll() }
+    }
+
+    /** Leaves a run out of Runner Sidekick's VO2 max, or takes it back in. */
+    suspend fun holdOutVo2(sid: String, held: Boolean) {
+        api.putRaw("/v1/activities/$sid/vo2-hold", """{"held_out":$held}""")
+        refreshActivity(sid)
+        runCatching { refreshCardio() }
+    }
+
+    suspend fun differentRoute(sid: String) {
+        api.post("/v1/activities/$sid/different-route")
+        refreshRoutes()
+        refreshActivity(sid)
+    }
+
+    val numbers: Flow<Cached<com.bennybar.runnersidekick.data.remote.TrainingNumbers>?> =
+        observe("numbers") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.TrainingNumbers>(it) }
+    suspend fun refreshNumbers() = put("numbers", api.getRaw("/v1/numbers"))
+
+    val cardio: Flow<Cached<com.bennybar.runnersidekick.data.remote.Cardio>?> =
+        observe("cardio") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(it) }
+    suspend fun refreshCardio() = put("cardio", api.getRaw("/v1/cardio"))
+
+    val trophies: Flow<Cached<com.bennybar.runnersidekick.data.remote.Trophies>?> =
+        observe("trophies") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(it) }
+    suspend fun refreshTrophies() = put("trophies", api.getRaw("/v1/trophies"))
+
+    val compare: Flow<Cached<com.bennybar.runnersidekick.data.remote.CompareReport>?> =
+        observe("compare") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(it) }
+
+    /** The runner's own OpenAI key, sent only with requests that may call the AI (coach, screen summaries). */
+    private suspend fun aiHeaders() = settings.ownAiKey()?.let { mapOf("X-OpenAI-Key" to it) } ?: emptyMap()
+
+    /** Returns true while the screen's AI summary is still being written. */
+    suspend fun refreshCompare(): Boolean {
+        val body = api.getRaw("/v1/compare", headers = aiHeaders())
+        put("compare", body)
+        return offMain { json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body) }.aiSummary?.status == "pending"
+    }
+
+    /** Fetches the coach analysis, polling (bounded) while the backend writes a new one for changed inputs. */
+    suspend fun pollCoach(pause: suspend (Int) -> Unit) {
+        for (attempt in 0 until 20) {
+            if (runCatching { refreshCoach() }.getOrDefault("failed") != "pending") return
+            pause(attempt)
+        }
+    }
+
+    /** A "pending" answer carries the previous analysis, which the UI shows marked as updating. */
+    suspend fun refreshCoach(): String {
+        // The runner's own key goes only with this request, never with any other call
+        val body = api.getRaw("/v1/coach", headers = aiHeaders())
+        put("coach", body)
+        return offMain { json.decodeFromString<CoachView>(body) }.status
+    }
+
+    suspend fun refreshFocus() = put("focus", api.getRaw("/v1/focus"))
+
+    suspend fun chooseFocus(kind: String) = put("focus", api.putRaw("/v1/focus", """{"kind":"$kind"}"""))
+
+    /** Today's intended session; the backend answers with the revised briefing. */
+    suspend fun setPlan(date: String, kind: String?, minutes: Int?) {
+        val body = if (kind == null) api.delete("/v1/plan/$date", emptyMap())
+        else api.putRaw("/v1/plan/$date", json.encodeToString(DayPlanIn(kind, minutes, Instant.now().toString())))
+        put("today", body)
+        val r = offMain { json.decodeFromString<MorningReport>(body) }
+        cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, body)
+    }
+
+    suspend fun setIntent(activityId: String, i: RunIntent) {
+        val text = { s: String? -> s?.trim()?.takeIf { it.isNotEmpty() } }
+        api.putRaw("/v1/activities/$activityId/intent", json.encodeToString(RunIntentIn(i.kind, text(i.note), text(i.target), i.effort, i.feel,
+            i.limiter, i.limiter2, i.health, Instant.now().toString())))
+        refreshActivity(activityId)
+        runCatching { put("activities", api.getRaw("/v1/activities")) }  // the run now counts as answered
+        refreshFocus()
+        // The AI input was written for the old type: refresh its state so "Update AI input" shows straight away
+        runCatching { refreshRunAi(activityId) }
+    }
+
+    suspend fun setInsightState(id: String, state: String?) {
+        put("insights", api.putRaw("/v1/insights/$id/state", if (state == null) """{"state":null}""" else """{"state":"$state"}"""))
+    }
+
+    /** Exchanges a Google ID token for an app token; stores it. Returns an error message, or null on success. */
+    /** Checks a device token with the server before it's saved; a message when it doesn't work, null when it does. */
+    suspend fun checkToken(backendUrl: String, token: String): String? = when (api.getWithToken(backendUrl, "/v1/me", token).first) {
+        200 -> null
+        401, 403 -> "The server didn't accept this device token."
+        429 -> "Too many tries from this network. Wait a minute and try again."
+        404 -> "That address answered, but it isn't a Runner Sidekick server. Check the address."
+        else -> "The server answered with an error. Check the address."
+    }
+
+    /** Finishes connecting Garmin: the app hands Garmin's answer to the server, signed in as the user who started it. */
+    suspend fun completeGarmin(state: String, code: String) {
+        api.postJson("/v1/garmin/oauth/complete", """{"state":${kotlinx.serialization.json.JsonPrimitive(state)},"code":${kotlinx.serialization.json.JsonPrimitive(code)}}""")
+        refreshStatus()
+    }
+
+    suspend fun signInWithGoogle(idToken: String, backendUrl: String): String? {
+        val (code, body) = api.postPublic(backendUrl, "/v1/auth/google",
+            json.encodeToString(GoogleSignInBody(idToken, android.os.Build.MODEL ?: "android")))
+        return when (code) {
+            200 -> {
+                val r = json.decodeFromString<AuthResult>(body)
+                com.bennybar.runnersidekick.Analytics.track("signed_in", mapOf("method" to "google"))  // before the screen closes
+                settings.setBackend(backendUrl, r.token)  // Today loads everything once the app opens
+                null
+            }
+            // The server says why (not invited, or the account was disabled)
+            403 -> runCatching { json.parseToJsonElement(body).let { (it as kotlinx.serialization.json.JsonObject)["detail"]!!
+                    .let { d -> (d as kotlinx.serialization.json.JsonPrimitive).content } } }.getOrNull()
+                ?.let { if (it.contains("invited")) "$it. Ask the server owner to invite your Google email." else it }
+                ?: "This Google account can't sign in here. Ask the server owner."
+            503 -> "Google sign-in isn't set up on this server yet."
+            429 -> "Too many tries from this network. Wait a minute and try again."
+            else -> "Sign-in failed (HTTP $code)."
+        }
+    }
+
+    suspend fun garminAuthorizeUrl(): String =
+        json.parseToJsonElement(api.post("/v1/garmin/oauth/start")).let { (it as kotlinx.serialization.json.JsonObject)["authorize_url"]!!.toString().trim('"') }
+
+    /** Hands the server the one-time ticket from Garmin's sign-in page; it connects Garmin and starts the first sync. */
+    suspend fun linkGarmin(ticket: String) {
+        api.postJson("/v1/garmin/ticket", """{"ticket":${kotlinx.serialization.json.JsonPrimitive(ticket)}}""")
+        runCatching { refreshStatus() }
+    }
+
+    suspend fun disconnectGarmin() { api.delete("/v1/garmin/connection", emptyMap()); refreshStatus() }
+
+    suspend fun deleteAccount() {
+        api.delete("/v1/account", emptyMap())
+        clearLocal(includeCheckins = true)
+        settings.clearToken()
+    }
+
+    /** Shown once on the sign-in screen after the server ended this session (expired or signed out elsewhere). */
+    val signInNote = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** The server rejected the token: back to sign-in with a note. Unsent check-ins stay on this phone. */
+    suspend fun sessionExpired() {
+        if (settings.settings.first().hasToken.not()) return
+        signInNote.value = "Your session has ended. Please sign in again."
+        clearLocal(includeCheckins = false)
+        settings.clearToken()
+    }
+
+    suspend fun signOut() {
+        // The token stops working on the server too; offline or slow, signing out here doesn't wait long for it
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { runCatching { api.post("/v1/auth/logout") } }
+        clearLocal(includeCheckins = false)
+        settings.clearToken()
+    }
+
+    fun trends(days: Int): Flow<Cached<Trends>?> = observe("trends:$days") { json.decodeFromString<Trends>(it) }
+    fun day(date: String): Flow<Cached<MorningReport>?> = observe("day:$date") { json.decodeFromString<MorningReport>(it) }
+
+    suspend fun refreshTrends(days: Int): Boolean {
+        val body = api.getRaw("/v1/trends", mapOf("days" to "$days"), aiHeaders())
+        put("trends:$days", body)
+        return offMain { json.decodeFromString<Trends>(body) }.aiSummary?.status == "pending"
+    }
+    suspend fun refreshDay(date: String) = put("day:$date", api.getRaw("/v1/today", mapOf("date" to date)))
+    suspend fun refreshWeekly() {
+        val body = runCatching { api.getRaw("/v1/weekly/latest") }.getOrElse { if (it is com.bennybar.runnersidekick.data.remote.ApiException.Http && it.code == 404) return else throw it }
+        put("weekly", body)
+    }
+
+    /** Earlier revisions of a report, newest first. Opening one caches it like any other report. */
+    suspend fun revisions(type: String, key: String): List<RevisionInfo> =
+        offMain { json.decodeFromString(ListSerializer(RevisionInfo.serializer()), api.getRaw("/v1/reports/$type/$key/revisions")) }
+
+    suspend fun cacheRevision(id: Long, type: String, key: String, date: String, revision: Int) {
+        if (db.reports().get(id)?.json != null) return
+        cacheReport(id, type, key, date, revision, null, null, api.getRaw("/v1/reports/$id"))
+    }
+
+    fun activity(id: String): Flow<Cached<ActivityDetail>?> = observe("activity:$id") { json.decodeFromString<ActivityDetail>(it) }
+
+    val journal: Flow<List<ReportEntity>> = settings.settings.map { it.currentMode }.flatMapLatest { mode ->
+        if (mode == null) flowOf(emptyList()) else db.reports().observeAll(mode)
+    }
+    private val account: Flow<String?> = settings.settings.map { it.account }
+
+    val checkins: Flow<List<CheckinEntity>> = account.flatMapLatest { a -> if (a == null) flowOf(emptyList()) else db.checkins().observeAll(a) }
+
+    /** "Not feeling well" today that the server's briefing doesn't include yet (offline, or not synced): until it does,
+     *  the app applies it itself everywhere (rest), and advice written without it (the AI coach) is held back. */
+    val unwellPending: Flow<Boolean> = kotlinx.coroutines.flow.combine(today, checkins) { t, cs ->
+        val d = java.time.LocalDate.now().toString()
+        cs.firstOrNull { it.localDate == d }?.illness == true &&
+            (t?.value?.localDate != d || t.value.decision?.unwellApplied != true)
+    }
+
+    fun report(id: Long): Flow<ReportEntity?> = db.reports().observe(id)
+    fun checkinFor(date: String): Flow<CheckinEntity?> =
+        account.flatMapLatest { a -> if (a == null) flowOf(null) else db.checkins().observeForDate(date, a) }
+
+    /**
+     * Identifies the signed-in account and scopes local data to it. A different account than last time clears the
+     * cached reports (never another account's check-ins, which stay hidden and are never uploaded under this account).
+     */
+    private suspend fun establishAccount(): String {
+        val body = api.getRaw("/v1/me")
+        val me = offMain { json.decodeFromString<Me>(body) }
+        val key = "${settings.settings.first().backendUrl.trimEnd('/')}#${me.id}"
+        val previous = settings.settings.first().account
+        if (previous != key) {
+            val status = db.cache().get("status")  // fetched just before; keep it
+            db.cache().clear()
+            db.reports().clear()
+            status?.let { db.cache().put(it) }
+            if (previous == null) db.checkins().adoptLegacy(key) else settings.setOwnAiKey(null)  // a key belongs to one account
+            settings.setAccount(key)
+            timezoneChecked = false  // a different account gets its own check
+        }
+        put("me", body)
+        return key
+    }
+
+    /** Decodes a response the way its screen will, before it's cached: one the app can't read throws here (and the
+     *  caller reports it) instead of replacing good saved data with something that shows as an empty screen. */
+    private fun check(key: String, body: String) {
+        when {
+            key == "status" -> json.decodeFromString<Status>(body)
+            key == "today" || key.startsWith("day:") -> json.decodeFromString<MorningReport>(body)
+            key == "activities" -> json.decodeFromString(ListSerializer(ActivitySummary.serializer()), body)
+            key == "insights" -> json.decodeFromString<InsightsReport>(body)
+            key == "weekly" -> json.decodeFromString<WeeklyReport>(body)
+            key == "fitness" -> json.decodeFromString<Fitness>(body)
+            key == "me" -> json.decodeFromString<Me>(body)
+            key == "focus" -> json.decodeFromString<FocusState>(body)
+            key == "coach" -> json.decodeFromString<CoachView>(body)
+            key == "compare" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.CompareReport>(body)
+            key == "trophies" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Trophies>(body)
+            key == "settings" -> json.decodeFromString<SettingsDto>(body)
+            key == "cardio" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.Cardio>(body)
+            key == "numbers" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.TrainingNumbers>(body)
+            key == "routes" -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RoutesReport>(body)
+            key.startsWith("trends:") -> json.decodeFromString<Trends>(body)
+            key.startsWith("activity:") -> json.decodeFromString<ActivityDetail>(body)
+            key.startsWith("runai:") -> json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body)
+        }
+    }
+
+    private suspend fun put(key: String, body: String) {
+        kotlinx.coroutines.withContext(Dispatchers.Default) { check(key, body) }  // big reports: decode off the main thread
+        val mode = settings.settings.first().currentMode ?: return
+        // Unchanged content isn't rewritten: no disk write and no needless refresh of every screen observing it
+        val existing = db.cache().get(key)
+        if (existing != null && existing.mode == mode && existing.json == body) {
+            // ...but its age is refreshed now and then, so a copy still in use isn't pruned as old
+            if (System.currentTimeMillis() - existing.fetchedAt > 86_400_000L) db.cache().touch(key, System.currentTimeMillis())
+            return
+        }
+        db.cache().put(CachedBlob(key, mode, body, System.currentTimeMillis()))
+    }
+
+    /** Status first: it tells us the backend mode, and a mode change wipes the other mode's cache. */
+    suspend fun refreshStatus(): Status {
+        val body = api.getRaw("/v1/status")
+        val s = offMain { json.decodeFromString<Status>(body) }
+        val current = settings.settings.first().currentMode
+        if (current != s.mode) {
+            db.cache().deleteOtherModes(s.mode)
+            db.reports().deleteOtherModes(s.mode)
+            settings.setMode(s.mode)
+        }
+        put("status", body)
+        return s
+    }
+
+    /** What a refresh or sync is doing and how far it has got (0–1); null when nothing is running. */
+    /** [hint]: a second line under the label (e.g. that a Garmin download runs on the server and takes a while). */
+    companion object {
+        const val SERVER_SYNC_HINT = "Runs on the server, so you can leave the app. A first download takes a few minutes; " +
+            "older history keeps filling in over the next hours."
+    }
+
+    data class Progress(val fraction: Float, val label: String, val hint: String? = null)
+    private val _progress = kotlinx.coroutines.flow.MutableStateFlow<Progress?>(null)
+    val progress: kotlinx.coroutines.flow.StateFlow<Progress?> = _progress
+
+    /** Everything the screens show, step by step; [from]..[to] is this refresh's share of the progress bar. */
+    private val refreshing = kotlinx.coroutines.sync.Mutex()
+
+    /** One full refresh at a time: a second call while one runs waits for it instead of fetching everything again. */
+    suspend fun refreshAll(from: Float = 0f, to: Float = 1f) {
+        if (!refreshing.tryLock()) {
+            refreshing.lock(); refreshing.unlock()
+            return
+        }
+        try { refreshAllNow(from, to) } finally { refreshing.unlock() }
+    }
+
+    private suspend fun refreshAllNow(from: Float, to: Float) {
+        val steps = listOf<Pair<String, suspend () -> Unit>>(
+            "Checking the connection" to {
+                refreshStatus(); establishAccount(); ensureTimezone(); runCatching { remoteSettings() }; pushPendingCheckins(); pullCheckins()
+                db.cache().pruneOld(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)  // runs and days not opened for 30 days
+            },
+            "Loading today" to {
+                val todayBody = api.getRaw("/v1/today")
+                put("today", todayBody)
+                val r = offMain { json.decodeFromString<MorningReport>(todayBody) }
+                cacheReport(r.id, "morning", r.localDate, r.localDate, r.revision, r.headline, r.recommendation.state, todayBody)
+            },
+            "Loading your runs" to { put("activities", api.getRaw("/v1/activities")) },
+            "Loading insights" to { put("insights", api.getRaw("/v1/insights")) },
+            "Loading your week" to { refreshWeekly(); refreshFocus() },
+            "Loading your fitness" to { refreshFitness() },
+            "Loading the journal" to { refreshJournal() },
+        )
+        try {
+            // The connection step first (mode, account and check-ins, which the rest depend on), then every
+            // screen at once: the server answers them side by side instead of one after another
+            _progress.value = Progress(from, steps[0].first)
+            steps[0].second()
+            val rest = steps.drop(1)
+            var done = 1
+            _progress.value = Progress(from + (to - from) * done / steps.size, "Loading your data")
+            kotlinx.coroutines.coroutineScope {
+                rest.map { (_, run) ->
+                    async {
+                        run()
+                        synchronized(this@Repository) { done++ }
+                        _progress.value = Progress(from + (to - from) * done / steps.size, "Loading your data")
+                    }
+                }.awaitAll()
+            }
+        } finally {
+            if (to >= 1f) _progress.value = null
+        }
+    }
+
+    suspend fun refreshInsights() = put("insights", api.getRaw("/v1/insights"))
+
+    /** Re-fetch today's briefing (used to pick up an AI summary that was still being written). */
+    suspend fun refreshToday() {
+        val body = api.getRaw("/v1/today")
+        put("today", body)
+    }
+
+    suspend fun refreshJournal() {
+        val list = offMain { json.decodeFromString(ListSerializer(ReportListItem.serializer()), api.getRaw("/v1/reports", mapOf("limit" to "200"))) }
+        // One transaction for the whole list; rows that didn't change are skipped in cacheReport
+        db.withTransaction { list.forEach { cacheReport(it.id, it.type, it.subjectKey, it.localDate, it.revision, it.title, it.state, null) } }
+    }
+
+    private suspend fun cacheReport(id: Long, type: String, key: String, date: String, rev: Int, title: String?, state: String?, body: String?) {
+        val mode = settings.settings.first().currentMode ?: return
+        val existing = db.reports().get(id)
+        if (body == null && existing != null && existing.mode == mode && existing.revision == rev && existing.title == title &&
+            existing.state == state) return
+        db.reports().upsert(ReportEntity(id, type, key, date, rev, title, state, mode, body ?: existing?.json, System.currentTimeMillis()))
+    }
+
+    suspend fun loadReport(id: Long) {
+        val existing = db.reports().get(id) ?: return
+        if (existing.json != null) return
+        db.reports().upsert(existing.copy(json = api.getRaw("/v1/reports/$id")))
+    }
+
+    suspend fun refreshActivity(id: String) = put("activity:$id", api.getRaw("/v1/activities/$id"))
+
+    /** The run as one Markdown file (built by the backend), for saving to Downloads. */
+    suspend fun exportRun(id: String): String = api.getRaw("/v1/activities/$id/export.md?v=${com.bennybar.runnersidekick.BuildConfig.VERSION_NAME}")
+
+    fun runAi(id: String): Flow<Cached<com.bennybar.runnersidekick.data.remote.RunAi>?> =
+        observe("runai:$id") { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(it) }
+
+    /** The run's AI input; [request] asks for it to be written (only then does it cost an AI call). Returns the status. */
+    suspend fun refreshRunAi(id: String, request: Boolean = false): String {
+        val body = if (request) api.postRaw("/v1/activities/$id/ai", aiHeaders()) else api.getRaw("/v1/activities/$id/ai", headers = aiHeaders())
+        put("runai:$id", body)
+        return offMain { json.decodeFromString<com.bennybar.runnersidekick.data.remote.RunAi>(body) }.status
+    }
+
+    /** Syncs with Garmin now and says how many new runs arrived. */
+    suspend fun syncRunsNow(pause: suspend (Int) -> Unit): Int {
+        val before = activities.first()?.value.orEmpty().map { it.sourceId }.toSet()
+        syncNow(pause)
+        return activities.first()?.value.orEmpty().count { it.sourceId !in before }
+    }
+
+    /** The background worker's small refresh: what the notifications read, nothing else. */
+    suspend fun backgroundRefresh() {
+        pushPendingCheckins()
+        put("today", api.getRaw("/v1/today"))
+        put("activities", api.getRaw("/v1/activities"))
+        refreshWeekly()
+        refreshFocus()
+    }
+
+    /** Starts a backend sync and waits (bounded) for it to finish, then refreshes the cache. For an explicit tap only. */
+    suspend fun syncNow(pause: suspend (Int) -> Unit) {
+        try {
+            _progress.value = Progress(0f, "Starting the Garmin sync")
+            // The server holds a sync back only when Garmin asked us to wait: say until when
+            val started = json.parseToJsonElement(api.post("/v1/sync")).jsonObject
+            started["next_allowed_at"]?.jsonPrimitive?.contentOrNull?.let { at ->
+                refreshStatus()
+                throw com.bennybar.runnersidekick.data.remote.ApiException.Sync(
+                    "Garmin asked us to wait before syncing again. Next sync from ${com.bennybar.runnersidekick.ui.components.clockOf(at)}.")
+            }
+            // The server's own progress fills the first 85%; loading the results fills the rest. Checks back off from
+            // 2 s (the caller's pause decides; nothing while the screen is hidden).
+            var s = refreshStatus()
+            for (attempt in 0 until 30) {
+                pause(attempt)
+                s = refreshStatus()
+                if (!s.syncRunning) break
+                s.syncProgress?.let { _progress.value = Progress(0.85f * it.percent / 100f, it.phase ?: "Syncing with Garmin", SERVER_SYNC_HINT) }
+            }
+            refreshAll(0.85f, 1f)
+            // Say how the sync really ended, never "synced" after a failure or while it's still going
+            if (s.syncRunning) throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Still syncing with Garmin on the server; new data will appear shortly.")
+            when (s.lastJob?.outcome) {
+                "ok", "partial", null -> Unit
+                "auth_failed" -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Garmin needs you to sign in again before it can sync.")
+                "rate_limited", "deferred" -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("Garmin asked us to wait; the sync will retry automatically.")
+                else -> throw com.bennybar.runnersidekick.data.remote.ApiException.Sync("The Garmin sync didn't finish" + (s.lastJob?.detail?.let { ": $it" } ?: "."))
+            }
+        } finally {
+            _progress.value = null
+        }
+    }
+
+    suspend fun saveCheckin(
+        date: String, energy: Int?, soreness: Int?, recovery: Int?, pain: Boolean, illness: Boolean, notes: String?, tags: List<String>,
+    ) {
+        val acct = settings.settings.first().account ?: ""
+        val existing = db.checkins().observeForDate(date, acct).first()
+        val c = CheckinEntity(
+            id = existing?.id ?: UUID.randomUUID().toString(), localDate = date, energy = energy, soreness = soreness,
+            recovery = recovery, pain = pain, illness = illness, notes = notes?.takeIf { it.isNotBlank() },
+            tagsJson = json.encodeToString(ListSerializer(String.serializer()), tags),
+            clientUpdatedAt = Instant.now().toString(), pendingSync = true, account = acct,
+        )
+        db.checkins().put(c)
+    }
+
+    private var timezoneChecked = false
+
+    /** A new account starts in the phone's time zone (the server's default is just a guess); once set, it's left alone. */
+    private suspend fun ensureTimezone() {
+        if (timezoneChecked) return
+        // A nicety, never a blocker: if settings can't be read now, the refresh goes on and it's tried next time
+        runCatching {
+            val s = json.parseToJsonElement(api.getRaw("/v1/settings")).jsonObject
+            if (s["timezone_set"]?.jsonPrimitive?.booleanOrNull == false) {
+                api.putRaw("/v1/settings", """{"timezone":"${java.time.ZoneId.systemDefault().id}"}""")
+            }
+            timezoneChecked = true
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+    }
+
+    /** "Not feeling well" for one day: an illness check-in the readiness and the next run take as overriding everything
+     *  else; tapping again clears it. */
+    suspend fun setUnwell(date: String, on: Boolean) {
+        saveCheckin(date, null, null, null, pain = false, illness = on, notes = null, tags = if (on) listOf("unwell") else emptyList())
+        // Saved on the phone first (Today applies it straight away); upload and refresh when the server can be reached
+        runCatching { pushPendingCheckins(); refreshToday() }
+    }
+
+    suspend fun pushPendingCheckins() {
+        val acct = settings.settings.first().account ?: return  // unknown account: upload nothing
+        for (c in db.checkins().pending(acct)) {
+            val dto = CheckinDto(
+                localDate = c.localDate, energy = c.energy, soreness = c.soreness, recovery = c.recovery, pain = c.pain,
+                illness = c.illness, notes = c.notes, tags = json.decodeFromString(ListSerializer(String.serializer()), c.tagsJson),
+                clientUpdatedAt = c.clientUpdatedAt,
+            )
+            val stored = offMain { json.decodeFromString<CheckinDto>(api.putRaw("/v1/checkins/${c.id}", json.encodeToString(dto))) }
+            // A newer version on the server wins; keep that one instead of ours
+            if (stored.clientUpdatedAt != c.clientUpdatedAt) mergeServerCheckin(stored, acct) else db.checkins().markSynced(c.id, c.clientUpdatedAt)
+        }
+    }
+
+    /** Pulls the account's check-ins so a reinstall or second phone shows the same history. Last write wins. */
+    suspend fun pullCheckins() {
+        val acct = settings.settings.first().account ?: return
+        offMain { json.decodeFromString(ListSerializer(CheckinDto.serializer()), api.getRaw("/v1/checkins")) }.forEach { mergeServerCheckin(it, acct) }
+    }
+
+    private suspend fun mergeServerCheckin(s: CheckinDto, acct: String) {
+        val id = s.id ?: return
+        val local = db.checkins().get(id)
+        if (local != null && local.clientUpdatedAt >= s.clientUpdatedAt) return
+        if (s.deleted) { if (local != null) db.checkins().delete(id); return }
+        db.checkins().put(CheckinEntity(
+            id = id, localDate = s.localDate, energy = s.energy, soreness = s.soreness, recovery = s.recovery, pain = s.pain,
+            illness = s.illness, notes = s.notes, tagsJson = json.encodeToString(ListSerializer(String.serializer()), s.tags),
+            clientUpdatedAt = s.clientUpdatedAt, pendingSync = false, account = acct,
+        ))
+    }
+
+    suspend fun remoteSettings(): SettingsDto {
+        val body = api.getRaw("/v1/settings")
+        put("settings", body)  // kept, so the app knows (offline too) whether AI is on
+        val s: SettingsDto = offMain { json.decodeFromString(body) }
+        restorePreferences(s)
+        return s
+    }
+
+    /** The app's preferences live on the server: what it has wins on this phone (a reinstall gets them back); what it
+     *  doesn't have yet is sent from this phone once. */
+    private suspend fun restorePreferences(s: SettingsDto) {
+        val local = settings.settings.first()
+        val missing = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
+        fun keep(key: String, server: Any?, mine: Any?) {
+            if (server == null && mine != null) missing[key] = when (mine) {
+                is Boolean -> kotlinx.serialization.json.JsonPrimitive(mine)
+                else -> kotlinx.serialization.json.JsonPrimitive(mine.toString())
+            }
+        }
+        s.units?.let { settings.setUnits(if (it == "imperial") com.bennybar.runnersidekick.data.local.Units.IMPERIAL else com.bennybar.runnersidekick.data.local.Units.METRIC) }
+        s.theme?.let { settings.setTheme(it) }
+        s.appearance?.let { settings.setAppearance(it) }
+        s.notifications?.let { settings.setNotificationsEnabledIfAllowed(it) }
+        s.backgroundRefresh?.let { settings.setBackgroundRefresh(it) }
+        keep("units", s.units, if (local.units == com.bennybar.runnersidekick.data.local.Units.IMPERIAL) "imperial" else "metric")
+        keep("theme", s.theme, local.theme)
+        keep("appearance", s.appearance, local.appearance)
+        keep("notifications", s.notifications, local.notificationsEnabled)
+        keep("background_refresh", s.backgroundRefresh, local.backgroundRefresh)
+        if (missing.isNotEmpty()) runCatching { api.putRaw("/v1/settings", kotlinx.serialization.json.JsonObject(missing).toString()) }
+    }
+
+    /** One app preference changed on this phone: saved here at once and on the server (best effort; the next refresh
+     *  sends it if this one can't). */
+    suspend fun savePreference(key: String, value: kotlinx.serialization.json.JsonPrimitive) {
+        runCatching { api.putRaw("/v1/settings", kotlinx.serialization.json.JsonObject(mapOf(key to value)).toString()) }
+    }
+
+    /** Whether the AI coach is on (Settings). Everything AI is hidden when it isn't, and until it's known. */
+    val aiEnabled: Flow<Boolean> = observe("settings") { json.decodeFromString<SettingsDto>(it) }.map { it?.value?.aiEnabled == true }
+
+    suspend fun saveRemoteSettings(s: SettingsDto): SettingsDto =
+        // Nulls are sent on purpose: a cleared goal or usual time must clear it on the server too
+        api.putRaw("/v1/settings", withNulls.encodeToString(s)).let { body -> put("settings", body); offMain { json.decodeFromString(body) } }
+
+    suspend fun exportJson(): String = api.getRaw("/v1/export")
+
+    suspend fun deleteRemote(scope: String) {
+        api.delete("/v1/data", mapOf("scope" to scope))
+        clearLocal(includeCheckins = scope == "all")
+    }
+
+    suspend fun clearLocal(includeCheckins: Boolean) {
+        db.cache().clear()
+        db.reports().clear()
+        api.forget()
+        if (includeCheckins) db.checkins().clear()
+    }
+}

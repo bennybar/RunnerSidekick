@@ -1,0 +1,110 @@
+import json
+from datetime import date, timedelta
+
+from fastapi.testclient import TestClient
+
+from helpers import add_checkin
+from sidekick import trends, weekly
+from sidekick.api import create_app
+from sidekick.auth import create_token
+from sidekick.config import Config
+from sidekick.connectors.fixture import FixtureConnector
+from sidekick.db import connect, user_db_name
+from sidekick.sync import run_sync
+
+ANCHOR = date(2026, 9, 30)  # a Wednesday
+
+
+def synced(tmp_path, days=60):
+    conn = connect(user_db_name(1, "fixture"))
+    run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, days, 3, max_backfill_days=90)
+    return conn
+
+
+def test_trends_keep_gaps_as_null_and_band_only_when_sufficient(tmp_path):
+    conn = synced(tmp_path)
+    t = trends.build_trends(conn, "fixture", ANCHOR, 90, True)
+    sleep = next(m for m in t["metrics"] if m["metric"] == "sleep_duration")
+    assert len(sleep["points"]) == 90
+    worn_gap = {(ANCHOR + timedelta(days=d)).isoformat() for d in (-44, -43, -42)}  # fixture: watch not worn
+    assert all(p["value"] is None for p in sleep["points"] if p["date"] in worn_gap)
+    assert all(p["value"] is None or p["value"] > 0 for p in sleep["points"])  # never zero-filled
+    assert "median" not in sleep["band"][0]  # the first days have no 14-day history yet
+    assert "median" in sleep["band"][-1]
+
+
+def test_trend_summary_needs_both_periods(tmp_path):
+    conn = synced(tmp_path)
+    s28 = next(m for m in trends.build_trends(conn, "fixture", ANCHOR, 28, True)["metrics"] if m["metric"] == "resting_hr")["summary"]
+    assert s28["enough"] and s28["previous_n"] >= 9 and s28["change"] is not None
+    s90 = next(m for m in trends.build_trends(conn, "fixture", ANCHOR, 90, True)["metrics"] if m["metric"] == "resting_hr")["summary"]
+    assert not s90["enough"] and s90["change"] is None
+
+
+def test_weekly_volume_matches_hand_count(tmp_path):
+    conn = synced(tmp_path)
+    ws = date(2026, 9, 21)
+    r = weekly.build_weekly(conn, "fixture", ws, True)
+    vol = next(f for f in r["findings"] if f["metric"] == "weekly_moving_time")
+    acts = list(conn.activity.find({"local_date": {"$gte": "2026-09-21", "$lte": "2026-09-27"}}))
+    rows = (len(acts), sum(a["moving_s"] for a in acts))
+    assert vol["observed"]["runs"] == rows[0] == 4  # fixture runs Mon, Wed, Fri, Sat
+    assert vol["observed"]["value"] == rows[1]
+    assert r["week_end"] == "2026-09-27" and r["next_week_focus"]["rule"].startswith("F")
+
+
+def test_weekly_pain_takes_priority_and_old_weeks_are_frozen(tmp_path):
+    conn = synced(tmp_path)
+    add_checkin(conn, "p", "2026-09-23", energy=3, pain=True)
+    assert weekly.build_weekly(conn, "fixture", date(2026, 9, 21), True)["next_week_focus"]["rule"] == "F1"
+    weekly.regenerate_weeklies(conn, "fixture", ANCHOR, True)
+    def latest_rev():
+        return conn.report.find_one({"type": "weekly", "subject_key": "2026-08-10"}, sort=[("revision", -1)])["revision"]
+    old = latest_rev()
+    add_checkin(conn, "q", "2026-08-12", energy=3, pain=True)
+    weekly.regenerate_weeklies(conn, "fixture", ANCHOR, True)
+    assert latest_rev() == old
+
+
+def test_revisions_endpoint_lists_history(tmp_path):
+    c = Config(data_dir=tmp_path, source="fixture", timezone="Asia/Jerusalem", backfill_days=(date.today() - ANCHOR).days + 40, refetch_days=3,
+               raw_retention_days=120, request_spacing_s=0)
+    token = create_token(tmp_path, "t")
+    client = TestClient(create_app(c, connector=FixtureConnector(ANCHOR)))
+    h = {"Authorization": f"Bearer {token}"}
+    r1 = client.get("/v1/today", params={"date": "2026-09-30"}, headers=h).json()
+    client.put("/v1/checkins/a", json={"local_date": "2026-09-30", "energy": 1, "client_updated_at": "2026-09-30T06:00:00Z"}, headers=h)
+    r2 = client.get("/v1/today", params={"date": "2026-09-30"}, headers=h).json()
+    revs = client.get("/v1/reports/morning/2026-09-30/revisions", headers=h).json()
+    assert [x["revision"] for x in revs] == [r2["revision"], r1["revision"]]
+    assert client.get(f"/v1/reports/{revs[-1]['id']}", headers=h).json()["revision"] == r1["revision"]
+    assert client.get("/v1/trends", params={"days": 13}, headers=h).status_code == 422
+    for d in (7, 28, 90):  # valid ranges arrive as query strings and must be accepted
+        r = client.get("/v1/trends", params={"days": d}, headers=h)
+        assert r.status_code == 200 and len(r.json()["metrics"][0]["points"]) == d
+
+
+def test_garmin_fitness_normalisation_keeps_garmin_names_and_skips_acwr():
+    from sidekick.connectors.garmin import normalise_fitness
+    race = {"calendarDate": "2026-10-01", "time5K": 1500, "time10K": 3150, "timeHalfMarathon": 7000, "timeMarathon": 15000}
+    ts = {"mostRecentVO2Max": {"generic": {"calendarDate": "2026-09-30", "vo2MaxPreciseValue": 48.6}},
+          "mostRecentTrainingStatus": {"latestTrainingStatusData": {"1": {
+              "primaryTrainingDevice": True, "trainingStatusFeedbackPhrase": "PRODUCTIVE_1", "calendarDate": "2026-10-01",
+              "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 400, "minTrainingLoadChronic": 300.0, "maxTrainingLoadChronic": 500.0,
+                                       "dailyAcuteChronicWorkloadRatio": 1.3, "acwrStatus": "OPTIMAL"}}}}}
+    f = normalise_fitness(race, ts)
+    assert f["race_predictions"]["5k"] == 1500 and f["vo2max"]["value"] == 48.6
+    assert f["training_status"]["phrase"] == "PRODUCTIVE_1" and f["training_status"]["acute_load"] == 400
+    assert "acwr" not in json.dumps(f).lower()  # the load ratio is deliberately not carried
+
+
+def test_records_and_new_best_flag(tmp_path):
+    from sidekick import reports as rp
+    conn = synced(tmp_path)
+    rec = rp.records(conn, "fixture")
+    assert rec["1k"]["best"]["elapsed_s"] > 0 and rec["1k"]["progression"][0]["date"] <= rec["1k"]["best"]["date"]
+    best_run = rec["1k"]["best"]["source_id"]
+    r = rp.build_post_run(conn, "fixture", best_run, True)
+    first_ever = rec["1k"]["progression"][0]["source_id"] == best_run
+    assert r["best_efforts"]["1k"]["is_best"] is (not first_ever)
+    assert r["story"] and "gap_pace_s_per_km" in r["splits"][0]

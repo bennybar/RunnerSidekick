@@ -1,0 +1,648 @@
+package com.bennybar.runnersidekick.ui.settings
+
+import androidx.compose.foundation.layout.width
+import android.Manifest
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bennybar.runnersidekick.Analytics
+import com.bennybar.runnersidekick.data.Repository
+import com.bennybar.runnersidekick.data.local.Units
+import com.bennybar.runnersidekick.data.remote.SettingsDto
+import com.bennybar.runnersidekick.ui.BaseVm
+import com.bennybar.runnersidekick.ui.Format
+import com.bennybar.runnersidekick.ui.components.DemoBadge
+import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.factory
+import com.bennybar.runnersidekick.ui.theme.Appearance
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.Instant
+
+class SettingsVm(repo: Repository) : BaseVm(repo) {
+    val status = repo.status.state(null)
+    val me = repo.me.state(null)
+
+    fun signOut() = launchIo { repo.signOut() }
+    fun deleteAccount() = launchIo { repo.deleteAccount() }
+    // Disconnecting on purpose: Connect Garmin doesn't then open by itself (Settings → Garmin → Connect still does)
+    fun disconnectGarmin() = launchIo { repo.disconnectGarmin(); repo.settings.setGarminPromptSkipped(true); message.value = "Garmin disconnected" }
+    fun connectGarmin(ctx: android.content.Context) = launchIo {
+        val url = repo.garminAuthorizeUrl()
+        androidx.browser.customtabs.CustomTabsIntent.Builder().build().launchUrl(ctx, android.net.Uri.parse(url))
+    }
+    val remote = MutableStateFlow<SettingsDto?>(null)
+    val message = MutableStateFlow<String?>(null)
+
+    init { loadRemote() }
+
+    fun loadRemote() = launchIo { remote.value = repo.remoteSettings() }
+
+    /** Which section sheet is open, and why its last save failed. Kept here, not in the screen, so a save that ends after
+     *  a rotation still closes its sheet, and only its own. */
+    val open = MutableStateFlow<String?>(null)
+    val sheetError = MutableStateFlow<String?>(null)
+    fun openSheet(id: String) { sheetError.value = null; open.value = id }
+    fun closeSheet() { sheetError.value = null; open.value = null }
+
+    /** Runs a sheet's save. Success: closes that sheet (if still open), says [done], refreshes in the background (a
+     *  failed refresh doesn't turn the save into an error). Failure: the sheet stays open with its edits and the error. */
+    private fun saveFrom(sheet: String?, done: String, after: suspend () -> Unit = { repo.refreshAll() }, save: suspend () -> Unit) =
+        viewModelScope.launch {
+            var ok = false
+            runIo { save(); ok = true }
+            if (!ok) {
+                if (sheet != null && open.value == sheet) { sheetError.value = error.value; clearError() }
+                return@launch
+            }
+            if (sheet != null && open.value == sheet) closeSheet()
+            message.value = done
+            launch { runCatching { after() } }  // its errors aren't this save's
+        }
+
+    /** [key]: the setting's name for anonymous usage (never its value). */
+    fun saveRemote(s: SettingsDto, sheet: String? = null, key: String = sheet ?: "settings") = saveFrom(sheet, "Saved") {
+        remote.value = repo.saveRemoteSettings(s)
+        Analytics.track("setting_changed", mapOf("key" to key))
+    }
+
+    /** AI input on this phone or the server. Choosing the phone downloads Gemini Nano first when it isn't there yet. */
+    fun setOwnAiKey(key: String?) = launchIo {
+        repo.settings.setOwnAiKey(key)
+        Analytics.track("setting_changed", mapOf("key" to "own_ai_key"))
+        message.value = if (key.isNullOrBlank()) "Your key was removed" else "Key saved on this phone"
+    }
+
+    // Each is saved on this phone at once and on the server, so a reinstall or a new phone gets it back
+    private fun keep(key: String, v: kotlinx.serialization.json.JsonPrimitive) = viewModelScope.launch {
+        Analytics.track("setting_changed", mapOf("key" to key))
+        repo.savePreference(key, v)
+    }
+    fun setUnits(u: Units) = viewModelScope.launch { repo.settings.setUnits(u) }.also {
+        keep("units", kotlinx.serialization.json.JsonPrimitive(if (u == Units.IMPERIAL) "imperial" else "metric")) }
+    fun setAppearance(a: Appearance) = viewModelScope.launch { repo.settings.setAppearance(a.name) }.also {
+        keep("appearance", kotlinx.serialization.json.JsonPrimitive(a.name)) }
+    fun setNotifications(on: Boolean) = viewModelScope.launch { repo.settings.setNotificationsEnabled(on) }.also {
+        keep("notifications", kotlinx.serialization.json.JsonPrimitive(on)) }
+    fun setAskAboutRuns(on: Boolean) = viewModelScope.launch {
+        repo.settings.setAskAboutRuns(on); Analytics.track("setting_changed", mapOf("key" to "ask_about_runs")) }
+    /** Off: nothing more is sent (the setting itself takes effect at once, through the settings flow). */
+    fun setShareUsage(on: Boolean) = viewModelScope.launch { repo.settings.setShareUsage(on) }
+    fun setBackgroundRefresh(on: Boolean) = viewModelScope.launch { repo.settings.setBackgroundRefresh(on) }.also {
+        keep("background_refresh", kotlinx.serialization.json.JsonPrimitive(on)) }
+
+    fun export(ctx: android.content.Context, uri: Uri) = launchIo {
+        val body = repo.exportJson()
+        withContext(Dispatchers.IO) { ctx.contentResolver.openOutputStream(uri)?.use { it.write(body.toByteArray()) } }
+        message.value = "Exported"
+    }
+
+    fun deleteRemote(scope: String) = launchIo { repo.deleteRemote(scope); message.value = "Deleted" }
+    fun clearLocal() = launchIo { repo.clearLocal(includeCheckins = false); message.value = "Local cache cleared" }
+}
+
+private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+private val GOALS = listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
+private val RACES = listOf("5k" to "5K", "10k" to "10K", "half" to "Half", "marathon" to "Marathon")
+private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onOpenReports: () -> Unit = {},
+                   vm: SettingsVm = viewModel(factory = factory(::SettingsVm))) {
+    val local by vm.settings.collectAsStateWithLifecycle()
+    val me by vm.me.collectAsStateWithLifecycle()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val remote by vm.remote.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val ctx = LocalContext.current
+    var confirm by remember { mutableStateOf<String?>(null) }
+    val open by vm.open.collectAsStateWithLifecycle()  // which section sheet is open (kept in the view model)
+    val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let { vm.export(ctx, it) } }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        vm.setNotifications(granted)
+        if (!granted) vm.message.value = "Notifications permission denied"
+    }
+    LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); vm.clearError() } }
+    val sheetError by vm.sheetError.collectAsStateWithLifecycle()
+    val close = vm::closeSheet
+    LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current)) }  // above the floating bar,
+    ) { padding ->
+        LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp + com.bennybar.runnersidekick.ui.components.LocalNavBarPadding.current),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 40.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Me", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                    if (status?.value?.synthetic == true) DemoBadge()
+                }
+            }
+            // Only a Garmin problem is shown up here; everything else lives in its own section
+            status?.value?.connection?.state?.takeIf { it == "reauth_required" || it == "not_configured" || it == "error" }?.let { st ->
+                item {
+                    Group(tint = Tint.ORANGE) {
+                        row(if (st == "error") "Garmin sync failing" else "Garmin sign-in needed",
+                            supporting = when (st) {
+                                "error" -> status?.value?.connection?.detail ?: "The last sync failed; it retries on its own."
+                                "not_configured" -> "Garmin isn't connected yet: tap Connect next to Garmin below."
+                                else -> "Garmin ended this connection, so syncing is paused: tap Connect next to Garmin below."
+                            },
+                            icon = Icons.Outlined.CloudOff, iconShape = MaterialShapes.Burst)
+                    }
+                }
+            }
+            item {
+                val m = me?.value
+                val s = status?.value
+                val name = m?.email ?: if (m?.role == "owner") "Owner (signed in with a device token)" else "Signed in"
+                Tile(tint = Tint.GREEN) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f), CircleShape),
+                            contentAlignment = Alignment.Center) {
+                            Text(name.first().uppercase(), style = MaterialTheme.typography.titleMedium, color = ink(Tint.GREEN))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(name, style = MaterialTheme.typography.titleMedium)
+                            listOfNotNull(
+                                when (m?.role) { "owner" -> "Server owner"; null -> null; else -> "Member" },
+                                when { s == null -> null; s.synthetic -> "Demo data"; else -> "Garmin" },
+                            ).joinToString(" · ").ifEmpty { null }?.let {
+                                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Group(title = "Reports", tint = Tint.PURPLE) {
+                    row("Morning briefings, run reports, weekly reviews", supporting = "By month, with every version", onClick = onOpenReports)
+                }
+            }
+            item {
+                val s = status?.value
+                val g = s?.garminOfficial
+                Group(title = "Garmin") {
+                    row("Garmin", supporting = when {
+                        s?.synthetic == true -> "Demo data source"
+                        g?.connected == true -> "Connected with Garmin's official sign-in. " + (g.dataImport ?: "")
+                        s != null && !s.garminLinked -> "Not connected. Connect to download your runs, sleep and health data."
+                        s?.connection?.state == "connected" -> "Connected · last fetch ${Format.ago(s.connection.lastSuccessAt?.let { t -> runCatching { Instant.parse(t) }.getOrNull() })}" +
+                            (s.backfill?.oldestDone?.let { d -> " · history from $d" } ?: "")
+                        g?.available == true -> "Not connected"
+                        else -> "Garmin sign-in for members opens once Garmin approves this app"
+                    },
+                        trailing = when {
+                            s == null || s.synthetic -> null
+                            // Garmin ended the connection: Connect again (it replaces the old one)
+                            s.connection.state == "reauth_required" && g?.connected != true -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
+                            g?.connected == true || s.garminLinked -> ({ TextButton(onClick = { confirm = "garmin" }) { Text("Disconnect") } })
+                            g?.available == true -> ({ FilledTonalButton(onClick = { vm.connectGarmin(ctx) }) { Text("Connect") } })
+                            else -> ({ FilledTonalButton(onClick = onConnectGarmin) { Text("Connect") } })
+                        })
+                }
+            }
+            remote?.let { r ->
+                item {
+                    Group(title = "Training") {
+                        row("Training", supporting = listOfNotNull(
+                                r.runningDays.sorted().joinToString(", ") { DAYS[it] }.ifEmpty { "No running days" },
+                                GOALS.firstOrNull { it.first == r.goalType }?.second?.let { "goal: ${it.lowercase()}" },
+                                r.availableMinutes?.let { "$it min a run" }).joinToString(" · "),
+                            onClick = { vm.openSheet("training") })
+                        row("Race", supporting = r.raceDate?.let { d ->
+                                listOfNotNull(r.raceName, RACES.firstOrNull { it.first == r.raceDistance }?.second, Format.shortDate(d),
+                                    r.raceTargetS?.let { "target ${hms(it)}" }).joinToString(" · ") } ?: "No race set",
+                            onClick = { vm.openSheet("race") })
+                        row("About you", supporting = listOfNotNull(
+                                (r.profileSex ?: r.profileDetected?.sex)?.replaceFirstChar(Char::uppercase),
+                                (r.profileBirthDate ?: r.profileDetected?.birthDate)?.let { "born $it" },
+                                if (r.profileSex == null && r.profileBirthDate == null) "from Garmin" else null).joinToString(" · ").ifEmpty { "Not set" },
+                            onClick = { vm.openSheet("about") })
+                        row("VO₂ max for scores", supporting = if (r.vo2Source == "watch")
+                                "Your watch's estimate" else "Runner Sidekick's experimental estimate, from your steady runs on any watch (needs 3 in 60 days)",
+                            trailing = {
+                                val keys = listOf("watch", "sidekick")
+                                com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Watch", "Sidekick"), keys.indexOf(r.vo2Source).takeIf { it >= 0 }, enabled = !busy,
+                                    modifier = Modifier.width(184.dp),
+                                    onSelect = { if (r.vo2Source != keys[it]) vm.saveRemote(r.copy(vo2Source = keys[it]), key = "vo2_source") })
+                            })
+                        row("Fitness age", supporting = if (r.fitnessAgeSource == "sidekick")
+                                "Runner Sidekick's: the age your VO₂ max (as chosen above) is typical for" else "Garmin's (VO₂ max, resting HR, activity, BMI)",
+                            trailing = {
+                                val keys = listOf("garmin", "sidekick")
+                                com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("Garmin", "Sidekick"), keys.indexOf(r.fitnessAgeSource).takeIf { it >= 0 }, enabled = !busy,
+                                    modifier = Modifier.width(184.dp),
+                                    onSelect = { if (r.fitnessAgeSource != keys[it]) vm.saveRemote(r.copy(fitnessAgeSource = keys[it]), key = "fitness_age_source") })
+                            })
+                    }
+                }
+            }
+            item {
+                Group(title = "Appearance") {
+                    custom {
+                        Text("Appearance", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
+                        val now = Appearance.of(local?.appearance)
+                        com.bennybar.runnersidekick.ui.components.ChoiceGroup(Appearance.entries.map { it.label }, now.ordinal, { vm.setAppearance(Appearance.entries[it]) })
+                    }
+                    custom {
+                        Text("Units", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
+                        com.bennybar.runnersidekick.ui.components.ChoiceGroup(Units.entries.map { if (it == Units.METRIC) "Metric (km)" else "Imperial (mi)" },
+                            local?.units?.ordinal, { vm.setUnits(Units.entries[it]) })
+                    }
+                }
+            }
+            item {
+                Group(title = "Notifications") {
+                    row("Morning briefing and run reports", supporting = "Best effort: Android decides exact timing.",
+                        trailing = {
+                            Switch(checked = local?.notificationsEnabled == true, onCheckedChange = { on ->
+                                if (on) permission.launch(Manifest.permission.POST_NOTIFICATIONS) else vm.setNotifications(false)
+                            })
+                        })
+                    row("Background refresh", supporting = if (local?.notificationsEnabled == true)
+                            "Already on with notifications (about hourly)."
+                        else "Keeps today's briefing and your runs ready offline, about every 3 hours. " +
+                            "Garmin itself syncs on the server either way.",
+                        trailing = {
+                            Switch(checked = local?.notificationsEnabled == true || local?.backgroundRefresh == true,
+                                enabled = local?.notificationsEnabled != true, onCheckedChange = vm::setBackgroundRefresh)
+                        })
+                    row("Ask about your newest run", supporting = "When you open Runs: what it was meant to be and how it went, " +
+                            "a few taps. Skipped runs aren't asked again.",
+                        trailing = { Switch(checked = local?.askAboutRuns != false, onCheckedChange = vm::setAskAboutRuns) })
+                    remote?.let { r ->
+                        row("Morning window", supporting = "${r.morningWindowStart}–${r.morningWindowEnd} · the briefing comes once your sleep has synced, " +
+                            "or at the end of the window as provisional", onClick = { vm.openSheet("window") })
+                    }
+                }
+            }
+            remote?.let { r ->
+                item {
+                    val ownKey = local?.hasOwnAiKey == true
+                    Group(title = "AI coach (optional)") {
+                        row("AI coach and summaries",
+                            supporting = when {
+                                ownKey -> "Uses OpenAI with your own key."
+                                r.aiAvailable -> "Uses OpenAI. Off by default."
+                                else -> "Add your own OpenAI key to use it."
+                            },
+                            trailing = { Switch(checked = r.aiEnabled, enabled = !busy && (r.aiAvailable || ownKey || r.aiEnabled),
+                                onCheckedChange = { vm.saveRemote(r.copy(aiEnabled = it), key = "ai_enabled") }) })
+                        row("Your own OpenAI key", supporting = if (ownKey) "Saved on this phone · runs gpt-6.1-sol" else "Optional: the server's key is used otherwise",
+                            onClick = { vm.openSheet("key") })
+                        row("What's sent to the AI", supporting = "Findings and numbers only; never your notes, run names or routes",
+                            onClick = { vm.openSheet("ai_info") })
+                    }
+                }
+                item {
+                    Group(title = "Weather") {
+                        row("Weather for your runs",
+                            supporting = "Temperature and humidity, so hot, humid runs are read fairly. Sends each outdoor run's start area " +
+                                "(rounded to about 1 km) and time to Open-Meteo, nothing else. Off: nothing is sent; estimates already kept stay.",
+                            trailing = { Switch(checked = r.weatherEnabled, enabled = !busy, onCheckedChange = { vm.saveRemote(r.copy(weatherEnabled = it), key = "weather_enabled") }) })
+                    }
+                }
+            }
+            item {
+                Group(title = "Your data") {
+                    row("Share anonymous usage", supporting = "Anonymous app usage (screens and features used) helps improve the app. " +
+                            "Never your runs, health data or server.",
+                        trailing = { Switch(checked = local?.shareUsage != false, onCheckedChange = vm::setShareUsage) })
+                    row("Export all data", supporting = "JSON file with records, check-ins and reports",
+                        onClick = { exporter.launch("runner-sidekick-export.json") })
+                    row("Clear this phone's cache", supporting = "Unsent check-ins are kept", onClick = { confirm = "local" })
+                    row("Delete raw Garmin payloads", supporting = "On the backend. Records and reports stay.", onClick = { confirm = "raw" })
+                    row("Delete everything on the backend", supporting = "Records, reports, check-ins and settings", onClick = { confirm = "all" })
+                    custom {
+                        Text("Health data lives on your backend and in this phone's cache. Android backup and device transfer are turned off for this app; " +
+                            "your server's own backups may still include its data folder.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
+                Group(title = "Account") {
+                    row("Server", supporting = (local?.backendUrl?.ifBlank { null } ?: "Not set") +
+                        "\nTo use another server, sign out and sign in with its address.")
+                    row("Sign out", supporting = "Removes the token and cached data from this phone", onClick = { confirm = "signout" })
+                    if (me?.value?.role == "member") row("Delete my account", supporting = "Deletes all your data on the server and disconnects Garmin",
+                        onClick = { confirm = "account" })
+                }
+            }
+            item {
+                Group(title = "About") {
+                    row("Runner Sidekick", supporting = "Guidance only, not medical advice. Garmin data via an unofficial, read-only connector.")
+                }
+            }
+        }
+    }
+    val r = remote
+    when (open) {
+        "training" -> r?.let { TrainingSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "training") } }
+        "race" -> r?.let { RaceSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "race") } }
+        "about" -> r?.let { AboutYouSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "about") } }
+        "window" -> r?.let { WindowSheet(it, busy, sheetError, onClose = close) { s -> vm.saveRemote(s, "window") } }
+        "key" -> KeySheet(local?.hasOwnAiKey == true, onClose = close) { k -> vm.setOwnAiKey(k); close() }
+        "ai_info" -> SectionSheet("What's sent to the AI", dirty = false, canSave = false, onSave = {}, onClose = close) {
+            Text("Runs get AI input automatically on the server: each new run, and your latest 3 runs whenever one has none yet (a failed " +
+                "try is tried again after 6 hours). At most 3 per sync, never using the last 5 AI calls of the day. Older runs: tap Get AI " +
+                "input. There's no free-text chat with the AI.", style = MaterialTheme.typography.bodyMedium)
+            Text("What is sent: finding titles, statuses, values and ranges. Never your notes, run names, routes or identifiers. Numbers in " +
+                "summaries are filled in from the report, not written by the AI. If its output doesn't pass checks, nothing is shown.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    confirm?.let { scope ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text(when (scope) { "signout" -> "Sign out?"; "account" -> "Delete your account?"; "garmin" -> "Disconnect Garmin?"; else -> "Delete data?" }) },
+            text = {
+                Text(when (scope) {
+                    "local" -> "Removes cached reports and runs from this phone. Unsent check-ins are kept."
+                    "raw" -> "Removes stored Garmin source payloads. Normalised records and reports stay."
+                    "signout" -> "You can sign in again any time. Unsent check-ins stay on this phone."
+                    "garmin" -> "Syncing stops and the server forgets this Garmin connection. Data already downloaded stays. You can connect again any time."
+                    "account" -> "Permanently deletes all your health data, reports and check-ins on the server, and disconnects Garmin. This can't be undone."
+                    else -> "Removes all records, reports, check-ins and settings from the backend and this phone. Garmin sign-in tokens aren't affected. This can't be undone."
+                })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    when (scope) {
+                        "local" -> vm.clearLocal()
+                        "signout" -> vm.signOut()
+                        "account" -> vm.deleteAccount()
+                        "garmin" -> vm.disconnectGarmin()
+                        else -> vm.deleteRemote(scope)
+                    }
+                    confirm = null
+                }) { Text(when (scope) { "signout" -> "Sign out"; "garmin" -> "Disconnect"; else -> "Delete" }) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+
+
+/** One section's sheet with its own Save. Closing it with unsaved edits asks first, so nothing is lost silently. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SectionSheet(title: String, dirty: Boolean, canSave: Boolean, onSave: () -> Unit, onClose: () -> Unit,
+                         error: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    var ask by remember { mutableStateOf(false) }
+    val dirtyNow by androidx.compose.runtime.rememberUpdatedState(dirty)
+    val state = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { v ->
+        if (v == androidx.compose.material3.SheetValue.Hidden && dirtyNow) { ask = true; false } else true
+    })
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = { if (dirtyNow) ask = true else onClose() }, sheetState = state) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall)
+            content()
+            error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+            if (canSave || dirty) Button(onClick = onSave, enabled = canSave && dirty, modifier = Modifier.fillMaxWidth()) {
+                Text(if (dirty) "Save" else "Saved")
+            }
+        }
+    }
+    if (ask) AlertDialog(onDismissRequest = { ask = false }, title = { Text("Discard changes?") },
+        text = { Text("Your edits in $title haven't been saved.") },
+        confirmButton = { TextButton(onClick = { ask = false; onClose() }) { Text("Discard") } },
+        dismissButton = { TextButton(onClick = { ask = false }) { Text("Keep editing") } })
+}
+
+@Composable
+private fun Label(text: String, hint: String? = null) {
+    Column {
+        Text(text, style = MaterialTheme.typography.titleMedium)
+        hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TrainingSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var days by rememberSaveable { mutableStateOf(r.runningDays.toSet()) }
+    var goalType by rememberSaveable { mutableStateOf(r.goalType) }
+    var goal by rememberSaveable { mutableStateOf(r.goal ?: "") }
+    var minutes by rememberSaveable { mutableStateOf(r.availableMinutes?.toString() ?: "") }
+    var weekStart by rememberSaveable { mutableStateOf(r.weekStartDay) }
+    var zones by rememberSaveable { mutableStateOf(r.hrZoneSource) }
+    var tz by rememberSaveable { mutableStateOf(r.timezone) }
+    val phoneTz = java.time.ZoneId.systemDefault().id
+    val tzOk = runCatching { java.time.ZoneId.of(tz.trim()) }.isSuccess
+    val edited = r.copy(runningDays = days.sorted(), goalType = goalType, goal = goal.ifBlank { null }, availableMinutes = minutes.toIntOrNull(),
+        weekStartDay = weekStart, hrZoneSource = zones, timezone = tz.trim())
+    SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose, error = error) {
+        Label("Running days")
+        com.bennybar.runnersidekick.ui.components.ToggleRow(DAYS, { it in days }, { i -> days = if (i in days) days - i else days + i })
+        Label("Main goal", "Orders the weekly focus suggestions.")
+        com.bennybar.runnersidekick.ui.components.ToggleRow(GOALS.map { it.second }, { goalType == GOALS[it].first }, { i -> val k = GOALS[i].first; goalType = if (goalType == k) null else k })
+        OutlinedTextField(goal, { goal = it.take(200) }, label = { Text("Goal in your words (optional)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(minutes, { minutes = it.filter(Char::isDigit).take(3) }, label = { Text("Usual time per run (min)") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+        Label("Week starts on", if (weekStart == null) "Now: ${r.weekStartEffective.replaceFirstChar(Char::uppercase)} (from Garmin, or Monday)."
+            else "Used for weekly reviews, the weekly focus, Activities and charts.")
+        val starts = listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
+        com.bennybar.runnersidekick.ui.components.ToggleRow(starts.map { it.second }, { weekStart == starts[it].first }, { weekStart = starts[it].first })
+        Label("Heart-rate zones")
+        val zoneKeys = listOf("garmin", "none")
+        com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("From Garmin", "Don't use"), zoneKeys.indexOf(zones).takeIf { it >= 0 }, { zones = zoneKeys[it] })
+        Label("Time zone", "Decides when your day starts and ends.")
+        OutlinedTextField(tz, { tz = it }, singleLine = true, isError = !tzOk, modifier = Modifier.fillMaxWidth(),
+            supportingText = { if (!tzOk) Text("Not a time zone name, e.g. Europe/London") })
+        if (tz.trim() != phoneTz) TextButton(onClick = { tz = phoneTz }) { Text("Use this phone's ($phoneTz)") }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun RaceSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var dist by rememberSaveable { mutableStateOf(r.raceDistance) }
+    var date by rememberSaveable { mutableStateOf(r.raceDate) }
+    var name by rememberSaveable { mutableStateOf(r.raceName ?: "") }
+    val t0 = r.raceTargetS ?: 0
+    var h by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "${t0 / 3600}" else "") }
+    var m by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 3600 / 60) else "") }
+    var s by rememberSaveable { mutableStateOf(if (r.raceTargetS != null) "%02d".format(t0 % 60) else "") }
+    var picking by remember { mutableStateOf(false) }
+    val target = if (h.isBlank() && m.isBlank() && s.isBlank()) null
+        else ((h.toIntOrNull() ?: 0) * 3600 + (m.toIntOrNull() ?: 0) * 60 + (s.toIntOrNull() ?: 0)).takeIf { (m.toIntOrNull() ?: 0) < 60 && (s.toIntOrNull() ?: 0) < 60 && it in 600..36000 }
+    val targetOk = (h.isBlank() && m.isBlank() && s.isBlank()) || target != null
+    val edited = r.copy(raceDistance = dist, raceDate = date, raceName = name.trim().ifBlank { null }, raceTargetS = target)
+    SectionSheet("Race", dirty = edited != r, canSave = !busy && targetOk && ((date == null) == (dist == null)), onSave = { onSave(edited) }, onClose = onClose, error = error) {
+        Text("The weekly focus, Today and the AI coach plan backwards from it: base, build, sharpen, taper, race week.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Label("Distance")
+        com.bennybar.runnersidekick.ui.components.ToggleRow(RACES.map { it.second }, { dist == RACES[it].first }, { i -> val k = RACES[i].first; dist = if (dist == k) null else k })
+        Label("Date")
+        OutlinedButton(onClick = { picking = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(date?.let { Format.longDate(it) } ?: "Choose the race date")
+        }
+        if ((date == null) != (dist == null)) Text("Set both a distance and a date, or neither", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error)
+        Label("Target time (optional)")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(Triple(h, "h") { v: String -> h = v }, Triple(m, "min") { v: String -> m = v }, Triple(s, "s") { v: String -> s = v })
+                .forEach { (v, l, set) ->
+                    OutlinedTextField(v, { set(it.filter(Char::isDigit).take(2)) }, label = { Text(l) }, singleLine = true, isError = !targetOk,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+        }
+        OutlinedTextField(name, { name = it.take(60) }, label = { Text("Race name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (dist != null || date != null) TextButton(onClick = { dist = null; date = null; h = ""; m = ""; s = ""; name = "" }) { Text("Remove race") }
+    }
+    if (picking) DateDialog(date, future = true, onClose = { picking = false }) { date = it; picking = false }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AboutYouSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var sex by rememberSaveable { mutableStateOf(r.profileSex) }
+    var birth by rememberSaveable { mutableStateOf(r.profileBirthDate) }
+    var picking by remember { mutableStateOf(false) }
+    val edited = r.copy(profileSex = sex, profileBirthDate = birth)
+    SectionSheet("About you", dirty = edited != r, canSave = !busy, onSave = { onSave(edited) }, onClose = onClose, error = error) {
+        val det = r.profileDetected
+        Text(if (det?.sex != null || det?.birthDate != null) "From Garmin: ${listOfNotNull(det.sex, det.birthDate).joinToString(", ")}. Set these only to override Garmin."
+            else "Garmin didn't provide these; set them to see age and sex comparisons.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Label("Sex")
+        val sexes = listOf(null to "As in Garmin", "male" to "Male", "female" to "Female")
+        com.bennybar.runnersidekick.ui.components.ChoiceGroup(sexes.map { it.second }, sexes.indexOfFirst { it.first == sex }.takeIf { it >= 0 }, { sex = sexes[it].first })
+        Label("Birth date")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f)) { Text(birth?.let { Format.longDate(it) } ?: "As in Garmin") }
+            if (birth != null) TextButton(onClick = { birth = null }) { Text("Use Garmin's") }
+        }
+    }
+    if (picking) DateDialog(birth ?: "1985-01-01", future = false, onClose = { picking = false }) { birth = it; picking = false }
+}
+
+@Composable
+private fun WindowSheet(r: SettingsDto, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (SettingsDto) -> Unit) {
+    var start by rememberSaveable { mutableStateOf(r.morningWindowStart) }
+    var end by rememberSaveable { mutableStateOf(r.morningWindowEnd) }
+    var picking by remember { mutableStateOf<String?>(null) }
+    val edited = r.copy(morningWindowStart = start, morningWindowEnd = end)
+    SectionSheet("Morning window", dirty = edited != r, canSave = !busy && start < end, onSave = { onSave(edited) }, onClose = onClose, error = error) {
+        Text("The briefing is sent once your sleep has synced, or at the end of the window as provisional.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { picking = "start" }, modifier = Modifier.weight(1f)) { Text("From $start") }
+            OutlinedButton(onClick = { picking = "end" }, modifier = Modifier.weight(1f)) { Text("Until $end") }
+        }
+        if (start >= end) Text("The window has to end after it starts", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    }
+    picking?.let { which ->
+        TimeDialog(if (which == "start") start else end, onClose = { picking = null }) { v -> if (which == "start") start = v else end = v; picking = null }
+    }
+}
+
+@Composable
+private fun KeySheet(ownKey: Boolean, onClose: () -> Unit, onSave: (String?) -> Unit) {
+    var key by remember { mutableStateOf("") }
+    SectionSheet("Your own OpenAI key", dirty = key.isNotBlank(), canSave = key.startsWith("sk-"), onSave = { onSave(key) }, onClose = onClose) {
+        Text("Encrypted on this phone and sent only with AI requests. The server uses it for that request and never stores it.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(key, { key = it.trim() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            label = { Text(if (ownKey) "Saved · enter a new key to replace" else "sk-…") }, visualTransformation = PasswordVisualTransformation())
+        if (ownKey) TextButton(onClick = { onSave(null) }) { Text("Remove saved key") }
+    }
+}
+
+/** A Material date picker for a "YYYY-MM-DD" value. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateDialog(value: String?, future: Boolean, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val start = value?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+    val today = java.time.LocalDate.now()
+    val state = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = start?.atStartOfDay(java.time.ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
+        selectableDates = object : androidx.compose.material3.SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                val d = Instant.ofEpochMilli(utcTimeMillis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                return if (future) !d.isBefore(today.minusDays(30)) else d.isBefore(today)
+            }
+        })
+    androidx.compose.material3.DatePickerDialog(onDismissRequest = onClose,
+        confirmButton = { TextButton(onClick = { state.selectedDateMillis?.let { ms ->
+            onPick(Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()) } }, enabled = state.selectedDateMillis != null) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } }) {
+        androidx.compose.material3.DatePicker(state)
+    }
+}
+
+/** A Material time picker for an "HH:MM" value. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeDialog(value: String, onClose: () -> Unit, onPick: (String) -> Unit) {
+    val (h0, m0) = value.split(":").let { (it.getOrNull(0)?.toIntOrNull() ?: 6) to (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+    val state = androidx.compose.material3.rememberTimePickerState(initialHour = h0, initialMinute = m0, is24Hour = true)
+    AlertDialog(onDismissRequest = onClose, text = { androidx.compose.material3.TimePicker(state) },
+        confirmButton = { TextButton(onClick = { onPick("%02d:%02d".format(state.hour, state.minute)) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } })
+}
+

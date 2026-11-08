@@ -1,0 +1,360 @@
+"""Synchronisation: bounded, resumable backfill plus an incremental window that re-fetches recent days.
+
+Ordering within a run (newest first so Today is useful early):
+  1. incremental: today back to (newest_done - refetch_days), catching late sleep and revised activities
+  2. backfill: continues from (oldest_done - 1) towards backfill_target, at most `max_backfill_days` per run
+Progress is committed per day, so an interrupted run resumes where it stopped.
+
+Failure policy:
+  * AuthRequired  -> state reauth_required; no automatic retries until `garmin-login` succeeds.
+  * RateLimited   -> exponential backoff with jitter (15 min doubling, capped at 6 h), persisted.
+  * SourceUnavailable -> the same backoff, starting at 2 min. The library has already retried 5xx 3 times.
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+
+from .connectors.base import AuthRequired, Capability, Connector, ConnectionState, RateLimited, SourceUnavailable
+from pymongo.database import Database
+
+from .db import get_setting, next_id, one, set_setting, utc_now
+from .store import activity_hash, is_deleted, purge_raw, save_activity, save_day
+
+REFETCH_EVERY_H = 6  # recent activities (within refetch_days) are re-read at most this often, for late samples/laps
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class SyncResult:
+    outcome: str
+    detail: str | None = None
+    changed_dates: set[str] = field(default_factory=set)
+    changed_activities: list[str] = field(default_factory=list)
+    days_fetched: int = 0
+    activities_fetched: int = 0
+    job_id: int | None = None
+    skipped: list[str] = field(default_factory=list)  # records that couldn't be read; the rest of the sync goes on
+
+
+def report_progress(conn, job_id: int | None, fraction: float, phase: str) -> None:
+    """How far a sync has got (0–1) and what it's doing, for the app's progress bar."""
+    if job_id is not None:
+        conn.sync_job.update_one({"id": job_id}, {"$set": {"progress": round(min(max(fraction, 0.0), 1.0), 3), "phase": phase}})
+
+
+def backoff_seconds(failures: int, base: float, cap: float = 6 * 3600, rng: random.Random | None = None) -> float:
+    rng = rng or random.Random()
+    return min(cap, base * (2 ** max(0, failures - 1))) * (0.5 + 0.5 * rng.random())
+
+
+CONNECTION_DEFAULTS = {"state": "not_configured", "detail": None, "last_attempt_at": None, "last_success_at": None,
+                       "retry_not_before": None, "consecutive_failures": 0, "capabilities": {}}
+
+
+def get_connection_row(conn: Database, source: str) -> dict | None:
+    return one(conn.source_connection, {"source": source})
+
+
+def set_connection(conn: Database, source: str, **fields) -> None:
+    conn.source_connection.update_one({"source": source}, {"$setOnInsert": {k: v for k, v in CONNECTION_DEFAULTS.items() if k not in fields},
+                                                           "$set": fields} if fields else
+                                      {"$setOnInsert": CONNECTION_DEFAULTS}, upsert=True)
+
+
+def mark_reconnected(conn: Database, source: str) -> None:
+    """Called after a successful interactive login: clears the auth block."""
+    set_connection(conn, source, state=ConnectionState.CONNECTED.value, detail=None, consecutive_failures=0, retry_not_before=None)
+
+
+FITNESS_EVERY_H = 3      # Garmin's fitness snapshot: after a new run, otherwise every 3 hours
+META_EVERY_H = 24        # heart-rate zones and profile
+FULL_LIST_EVERY_H = 24   # the full activity history listing
+RECENT_LIST_DAYS = 7     # otherwise only this many days are listed
+CORE_DAY_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
+
+
+def _hours_ago(h: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat().replace("+00:00", "Z")
+
+
+def day_complete(conn, source: str, d: date) -> bool:
+    """All of a day's core readings are in: re-reading it can't add anything the advice uses."""
+    return conn.daily_observation.count_documents({"source": source, "local_date": d.isoformat(), "metric": {"$in": list(CORE_DAY_METRICS)},
+                                                   "state": "measured"}) == len(CORE_DAY_METRICS)
+
+
+def _checkpoint(conn, source, stream, target: str) -> dict:
+    key = {"source": source, "stream": stream}
+    conn.sync_checkpoint.update_one(key, {"$setOnInsert": {"backfill_target": target, "oldest_done": None, "newest_done": None,
+                                                           "updated_at": utc_now()}}, upsert=True)
+    # A larger backfill configured later extends the target further back
+    conn.sync_checkpoint.update_one({**key, "backfill_target": {"$gt": target}}, {"$set": {"backfill_target": target}})
+    return one(conn.sync_checkpoint, key)
+
+
+def _update_checkpoint(conn, source, stream, **fields) -> None:
+    conn.sync_checkpoint.update_one({"source": source, "stream": stream}, {"$set": {**fields, "updated_at": utc_now()}})
+
+
+LEASE_MIN = 20  # a sync that died without releasing its lease frees it after this
+
+
+def take_lease(conn: Database, now: datetime) -> str | None:
+    """A token for this sync's lease, or None while another sync holds it."""
+    import secrets as _secrets
+    from pymongo.errors import DuplicateKeyError
+    stamp = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    until = (now + timedelta(minutes=LEASE_MIN)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    holder = _secrets.token_hex(8)
+    try:
+        conn.sync_lease.update_one({"_id": "sync", "until": {"$lt": stamp}}, {"$set": {"until": until, "holder": holder}}, upsert=True)
+        return holder
+    except DuplicateKeyError:
+        return None  # held by a sync that's still running
+
+
+def release_lease(conn: Database, holder: str | None = None) -> None:
+    """Frees the lease only if this sync still holds it (one that outlived its lease mustn't free a newer sync's)."""
+    conn.sync_lease.delete_one({"_id": "sync", **({"holder": holder} if holder else {})})
+
+
+def run_sync(conn: Database, connector: Connector, today: date, backfill_days: int, refetch_days: int,
+             raw_retention_days: int = 120, max_backfill_days: int = 30, max_activity_details: int = 60,
+             force: bool = False, now: datetime | None = None) -> SyncResult:
+    source = connector.source
+    now = now or datetime.now(timezone.utc)
+    set_connection(conn, source)
+    row = get_connection_row(conn, source)
+    if row["state"] == ConnectionState.REAUTH_REQUIRED.value and not force:
+        return SyncResult("auth_failed", "Garmin needs connecting again: Settings → Garmin in the app")
+    if row["retry_not_before"] and not force and row["retry_not_before"] > now.isoformat().replace("+00:00", "Z"):
+        return SyncResult("deferred", f"Backing off until {row['retry_not_before']}")
+    if connector.connection_state() == ConnectionState.NOT_CONFIGURED:
+        set_connection(conn, source, state=ConnectionState.NOT_CONFIGURED.value, detail="No credentials configured")
+        return SyncResult("auth_failed", "Source not configured")
+
+    # One sync per user at a time, across processes (the hourly job and the API): a lease in the user's database
+    lease = take_lease(conn, now)
+    if lease is None:
+        return SyncResult("deferred", "Another sync is running")
+    target = (today - timedelta(days=backfill_days - 1)).isoformat()
+    job_id = next_id(conn, "sync_job")
+    conn.sync_job.insert_one({"id": job_id, "source": source, "kind": "sync", "started_at": utc_now(), "finished_at": None, "outcome": None,
+                              "detail": None, "days_fetched": 0, "activities_fetched": 0})
+    set_connection(conn, source, last_attempt_at=utc_now())
+    res = SyncResult("ok", job_id=job_id)
+    report_progress(conn, job_id, 0.02, "Connecting to Garmin")
+    try:
+        _sync_days(conn, connector, today, target, refetch_days, max_backfill_days, res)
+        _sync_activities(conn, connector, today, target, refetch_days, max_activity_details, res)
+        prev_fit = get_setting(conn, "garmin_fitness", None) or {}
+        fit_due = bool(res.changed_activities) or (prev_fit.get("fetched_at") or "") < _hours_ago(FITNESS_EVERY_H)
+        report_progress(conn, job_id, 0.85, "Reading Garmin's fitness numbers")
+        if hasattr(connector, "fitness_snapshot") and fit_due:
+            snap = connector.fitness_snapshot(today)
+            if snap:
+                # Garmin sometimes leaves a part out (e.g. no VO2 max early in the day, or one call failing): keep the last
+                # known value of anything not returned this time instead of wiping it
+                prev = get_setting(conn, "garmin_fitness", None) or {}
+                merged = {**prev, **{k: v for k, v in snap.items() if v not in (None, {}, [])}}
+                merged["fetched_at"] = utc_now()
+                set_setting(conn, "garmin_fitness", merged)
+                # Garmin's training status and load by the day it's for (it only says "latest"): a run's export shows the
+                # status as of its own day, not today's
+                st, lb = snap.get("training_status") or {}, snap.get("load_balance") or {}
+                if st.get("date"):
+                    hist = {r["date"]: r for r in get_setting(conn, "garmin_status_history", None) or []}
+                    hist[st["date"]] = {**{k: st.get(k) for k in ("date", "phrase", "acute_load", "chronic_min", "chronic_max")},
+                                        "load_focus": lb.get("trainingBalanceFeedbackPhrase")}
+                    set_setting(conn, "garmin_status_history", [hist[k] for k in sorted(hist)][-400:])
+        # Garmin's threshold and race-prediction histories: with the fitness numbers. Extras: Garmin failing on one of them
+        # doesn't fail the sync (a sign-in problem or rate limit still does)
+        for fn, key in (("threshold_history", "garmin_threshold"), ("prediction_history", "garmin_predictions")):
+            if hasattr(connector, fn) and fit_due:
+                try:
+                    got = getattr(connector, fn)(today)
+                except (AuthRequired, RateLimited):
+                    raise
+                except Exception as e:
+                    log.warning("%s skipped: %s", fn, type(e).__name__)
+                    got = None
+                if got:
+                    set_setting(conn, key, got)
+        # Garmin's all-time personal records change only with a new run: with the fitness numbers
+        if hasattr(connector, "personal_records") and fit_due:
+            recs = connector.personal_records()
+            if recs is not None:
+                set_setting(conn, "garmin_records", {"records": recs, "fetched_at": utc_now()})
+        # Zones and the profile (sex, birth date, week start) rarely change: once a day
+        meta_due = (get_setting(conn, "source_meta_at", None) or "") < _hours_ago(META_EVERY_H)
+        if hasattr(connector, "hr_zones") and meta_due:
+            zones = connector.hr_zones()
+            if zones:
+                set_setting(conn, "source_hr_zones", zones)
+        if hasattr(connector, "profile") and meta_due:
+            prof = connector.profile()
+            if prof:
+                set_setting(conn, "source_profile", prof)
+        if meta_due:
+            set_setting(conn, "source_meta_at", utc_now())
+        purge_raw(conn, raw_retention_days)
+        _record_capabilities(conn, connector)
+        set_connection(conn, source, state=ConnectionState.CONNECTED.value, detail=None, last_success_at=utc_now(),
+                       consecutive_failures=0, retry_not_before=None)
+    except AuthRequired as e:
+        res.outcome, res.detail = "auth_failed", str(e)
+        set_connection(conn, source, state=ConnectionState.REAUTH_REQUIRED.value, detail=str(e))
+    except (RateLimited, SourceUnavailable) as e:
+        limited = isinstance(e, RateLimited)
+        res.outcome, res.detail = ("rate_limited" if limited else "error"), str(e)
+        failures = (row["consecutive_failures"] or 0) + 1
+        wait = backoff_seconds(failures, 900 if limited else 120)
+        set_connection(conn, source, state=(ConnectionState.RATE_LIMITED if limited else ConnectionState.ERROR).value,
+                       detail=str(e), consecutive_failures=failures,
+                       retry_not_before=(now + timedelta(seconds=wait)).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
+    except Exception as e:  # anything else (a parsing bug, a database error): the job ends as a failure with a back-off
+        log.exception("sync failed")
+        res.outcome, res.detail = "error", f"{type(e).__name__}: {e}"[:300]
+        failures = (row["consecutive_failures"] or 0) + 1
+        set_connection(conn, source, state=ConnectionState.ERROR.value, detail=res.detail, consecutive_failures=failures,
+                       retry_not_before=(now + timedelta(seconds=backoff_seconds(failures, 120))).replace(microsecond=0)
+                       .isoformat().replace("+00:00", "Z"))
+    finally:
+        release_lease(conn, lease)
+    if res.skipped and res.outcome == "ok":
+        res.detail = f"Skipped {len(res.skipped)} record{'s' if len(res.skipped) != 1 else ''} Garmin sent that couldn't be read"
+    conn.sync_job.update_one({"id": job_id}, {"$set": {"finished_at": utc_now(), "outcome": res.outcome, "detail": res.detail,
+                                                       "days_fetched": res.days_fetched, "activities_fetched": res.activities_fetched}})
+    return res
+
+
+def _sync_days(conn, connector, today: date, target: str, refetch_days: int, max_backfill: int, res: SyncResult) -> None:
+    source = connector.source
+    cp = _checkpoint(conn, source, "days", target)
+    newest_done = date.fromisoformat(cp["newest_done"]) if cp["newest_done"] else None
+    inc_start = max(date.fromisoformat(target), (newest_done or today) - timedelta(days=refetch_days))
+    # Today and yesterday are always re-read (sleep and summaries arrive late); older days of the window only while one
+    # of their core readings is still missing. Each skipped day saves six Garmin calls.
+    todo = [inc_start + timedelta(days=k) for k in range((today - inc_start).days + 1)]
+    todo = [d for d in todo if not (d < today - timedelta(days=1) and day_complete(conn, source, d))]
+    for i, d in enumerate(todo):
+        report_progress(conn, res.job_id, 0.05 + 0.45 * i / len(todo), "Reading your days from Garmin")
+        try:
+            bundles = list(connector.read_days(d, d))  # read_days is lazy: reading happens here, inside the guard
+        except (AuthRequired, RateLimited, SourceUnavailable):
+            raise
+        except Exception as e:  # one unreadable day doesn't stop the sync
+            log.warning("skipped day %s: %s", d, e)
+            res.skipped.append(f"day:{d}")
+            continue
+        for b in bundles:
+            res.changed_dates |= save_day(conn, source, b)
+            oldest = min(b.local_date, cp["oldest_done"] or b.local_date)
+            _update_checkpoint(conn, source, "days", oldest_done=oldest)
+            cp = one(conn.sync_checkpoint, {"source": source, "stream": "days"})
+            res.days_fetched += 1
+    _update_checkpoint(conn, source, "days", newest_done=today.isoformat())
+    if cp["oldest_done"] is None:
+        return
+    oldest_done = date.fromisoformat(cp["oldest_done"])
+    bf_end = oldest_done - timedelta(days=1)
+    bf_start = max(date.fromisoformat(target), bf_end - timedelta(days=max_backfill - 1))
+    if bf_end >= bf_start:
+        report_progress(conn, res.job_id, 0.5, "Reading earlier days from Garmin")
+        d = bf_end
+        while d >= bf_start:  # newest first, one day at a time, so one unreadable day is passed over, not retried forever
+            try:
+                bundles = list(connector.read_days(d, d))
+            except (AuthRequired, RateLimited, SourceUnavailable):
+                raise
+            except Exception as e:
+                log.warning("skipped day %s: %s", d, e)
+                res.skipped.append(f"day:{d}")
+                bundles = []
+            for b in bundles:
+                res.changed_dates |= save_day(conn, source, b)
+                res.days_fetched += 1
+            _update_checkpoint(conn, source, "days", oldest_done=d.isoformat())
+            d -= timedelta(days=1)
+
+
+def _sync_activities(conn, connector, today: date, target: str, refetch_days: int, max_details: int, res: SyncResult) -> None:
+    source = connector.source
+    cp = _checkpoint(conn, source, "activities", target)
+    # The whole history is listed once a day, or until every activity has been read; otherwise only the last week
+    # (Garmin pages the list, so the full history is several requests)
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=FULL_LIST_EVERY_H)).isoformat().replace("+00:00", "Z")
+    full = not cp.get("complete") or (cp.get("full_listed_at") or "") < day_ago
+    start = date.fromisoformat(target) if full else max(date.fromisoformat(target), today - timedelta(days=max(refetch_days, RECENT_LIST_DAYS)))
+    summaries = connector.list_activities(start, today)
+    # Newest first, so a bounded run covers recent activities before old ones
+    summaries.sort(key=lambda s: s["start"], reverse=True)
+    fetched = 0
+    recent = (today - timedelta(days=refetch_days)).isoformat()
+    stale_before = (datetime.now(timezone.utc) - timedelta(hours=REFETCH_EVERY_H)).isoformat().replace("+00:00", "Z")
+    todo = []
+    for s in summaries:
+        if is_deleted(conn, s["source_id"]):  # deleted by the runner: not downloaded again
+            continue
+        if activity_hash(conn, source, s["source_id"]) == s["content_hash"]:
+            # Samples and laps can arrive or be corrected after the summary; re-read recent runs now and then
+            row = one(conn.activity, {"source": source, "source_id": s["source_id"]})
+            if not (row and row["local_date"] >= recent and row["updated_at"] < stale_before):
+                continue
+        todo.append(s)
+    report_progress(conn, res.job_id, 0.55, "Checking your runs")
+    for s in todo:
+        report_progress(conn, res.job_id, 0.55 + 0.3 * fetched / min(len(todo), max_details), "Reading your runs")
+        if fetched >= max_details:
+            res.outcome = "partial"
+            res.detail = "Activity detail limit reached for this run; next sync continues"
+            break
+        try:
+            a = connector.read_activity(s)
+        except (AuthRequired, RateLimited, SourceUnavailable):
+            raise
+        except Exception as e:  # one activity Garmin sent in an odd shape doesn't stop the others
+            log.warning("skipped activity %s: %s", s.get("source_id"), e)
+            res.skipped.append(f"activity:{s.get('source_id')}")
+            continue
+        save_activity(conn, source, a, s["content_hash"])
+        fetched += 1
+        res.changed_activities.append(a.source_id)
+        res.changed_dates.add(a.local_date)
+    res.activities_fetched = fetched
+    done = res.outcome != "partial"
+    _update_checkpoint(conn, source, "activities", newest_done=today.isoformat(), complete=done or (bool(cp.get("complete")) and not full),
+                       **({"full_listed_at": utc_now()} if full and done else {}))
+
+
+def _record_capabilities(conn, connector) -> None:
+    declared = connector.capabilities()
+    observed = {r["_id"]: (r["measured"], r["total"]) for r in conn.daily_observation.aggregate([
+        {"$match": {"source": connector.source}},
+        {"$group": {"_id": "$metric", "measured": {"$sum": {"$cond": [{"$eq": ["$state", "measured"]}, 1, 0]}}, "total": {"$sum": 1}}}])}
+    caps = {}
+    for m, cap in declared.items():
+        measured, total = observed.get(m, (0, 0))
+        state = Capability.SUPPORTED.value if measured else (cap.value if cap != Capability.SUPPORTED else "supported_not_observed")
+        if cap == Capability.UNKNOWN and total and not measured:
+            state = "not_observed"
+        caps[m] = {"state": state, "days_measured": measured, "days_fetched": total}
+    set_connection(conn, connector.source, capabilities=caps)
+
+
+# ---------------------------------------------------------------- manual sync
+
+def next_manual_sync(conn: Database, source: str, now: datetime | None = None) -> datetime | None:
+    """When a manual sync may next call Garmin, or None when it may now. Only Garmin's own back-off holds it (when
+    Garmin asked us to wait, ignoring it risks the account); the app adds no cooldown of its own."""
+    now = now or datetime.now(timezone.utc)
+    row = get_connection_row(conn, source)
+    if row and row.get("retry_not_before"):
+        rb = datetime.fromisoformat(row["retry_not_before"].replace("Z", "+00:00"))
+        return rb if rb > now else None
+    return None

@@ -1,0 +1,50 @@
+# Runner Sidekick, self-hosted: the API, MongoDB and the hourly Garmin sync. See docs/SELF_HOSTING.md.
+#   cp .env.example .env   # then edit
+#   docker compose up -d
+
+x-backend: &backend
+  build: ./backend
+  image: runnersidekick-backend
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    RSK_MONGO_URI: mongodb://mongo:27017
+    RSK_DATA_DIR: /data
+    RSK_TIMEZONE: ${RSK_TIMEZONE:-UTC}
+    # The port is published on 127.0.0.1 only, so whatever reaches it is the local reverse proxy: trust its
+    # X-Forwarded-For, so the per-address rate limit sees real client addresses
+    FORWARDED_ALLOW_IPS: "*"
+  volumes:
+    - sidekick-data:/data
+  depends_on:
+    mongo:
+      condition: service_healthy
+
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    <<: *backend
+    # Only on this machine: a reverse proxy in front adds HTTPS (the apps need an https address)
+    ports:
+      - "127.0.0.1:8765:8765"
+
+  sync:
+    <<: *backend
+    # The same sync the API's "sync now" runs, for every connected user, once an hour
+    command: ["sh", "-c", "while true; do python -m sidekick sync; sleep 3600; done"]
+
+volumes:
+  mongo-data:
+  sidekick-data:

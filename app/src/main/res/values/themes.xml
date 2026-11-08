@@ -1,0 +1,4 @@
+<resources>
+    <!-- Compose draws all UI; this theme only governs the window before Compose starts. -->
+    <style name="Theme.RunnerSidekick" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

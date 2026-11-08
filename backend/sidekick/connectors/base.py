@@ -1,0 +1,220 @@
+"""Provider-neutral connector contract and normalised record types.
+
+A connector reads from one source and returns normalised records plus the raw
+payloads they came from. It never writes to the source. Future official-Garmin or
+Health Connect adapters implement the same interface with their own capability set.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from enum import Enum
+from typing import Iterable, Protocol
+
+
+class Capability(str, Enum):
+    SUPPORTED = "supported"            # the source can provide this metric
+    UNSUPPORTED = "unsupported"        # the source/device cannot provide it
+    NO_PERMISSION = "no_permission"    # possible, but access not granted
+    UNKNOWN = "unknown"                # not yet observed either way
+
+
+class ConnectionState(str, Enum):
+    CONNECTED = "connected"
+    NOT_CONFIGURED = "not_configured"
+    REAUTH_REQUIRED = "reauth_required"
+    RATE_LIMITED = "rate_limited"
+    ERROR = "error"
+
+
+class AuthRequired(Exception):
+    """Credentials are missing, expired or revoked. Never retried automatically."""
+
+
+class RateLimited(Exception):
+    """The source asked us to slow down."""
+
+
+class SourceUnavailable(Exception):
+    """Transient failure (network, 5xx) after the client's own bounded retries."""
+
+
+# Metric keys for daily observations, with canonical units.
+METRIC_UNITS: dict[str, str] = {
+    "resting_hr": "bpm",
+    "hrv_overnight_avg": "ms",
+    "hrv_weekly_avg": "ms",
+    # From Garmin's 5-minute overnight readings (hrv_detail): first and last 3 hours of sleep, and by sleep stage
+    "hrv_early_avg": "ms", "hrv_late_avg": "ms", "hrv_deep_avg": "ms", "hrv_light_avg": "ms", "hrv_rem_avg": "ms",
+    "sleep_duration": "s",
+    "steps": "count",
+    "active_duration": "s",
+    "intensity_minutes_moderate": "min",   # Garmin's moderate-intensity minutes for the day
+    "intensity_minutes_vigorous": "min",   # Garmin's vigorous-intensity minutes for the day
+    "avg_stress": "garmin_stress_0_100",
+    "body_battery_high": "garmin_body_battery",
+    "body_battery_low": "garmin_body_battery",
+    "respiration_waking_avg": "breaths/min",
+    "weight": "kg",
+    "body_fat_pct": "%",                   # only from a Garmin scale (Index) when it reports it
+    "garmin_training_readiness": "garmin_score_0_100",
+    "garmin_vo2max_running": "ml/kg/min",
+    "garmin_sleep_score": "garmin_score_0_100",
+    # Garmin's context for its own numbers: its HRV baseline band, what its morning readiness was built from, the
+    # recovery time it reported then, and how much of the night the watch measured (0: not worn overnight)
+    "hrv_baseline_low": "ms",
+    "hrv_baseline_high": "ms",
+    "garmin_recovery_time_min": "min",
+    "garmin_readiness_inputs": "flag",     # 1 when Garmin had a valid night; the label lists each input's feedback
+    "asleep_measured_s": "s",
+}
+
+# Values Garmin computes itself. Shown under their own names; never fed into our recommendation rules.
+GARMIN_PROPRIETARY = {
+    "avg_stress", "body_battery_high", "body_battery_low",
+    "garmin_training_readiness", "garmin_vo2max_running", "garmin_sleep_score",
+}
+
+
+@dataclass
+class RawPayload:
+    kind: str
+    source_key: str
+    payload: object
+
+
+@dataclass
+class Observation:
+    local_date: str
+    metric: str
+    value: float | None
+    state: str = "measured"          # measured | not_measured | invalid
+    method: str | None = None
+    source_record_id: str | None = None
+    observed_start: str | None = None
+    observed_end: str | None = None
+    # Garmin text status (e.g. HRV "BALANCED") kept alongside numeric value when supplied
+    label: str | None = None
+
+
+@dataclass
+class SleepSession:
+    source_id: str
+    wake_date: str
+    start_utc: str
+    end_utc: str
+    utc_offset_s: int | None
+    is_nap: bool
+    duration_s: float | None
+    deep_s: float | None = None
+    light_s: float | None = None
+    rem_s: float | None = None
+    awake_s: float | None = None
+    garmin_sleep_score: float | None = None
+
+
+@dataclass
+class DayBundle:
+    local_date: str
+    observations: list[Observation] = field(default_factory=list)
+    sleep: list[SleepSession] = field(default_factory=list)
+    raw: list[RawPayload] = field(default_factory=list)
+
+
+@dataclass
+class Lap:
+    idx: int
+    start_utc: str | None
+    distance_m: float | None
+    elapsed_s: float | None
+    moving_s: float | None
+    avg_hr: float | None
+    max_hr: float | None = None
+    elevation_gain_m: float | None = None
+    elevation_loss_m: float | None = None
+    avg_cadence_spm: float | None = None
+    intensity: str | None = None
+
+
+@dataclass
+class Samples:
+    """Parallel arrays. None marks a gap; arrays share the index of `t`."""
+    t: list[float]
+    hr: list[float | None]
+    speed: list[float | None]
+    dist: list[float | None]
+    elev: list[float | None]
+    cad: list[float | None]
+    power: list[float | None] | None = None  # running power (W), when the watch records it
+    # Running dynamics and body battery, when the watch records them: gct (ms), stride (m), vo (vertical oscillation, cm),
+    # vr (vertical ratio, %), bb (body battery)
+    dyn: dict[str, list[float | None]] | None = None
+
+    def to_json(self) -> dict:
+        out = {"t": self.t, "hr": self.hr, "speed": self.speed, "dist": self.dist, "elev": self.elev, "cad": self.cad}
+        if self.power is not None:
+            out["power"] = self.power
+        if self.dyn:
+            out["dyn"] = self.dyn
+        return out
+
+    @staticmethod
+    def from_json(d: dict) -> "Samples":
+        return Samples(d["t"], valid_hr(d["hr"]), d["speed"], d["dist"], d["elev"], d["cad"], d.get("power"), d.get("dyn"))
+
+
+HR_PLAUSIBLE = (30, 240)  # bpm; a 0 or 255 from the strap means no reading, not a heart rate
+
+
+def valid_hr(hr: list) -> list:
+    """Heart-rate samples with implausible readings (0, sensor sentinels) as gaps, so no analysis counts them."""
+    lo, hi = HR_PLAUSIBLE
+    return [h if h is not None and lo <= h <= hi else None for h in hr]
+
+
+@dataclass
+class Activity:
+    source_id: str
+    sport: str                       # normalised: running | trail_running | treadmill_running | other
+    name: str | None
+    start_utc: str
+    utc_offset_s: int | None
+    local_date: str
+    distance_m: float | None
+    elapsed_s: float | None
+    moving_s: float | None
+    timer_s: float | None
+    avg_hr: float | None
+    max_hr: float | None
+    elevation_gain_m: float | None
+    elevation_loss_m: float | None
+    avg_cadence_spm: float | None
+    garmin_metrics: dict = field(default_factory=dict)
+    device_id: str | None = None
+    manufacturer: str | None = None
+    laps: list[Lap] = field(default_factory=list)
+    samples: Samples | None = None
+    raw: list[RawPayload] = field(default_factory=list)
+    shape: list | None = None  # the simplified route (routes.py), when the run has GPS
+
+
+class Connector(Protocol):
+    source: str
+    synthetic: bool
+
+    def connection_state(self) -> ConnectionState: ...
+
+    def capabilities(self) -> dict[str, Capability]: ...
+
+    def read_days(self, start: date, end: date) -> Iterable[DayBundle]:
+        """Historical/incremental daily reads, newest first. Raises AuthRequired/RateLimited/SourceUnavailable."""
+        ...
+
+    def list_activities(self, start: date, end: date) -> list[dict]:
+        """Lightweight summaries (must include 'source_id' and 'content_hash')."""
+        ...
+
+    def read_activity(self, summary: dict) -> Activity:
+        """Full activity: laps and samples."""
+        ...

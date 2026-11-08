@@ -1,0 +1,348 @@
+"""How the runner compares with people of the same sex and age: VO2 max, fitness age, resting heart rate, HRV and
+age-graded running times. Deterministic; every comparison names its reference population, method and caveats.
+Positions within a reference are interpolated between published percentiles and never extrapolated beyond them."""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from statistics import median
+
+from . import reports as rp
+from .analytics import norms as nm
+from .db import get_setting
+
+COMPARE_VERSION = "compare-1.0"
+SEX_WORD = {"male": ("man", "men"), "female": ("woman", "women")}
+GRADE_CLASSES = ((90, "world class"), (80, "national class"), (70, "regional class"), (60, "local class"))
+DISTANCE_LABELS = {"5k": "5 km", "10k": "10 km", "half": "Half marathon", "marathon": "Marathon"}
+MIN_RHR_DAYS = 7
+
+
+def age_on(birth: str, d: date) -> int:
+    b = date.fromisoformat(birth if len(birth) > 4 else f"{birth}-07-01")
+    return d.year - b.year - ((d.month, d.day) < (b.month, b.day))
+
+
+def profile(conn, today: date) -> dict:
+    """Sex and birth date: the runner's own setting first, else what Garmin reports."""
+    src = get_setting(conn, "source_profile", None) or {}
+    sex = get_setting(conn, "profile_sex", None) or src.get("sex")
+    birth = get_setting(conn, "profile_birth_date", None) or src.get("birth_date")
+    try:
+        if birth:
+            age_on(birth, today)
+    except ValueError:
+        birth = src.get("birth_date") if birth != src.get("birth_date") else None  # a stored impossible date counts as missing
+    source = "settings" if (get_setting(conn, "profile_sex", None) or get_setting(conn, "profile_birth_date", None)) else src.get("source")
+    return {"sex": sex, "birth_date": birth, "age": age_on(birth, today) if birth else None, "source": source,
+            "detected": {"sex": src.get("sex"), "birth_date": src.get("birth_date")} if src else None}
+
+
+def group_label(sex: str, lo: int, hi: int) -> str:
+    return f"{SEX_WORD[sex][1]} aged {lo}–{hi}" if hi < 120 else f"{SEX_WORD[sex][1]} aged {lo}+"
+
+
+def nearest_note(outside: bool, age: int, lo: int, hi: int) -> list[str]:
+    return [f"The reference has no group for age {age}; the nearest group ({lo}–{hi}) is used."] if outside else []
+
+
+# ---------------------------------------------------------------- VO2 max
+
+def vo2_typical_age(sex: str, value: float) -> tuple[float | None, str]:
+    """Age at which this VO2 max is typical, using the midpoint of the 40th and 60th percentiles as the typical value
+    of each age group and interpolating between group midpoints. 'younger'/'older' when outside the table."""
+    mids = [(lo + hi + 1) / 2 for lo, hi in nm.VO2_BANDS]
+    typical = [(p[0] + p[1]) / 2 for p in nm.VO2[sex]]  # falls with age
+    if value >= typical[0]:
+        return None, "younger"
+    if value <= typical[-1]:
+        return None, "older"
+    for i in range(len(mids) - 1):
+        a, b = typical[i], typical[i + 1]
+        if b <= value <= a:
+            return mids[i] + (a - value) / (a - b) * (mids[i + 1] - mids[i]), "within"
+    return None, "within"
+
+
+def ordinal(n: int) -> str:
+    """84 → "84th", 41 → "41st", 52 → "52nd", 13 → "13th"."""
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def vo2_item(sex: str, age: int, g: dict) -> dict:
+    v = (g.get("vo2max") or {}).get("value")
+    who = g.get("vo2_maker") or "Garmin"
+    base = {"id": "vo2max", "title": "VO₂ max", "source": nm.VO2_SOURCE}
+    if v is None:
+        return {**base, "status": "unavailable", "headline": f"No VO₂ max from {who} yet",
+                "detail": "Runner Sidekick's needs 3 steady, flat runs with good heart rate in the last 60 days (Settings › VO₂ max "
+                          "for scores can use the watch's instead)." if who == "Runner Sidekick" else
+                          f"{who} estimates VO₂ max from outdoor runs with heart rate."}
+    i, outside = nm.band_index(nm.VO2_BANDS, age)
+    lo, hi = nm.VO2_BANDS[i]
+    pts = nm.VO2[sex][i]
+    pct, where = nm.percentile_of(v, pts, nm.VO2_PERCENTILES)
+    rating = "Poor" if v < pts[0] else nm.VO2_RATINGS[max(k for k in range(4) if v >= pts[k])]
+    grp = group_label(sex, lo, hi)
+    if where == "below":
+        pos = f"below the 40th percentile for {grp}"
+    elif where == "above":
+        pos = f"above the 95th percentile for {grp}"
+    else:
+        pos = f"around the {ordinal(round(pct))} percentile for {grp} (the reference group)"
+    t_age, t_where = vo2_typical_age(sex, v)
+    typical = (f"typical for a {SEX_WORD[sex][0]} of about {round(t_age)}" if t_age is not None else
+               f"above the typical level of {SEX_WORD[sex][1]} in their twenties" if t_where == "younger" else
+               f"below the typical level of {SEX_WORD[sex][1]} in their seventies")
+    lo_dom, hi_dom = pts[0] - 8, pts[-1] + 6
+    bands = [{"label": "Poor", "from": lo_dom, "to": pts[0]}] + [
+        {"label": nm.VO2_RATINGS[k], "from": pts[k], "to": pts[k + 1] if k < 3 else hi_dom} for k in range(4)]
+    return {**base, "status": "ok", "value": v, "unit": "mL/kg/min", "rating": rating, "percentile": round(pct) if pct is not None else None,
+            "position": where, "group": grp, "typical_age": round(t_age) if t_age is not None else None,
+            "headline": f"In the table's {rating} band for {grp}",
+            "detail": f"Your VO₂ max of {v:.1f} ({who}) is {pos}. It is {typical}.",
+            "method": f"{who}'s VO₂ max placed among the Cooper Institute ratings for your sex and age group; the position between "
+                      "published percentiles is interpolated. 'Typical' is the midpoint of the 40th and 60th percentiles.",
+            "caveats": nearest_note(outside, age, lo, hi) + [
+                f"{who}'s VO₂ max is an estimate from pace and heart rate, not a lab test.",
+                "The reference comes from people tested at the Cooper Institute clinic, not the general population."],
+            "chart": {"type": "bands", "unit": "mL/kg/min", "bands": bands, "value": v, "higher_is_better": True}}
+
+
+# ---------------------------------------------------------------- fitness age
+
+def fitness_age_item(age: int, g: dict, vo2: dict) -> dict:
+    fa = g.get("fitness_age") or {}
+    base = {"id": "fitness_age", "title": "Fitness age", "source": "Garmin"}
+    if fa.get("fitnessAge") is None:
+        return {**base, "status": "unavailable", "headline": "No fitness age from Garmin yet",
+                "detail": "Garmin calculates fitness age from VO₂ max, resting heart rate, activity and BMI."}
+    f = fa["fitnessAge"]
+    real = fa.get("chronologicalAge") or age
+    diff = real - f
+    trend = None
+    if fa.get("previousFitnessAge") is not None:
+        ch = f - fa["previousFitnessAge"]
+        trend = "about the same as before" if abs(ch) < 0.3 else (f"{abs(ch):.1f} years younger than Garmin's previous value" if ch < 0
+                                                                   else f"{ch:.1f} years older than Garmin's previous value")
+    head = (f"{abs(diff):.1f} years younger than your age" if diff >= 0.5 else
+            f"{abs(diff):.1f} years older than your age" if diff <= -0.5 else "Close to your actual age")
+    detail = f"Garmin puts your fitness age at {f:.1f}, against an actual age of {real}."
+    if fa.get("achievableFitnessAge") is not None:
+        detail += f" Garmin estimates you could reach {fa['achievableFitnessAge']:.1f} with more vigorous activity."
+    if trend:
+        detail += f" That is {trend}."
+    comps = fa.get("components") or {}
+    return {**base, "status": "ok", "fitness_age": round(f, 1), "age": real, "achievable": fa.get("achievableFitnessAge"),
+            "previous": fa.get("previousFitnessAge"), "typical_vo2_age": vo2.get("typical_age"), "headline": head, "detail": detail,
+            "components": {k: comps[k] for k in ("rhr", "bmi", "vigorousDaysAvg", "vigorousMinutesAvg") if k in comps},
+            "method": "Garmin's own fitness age. Shown next to the age at which your VO₂ max is typical in the Cooper Institute ratings.",
+            "caveats": ["Garmin doesn't publish the exact formula; it combines VO₂ max, resting heart rate, vigorous activity and BMI."],
+            "chart": {"type": "ages", "age": real, "fitness_age": round(f, 1),
+                      "achievable": round(fa["achievableFitnessAge"], 1) if fa.get("achievableFitnessAge") is not None else None,
+                      "vo2_age": vo2.get("typical_age")}}
+
+
+def sidekick_fitness_age(sex: str, value: float) -> tuple[int | None, str]:
+    """Runner Sidekick's VO2-based fitness age: the age at which this VO2 max is typical for your sex, where typical is the
+    midpoint of the 40th and 60th percentile values of each Cooper Institute age group (not a published median),
+    interpolated between group midpoints and rounded to whole years. Only within the table: 'above' (higher than typical
+    for the youngest group) or 'below' (lower than typical for the oldest) with no age, rather than an extrapolated one."""
+    age, where = vo2_typical_age(sex, value)
+    if age is None:
+        return None, "above" if where == "younger" else "below"
+    return round(age), "within"
+
+
+def own_fitness_age_item(sex: str, age: int, vo2: dict, maker: str) -> dict:
+    """The fitness age item from Runner Sidekick's own calculation (chosen in Settings instead of Garmin's)."""
+    base = {"id": "fitness_age", "title": "VO₂-based fitness age", "source": "Runner Sidekick"}
+    v = vo2.get("value") if vo2.get("status") == "ok" else None
+    if v is None:
+        ours = maker == "Runner Sidekick"
+        return {**base, "status": "unavailable",
+                "headline": "Needs Runner Sidekick's VO₂ max (3 qualifying runs)" if ours else f"Needs a VO₂ max from your {maker} watch",
+                "detail": "Runner Sidekick's fitness age comes from the VO₂ max chosen in Settings: "
+                          + ("Runner Sidekick's estimate from your runs, which needs 3 qualifying runs in 60 days." if ours else f"{maker}'s.")}
+    f, where = sidekick_fitness_age(sex, v)
+    lo, hi = nm.VO2_BANDS[0], nm.VO2_BANDS[-1]
+    who = SEX_WORD[sex][1]
+    if where == "above":
+        head = f"Above the typical VO₂ max for {who} aged {lo[0]}–{lo[1]}"
+        shown = None
+    elif where == "below":
+        head = f"Below the typical VO₂ max for {who} aged {hi[0]}–{hi[1]}"
+        shown = None
+    else:
+        diff = age - f
+        shown = f"around {f}"
+        head = (f"Around {f}: about {abs(diff)} years younger than your age" if diff >= 2 else
+                f"Around {f}: about {abs(diff)} years older than your age" if diff <= -2 else f"Around {f}: close to your actual age")
+    return {**base, "status": "ok", "fitness_age": f, "age": age, "bound": None if where == "within" else where,
+            "label": shown or head, "headline": head,
+            "detail": f"Your VO₂ max of {v:.1f} ({maker}'s estimate) " + (f"is typical for {who} {shown}." if shown else
+                      f"is {'above' if where == 'above' else 'below'} what the reference table covers for {who}, so no age is given."),
+            "method": "Runner Sidekick: the age at which your VO₂ max is typical for your sex in the Cooper Institute ratings, "
+                      "where typical is the midpoint of each age group's 40th and 60th percentile values (not a published "
+                      "median), interpolated between age groups and rounded. Only within the table's age groups.",
+            "caveats": ["Approximate: one point of VO₂ max can move it by several years.",
+                        "Only VO₂ max goes in: unlike Garmin's, resting heart rate, activity and BMI don't.",
+                        f"{maker}'s VO₂ max is an estimate from pace and heart rate, not a lab test."],
+            "chart": {"type": "ages", "age": age, "fitness_age": f, "achievable": None, "vo2_age": vo2.get("typical_age")}}
+
+
+# ---------------------------------------------------------------- resting heart rate
+
+def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
+    """Your typical resting heart rate (4-week median) against your own 4 weeks before. No
+    population ranking: a watch's resting heart rate is the day's lowest stretch, mostly asleep, while survey values are
+    a seated pulse, so ranking one against the other would mislead. The survey's middle is given for orientation only."""
+    base = {"id": "resting_hr", "title": "Resting heart rate", "source": "your own nights"}
+    series = rp.rhr_series(conn, source, today.isoformat())
+
+    def med_from(end: date) -> tuple[float | None, int]:
+        vals = [v for k, v in series.items() if (end - timedelta(days=27)).isoformat() <= k <= end.isoformat()]
+        return (median(vals) if len(vals) >= MIN_RHR_DAYS else None), len(vals)
+    v, n = med_from(today)
+    if v is None:
+        return {**base, "status": "unavailable", "headline": "Not enough resting heart rate data yet",
+                "detail": f"Needs {MIN_RHR_DAYS} days with a resting heart rate in the last 4 weeks; {n} so far."}
+    before, _ = med_from(today - timedelta(days=28))
+    i, outside = nm.band_index(nm.RHR_BANDS, age)
+    lo, hi = nm.RHR_BANDS[i]
+    grp = group_label(sex, lo, hi)
+    change = "" if before is None else (", the same as the 4 weeks before" if round(v) == round(before) else
+                                        f", {abs(round(v - before))} {'lower' if v < before else 'higher'} than the 4 weeks before")
+    return {**base, "status": "ok", "value": round(v), "unit": "bpm", "days": n, "group": grp,
+            "headline": f"{round(v)} bpm, your 4-week median{change}",
+            "detail": f"Median of {n} days in the last 4 weeks. For orientation only: a US national survey's middle "
+                      f"for {grp} is {nm.RHR[sex][i][4]} bpm, but that's a seated pulse, higher than a watch's sleep-time value, so "
+                      "no ranking is given.",
+            "method": "Median of your watch's daily resting heart rate (last 28 days), against the 28 days before.",
+            "caveats": nearest_note(outside, age, lo, hi) + [
+                "A low resting heart rate is common in people who train, but on its own it isn't a measure of health."]}
+
+
+def hrv_item(conn, source: str, today: date) -> dict:
+    """Overnight HRV against your own usual range on the current watch (population norms aren't comparable with a
+    whole-night average). Weekly medians for the last 12 weeks; a watch change starts a new segment."""
+    from .analytics import baseline as bl
+    base = {"id": "hrv", "title": "Overnight HRV", "source": "your own nights"}
+    # Comparable HRV only: the measurement method currently in use (as in Trends)
+    latest = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured"}, sort=[("local_date", -1)])
+    if latest is None:
+        return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "A Garmin records it while you sleep with the watch on."}
+    if latest["local_date"] < (today - timedelta(days=6)).isoformat():  # nothing this week: say when the last one was
+        return {**base, "status": "unavailable", "headline": f"No overnight HRV since {latest['local_date']}",
+                "detail": f"The last reading was {round(latest['value'])} ms on {latest['local_date']}.."}
+    values = rp.series(conn, source, "hrv_overnight_avg", today.isoformat(), latest.get("method"))
+    era = rp.device_era_start(conn, source, today)
+    in_era = {d: v for d, v in values.items() if not era or d >= era.isoformat()}
+    week = [v for d, v in in_era.items() if d >= (today - timedelta(days=6)).isoformat()]
+    b = bl.compute_baseline(in_era, today, era_start=era)
+    weeks: list[dict] = []
+    prev_era = None  # era start of the previous plotted week (None is a valid era: the first watch)
+    for k in range(11, -1, -1):
+        ws = rp.week_start(today, rp.first_weekday(conn)) - timedelta(days=7 * k)
+        vals = [v for d, v in values.items() if ws.isoformat() <= d <= (ws + timedelta(days=6)).isoformat()]
+        if not vals:
+            continue
+        e = rp.device_era_start(conn, source, min(ws + timedelta(days=6), today))
+        weeks.append({"week": ws.isoformat(), "value": round(median(vals)), "nights": len(vals), "new_watch": bool(weeks) and e != prev_era})
+        prev_era = e
+    chart = {"type": "weekly_dots", "unit": "ms", "decimals": 0, "step": 5, "points": weeks,
+             "band": [round(b.q1), round(b.q3)] if b.sufficient else None}
+    if not week:
+        return {**base, "status": "unavailable", "headline": "No overnight HRV this week", "chart": chart,
+                "detail": "No nights with HRV in the last 7 days."}
+    v = round(median(week))
+    last = max(d for d in in_era if d >= (today - timedelta(days=6)).isoformat())
+    nights = f"{len(week)} night{'s' if len(week) != 1 else ''}, latest {last}"  # what "this week" rests on
+    if not b.sufficient:
+        n = len([d for d in in_era if d >= (today - timedelta(days=bl.WINDOW_DAYS)).isoformat()])
+        return {**base, "status": "ok", "value": v, "unit": "ms", "headline": f"This week: {v} ms ({nights}) · still learning your range",
+                "detail": f"Your usual range needs {bl.MIN_VALID} nights on this watch in the last {bl.WINDOW_DAYS} days; {n} so far.",
+                "caveats": ["HRV readings from different watches aren't compared."] if era else [], "chart": chart}
+    where = "below" if v < b.q1 else "above" if v > b.q3 else "within"
+    return {**base, "status": "ok", "value": v, "unit": "ms",
+            "headline": f"This week: {v} ms ({nights}), {where} your usual range",
+            "detail": f"Median of {len(week)} night{'s' if len(week) != 1 else ''} this week, against your usual {round(b.q1)}–{round(b.q3)} ms "
+                      f"(middle half of the last {bl.WINDOW_DAYS} days on this watch). Higher or lower than usual is a change worth "
+                      "noticing alongside sleep and training, not a verdict on its own.",
+            "method": "Weekly median of Garmin's overnight HRV; your usual range is the 25th–75th percentile of the last 28 days on the "
+                      "current watch, as for Today's readings.",
+            "caveats": ["Population HRV norms are measured differently (short daytime or early-morning windows), so they aren't used."],
+            "chart": chart}
+
+
+# ---------------------------------------------------------------- age grading
+
+def grade_class(pct: float) -> str:
+    return next((label for floor, label in GRADE_CLASSES if pct >= floor), "recreational")
+
+
+def age_grade(sex: str, age: int, dist: str, seconds: float) -> dict | None:
+    std = nm.age_standards()["standards"][sex].get(dist, {})
+    a = str(min(max(age, 5), 100))
+    if a not in std or not seconds:
+        return None
+    open_std = min(std.values())  # the open-class (fastest) standard
+    pct = 100 * std[a] / seconds
+    return {"age_grade_pct": round(pct, 1), "class": grade_class(pct), "standard_s": std[a],
+            "age_graded_time_s": round(seconds * open_std / std[a])}
+
+
+def age_grade_item(conn, source: str, sex: str, birth: str, g: dict, today: date) -> dict:
+    base = {"id": "age_grade", "title": "Age-graded running", "source": "USATF / Alan Jones 2025 road age standards"}
+    rows = []
+    for k, r in rp.records(conn, source).items():
+        if k in DISTANCE_LABELS and r["best"]:
+            ag = age_grade(sex, age_on(birth, date.fromisoformat(r["best"]["date"])), k, r["best"]["elapsed_s"])
+            if ag:
+                rows.append({"distance": k, "label": DISTANCE_LABELS[k], "kind": "best", "time_s": r["best"]["elapsed_s"],
+                             "date": r["best"]["date"], "source_id": r["best"]["source_id"], **ag})
+    pred = g.get("race_predictions") or {}
+    today_age = age_on(birth, today)
+    for k in DISTANCE_LABELS:
+        if pred.get(k):
+            ag = age_grade(sex, today_age, k, pred[k])
+            if ag:
+                rows.append({"distance": k, "label": DISTANCE_LABELS[k], "kind": "prediction", "time_s": pred[k], "date": pred.get("date"), **ag})
+    if not rows:
+        return {**base, "status": "unavailable", "headline": "No times to grade yet",
+                "detail": "Needs a run of 5 km or longer, or Garmin race predictions."}
+    best = max((r for r in rows if r["kind"] == "best"), key=lambda r: r["age_grade_pct"], default=None)
+    top = best or max(rows, key=lambda r: r["age_grade_pct"])
+    what = "best" if top["kind"] == "best" else "Garmin-predicted"
+    return {**base, "status": "ok", "rows": rows,
+            "headline": f"{top['age_grade_pct']:.0f}% age grade: {top['class']}",
+            "detail": f"Your {what} {top['label'].lower()} time is {top['age_grade_pct']:.0f}% of the age standard for a "
+                      f"{SEX_WORD[sex][0]} of your age ({top['class']}). 100% is about world-record level for your age.",
+            "method": "Age grade = the age standard for your sex, age and distance divided by your time. Classes: 60% local, 70% regional, "
+                      "80% national, 90% world class (below 60% is called recreational here). The age-graded time is your time converted to its open-age equivalent.",
+            "caveats": ["Your bests are the fastest stretch within a run, not race results; age grading is designed for races.",
+                        "Garmin's race predictions are estimates, shown separately from times you actually ran."],
+            "chart": {"type": "age_grade", "classes": [c[0] for c in reversed(GRADE_CLASSES)], "rows": rows}}
+
+
+# ---------------------------------------------------------------- all
+
+def build(conn, source: str, today: date) -> dict:
+    p = profile(conn, today)
+    missing = [k for k, v in (("sex", p["sex"]), ("birth date", p["birth_date"])) if not v]
+    out = {"profile": p, "missing": missing, "items": [], "algorithm_version": COMPARE_VERSION}
+    if missing:
+        return out
+    g = rp.get_setting(conn, "garmin_fitness", None) or {}
+    # The same VO2 max as the Fitness score: the newest dated reading, nothing older than the score allows
+    from .scores import vo2_on
+    now = vo2_on(conn, source, today, today)
+    from .scores import vo2_maker
+    g = {**g, "vo2max": {"value": now[0], "date": now[1].isoformat()} if now else None, "vo2_maker": vo2_maker(conn, today)}
+    vo2 = vo2_item(p["sex"], p["age"], g)
+    from .scores import vo2_maker
+    fa = (own_fitness_age_item(p["sex"], p["age"], vo2, vo2_maker(conn, today))
+          if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick" else fitness_age_item(p["age"], g, vo2))
+    out["items"] = [vo2, fa, rhr_item(conn, source, p["sex"], p["age"], today),
+                    age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]
+    return out

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Runner Sidekick icon (concept E): a runner above a heart-rate line on a teal card, a violet card tilted behind.
+     Scaled to 90% around the centre to stay inside the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.9" android:scaleY="0.9">
+        <group android:pivotX="60" android:pivotY="46" android:rotation="12">
+            <path
+                android:fillColor="#8B6CFF"
+                android:pathData="M48,22h24a13,13 0,0 1,13 13v20a13,13 0,0 1,-13 13h-24a13,13 0,0 1,-13 -13v-20a13,13 0,0 1,13 -13z" />
+        </group>
+        <path android:pathData="M42,34h20a16,16 0,0 1,16 16v20a16,16 0,0 1,-16 16h-20a16,16 0,0 1,-16 -16v-20a16,16 0,0 1,16 -16z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="26" android:startY="34"
+                    android:endX="78" android:endY="86"
+                    android:startColor="#2ED3C6"
+                    android:endColor="#0B8F8A" />
+            </aapt:attr>
+        </path>
+        <!-- heart-rate line -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M33,74L43,74L47,65L54,82L59,70L70,70"
+            android:strokeWidth="4.5"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- runner: head, then body and limbs -->
+        <path android:fillColor="#FFFFFF" android:pathData="M54.8,43a4.2,4.2 0,1 0,8.4 0a4.2,4.2 0,1 0,-8.4 0z" />
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M57,49L52,58L45,59M52,58L56,64M55,52L62,55L66,51"
+            android:strokeWidth="3.6"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

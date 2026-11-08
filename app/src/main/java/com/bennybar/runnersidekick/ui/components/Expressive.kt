@@ -1,0 +1,181 @@
+package com.bennybar.runnersidekick.ui.components
+
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ToggleButton
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.toShape
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.fillMaxSize
+import kotlin.math.roundToInt
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.graphics.shapes.RoundedPolygon
+
+class GroupScope internal constructor() {
+    internal val rows = mutableListOf<@Composable (Shape) -> Unit>()
+
+    /** A row in the group. [onClick] makes it a button; [trailing] defaults to a chevron when clickable. */
+    fun row(
+        headline: String,
+        supporting: String? = null,
+        overline: String? = null,
+        icon: ImageVector? = null,
+        iconShape: RoundedPolygon? = null,
+        onClick: (() -> Unit)? = null,
+        accent: String? = null, // accent category, see accentFor()
+        trailing: (@Composable RowScope.() -> Unit)? = null,
+    ) {
+        rows += { shape -> GroupRow(shape, headline, supporting, overline, icon, iconShape, onClick, accent, trailing) }
+    }
+
+    fun custom(content: @Composable ColumnScope.() -> Unit) {
+        rows += { _ -> Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), content = content) }
+    }
+}
+
+/** A titled list of rows in one card (tinted with [tint]), rows separated by thin lines. */
+@Composable
+fun Group(modifier: Modifier = Modifier, title: String? = null, tint: com.bennybar.runnersidekick.ui.theme.Tint = com.bennybar.runnersidekick.ui.theme.Tint.NEUTRAL,
+          content: GroupScope.() -> Unit) {
+    val scope = GroupScope().apply(content)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        title?.let { SectionLabel(it) }
+        if (scope.rows.isNotEmpty()) Tile(tint = tint, contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 4.dp), spacing = 0.dp) {
+            scope.rows.forEachIndexed { i, r ->
+                if (i > 0) androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 18.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+                r(RoundedCornerShape(0.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun GroupRow(
+    shape: Shape, headline: String, supporting: String?, overline: String?, icon: ImageVector?, iconShape: RoundedPolygon?,
+    onClick: (() -> Unit)?, accentCategory: String?, trailing: (@Composable RowScope.() -> Unit)?,
+) {
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+                .heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                val accent = accentCategory?.let { com.bennybar.runnersidekick.ui.theme.accentFor(it) }
+                ShapeBadge(icon, iconShape ?: MaterialShapes.Circle, Modifier.size(36.dp),
+                    container = accent?.container ?: MaterialTheme.colorScheme.primaryContainer,
+                    content = accent?.content ?: MaterialTheme.colorScheme.onPrimaryContainer, iconSize = 20.dp)
+                Spacer(Modifier.width(14.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                overline?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text(headline, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                supporting?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            when {
+                trailing != null -> trailing()
+                onClick != null -> Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+/** One choice from a few, as a connected button group: the chosen button fills in and its corners round
+ *  (M3 Expressive). [selected] null shows none chosen. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ChoiceGroup(labels: List<String>, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier.fillMaxWidth(),
+                enabled: Boolean = true) {
+    Row(modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+        labels.forEachIndexed { i, l ->
+            ToggleButton(checked = selected == i, onCheckedChange = { onSelect(i) }, enabled = enabled, colors = offFill(),
+                modifier = Modifier.weight(1f).semantics { role = Role.RadioButton },
+                shapes = when (i) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    labels.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
+                Text(l, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Options that each turn on and off (or one choice that can be cleared): toggle buttons whose shape changes when on. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun ToggleRow(labels: List<String>, checked: (Int) -> Boolean, onToggle: (Int) -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        labels.forEachIndexed { i, l -> ToggleButton(checked = checked(i), onCheckedChange = { onToggle(i) }, colors = offFill()) { Text(l) } }
+    }
+}
+
+/** Toggle colours with the "off" fill a step stronger than the card's, so unchosen buttons still show on a plain card. */
+@Composable
+private fun offFill() = androidx.compose.material3.ToggleButtonDefaults.colors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+
+/** An icon on an Expressive shape (cookie, sunny, burst…), tinted with a container colour. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ShapeBadge(
+    icon: ImageVector,
+    polygon: RoundedPolygon,
+    modifier: Modifier = Modifier,
+    container: Color = MaterialTheme.colorScheme.primaryContainer,
+    content: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    iconSize: androidx.compose.ui.unit.Dp = 22.dp,
+) {
+    Surface(shape = polygon.toShape(), color = container, modifier = modifier) {
+        Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = content, modifier = Modifier.size(iconSize)) }
+    }
+}
+
+/** A lazy-list item that fades in, fades out and moves into place when the list changes (a tab or range switch,
+ *  a card appearing), using Material's emphasized timing. */
+fun androidx.compose.foundation.lazy.LazyListScope.animatedItem(key: Any, content: @Composable () -> Unit) =
+    item(key = key) {
+        Box(Modifier.animateItem(fadeInSpec = androidx.compose.animation.core.tween(220, 60),
+            fadeOutSpec = androidx.compose.animation.core.tween(90))) { content() }
+    }

@@ -1,0 +1,255 @@
+package com.bennybar.runnersidekick.ui.components
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import com.bennybar.runnersidekick.data.remote.Finding
+import com.bennybar.runnersidekick.ui.Format
+
+@Composable
+fun DemoBadge() {
+    AssistChip(
+        onClick = {}, enabled = true,
+        label = { Text("Demo data") },
+        leadingIcon = { Icon(Icons.Outlined.Science, null, Modifier.size(AssistChipDefaults.IconSize)) },
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            labelColor = MaterialTheme.colorScheme.onErrorContainer,
+            leadingIconContentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+        border = null,
+    )
+}
+
+@Composable
+fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.padding(top = 8.dp, bottom = 4.dp).semantics { heading() },
+    )
+}
+
+@Composable
+fun EmptyState(icon: ImageVector, title: String, body: String, modifier: Modifier = Modifier, action: @Composable (() -> Unit)? = null) {
+    Column(modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        action?.invoke()
+    }
+}
+
+@Composable
+fun OfflineBanner(message: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.CloudOff, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text(message, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+/** "Show why": the evidence behind a finding — value, personal range, sample size, dates, limitations, version. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EvidenceSheet(finding: Finding, note: com.bennybar.runnersidekick.data.remote.ReadingNote? = null, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 32.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(finding.title, style = MaterialTheme.typography.headlineSmall)
+            note?.let { NoteBlock(it) }
+            Text(finding.statement, style = MaterialTheme.typography.bodyLarge)
+            finding.interpretation?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Tile(spacing = 6.dp) { EvidenceRows {
+                finding.observed?.value?.let { Row("Observed", Format.metricValue(finding.metric, it) + (finding.observed.date?.let { d -> " on ${Format.shortDate(d)}" } ?: "")) }
+                finding.observed?.label?.let { Row("Garmin status", "$it (Garmin)") }
+                finding.comparison?.let { c ->
+                    if (c.median != null) {
+                        Row("Your usual (median)", Format.metricValue(finding.metric, c.median))
+                        if (c.q1 != null && c.q3 != null) Row("Typical range (middle 50%)", "${Format.metricValue(finding.metric, c.q1)} – ${Format.metricValue(finding.metric, c.q3)}")
+                    }
+                    if (c.kind == "prior_4_week_weekly_mean" && c.value != null) Row("Prior 4-week weekly average", Format.metricValue(finding.metric, c.value))
+                    c.window?.takeIf { it.size == 2 }?.let { Row("Compared with", "${Format.shortDate(it[0])} – ${Format.shortDate(it[1])}") }
+                }
+                finding.delta?.abs?.let { if (finding.comparison?.median != null) Row("Difference", Format.signedDelta(finding.metric, it) + (finding.delta.pct?.let { p -> " (%+.0f%%)".format(p) } ?: "")) }
+                finding.sampleSize?.let { Row("Sample size", "$it ${if (finding.category == "running") "records" else "days"}") }
+                Row("Derived", if (finding.derived) "Yes — calculated by Runner Sidekick" else "No — as reported by the source")
+                Row("Algorithm", finding.algorithmVersion)
+            } }
+            if (finding.limitations.isNotEmpty()) {
+                Text("Limitations", style = MaterialTheme.typography.titleSmall)
+                finding.limitations.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+class EvidenceRowsScope(private val col: ColumnScope) {
+    @Composable
+    fun Row(label: String, value: String) {
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+fun EvidenceRows(content: @Composable EvidenceRowsScope.() -> Unit) {
+    Column { EvidenceRowsScope(this).content() }
+}
+
+
+/** The plain verdict for a reading (how good it is) and what it means. */
+@Composable
+fun NoteBlock(n: com.bennybar.runnersidekick.data.remote.ReadingNote) {
+    Tile(tint = com.bennybar.runnersidekick.ui.theme.Tint.TEAL, spacing = 6.dp) {
+        Text(n.verdict, style = MaterialTheme.typography.titleMedium)
+        Text(n.meaning, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Good / OK / Low (or Info) next to a plain-language check. */
+@Composable
+fun VerdictChip(verdict: String?, label: String? = null) {
+    val cs = MaterialTheme.colorScheme
+    val dark = com.bennybar.runnersidekick.ui.theme.LocalDark.current
+    fun of(t: com.bennybar.runnersidekick.ui.theme.Tint) = t.hue.copy(alpha = if (dark) 0.28f else 0.20f)
+    val (text, bg, fg) = when (verdict) {
+        "good" -> Triple("Good", of(com.bennybar.runnersidekick.ui.theme.Tint.GREEN), cs.onSurface)
+        "ok" -> Triple("OK", of(com.bennybar.runnersidekick.ui.theme.Tint.AMBER), cs.onSurface)
+        "low" -> Triple("Low", of(com.bennybar.runnersidekick.ui.theme.Tint.PINK), cs.onSurface)
+        "info" -> Triple("Info", cs.surfaceContainerHighest, cs.onSurfaceVariant)
+        else -> Triple("—", cs.surfaceContainerHighest, cs.onSurfaceVariant)
+    }
+    Surface(shape = MaterialTheme.shapes.large, color = bg) {
+        Text(label ?: text, style = MaterialTheme.typography.labelLarge, color = fg, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+    }
+}
+
+/** Tells the screen's ViewModel whether the screen is on show, so its polls pause while it's hidden or the app is in
+ * the background. */
+@Composable
+fun TrackVisible(vm: com.bennybar.runnersidekick.ui.BaseVm) {
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+            vm.setVisible(owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs); vm.setVisible(false) }
+    }
+}
+
+/** The app-wide refresh/sync progress (see Repository.progress), provided at the root. */
+val LocalProgress = androidx.compose.runtime.staticCompositionLocalOf<kotlinx.coroutines.flow.StateFlow<com.bennybar.runnersidekick.data.Repository.Progress?>> {
+    kotlinx.coroutines.flow.MutableStateFlow(null)
+}
+
+/** Pull-to-refresh without the spinner over the content: while data loads, a thin line along the top edge; the round
+ * indicator shows only while you're pulling. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun RefreshBox(isRefreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier,
+               content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val state = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val progress by LocalProgress.current.collectAsState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing, onRefresh, modifier, state = state, indicator = {
+        val p = progress
+        if (isRefreshing && p != null) {
+            // A real share of the work, with what's being done and the percentage
+            val shown by androidx.compose.animation.core.animateFloatAsState(p.fraction, label = "progress")
+            androidx.compose.material3.LinearWavyProgressIndicator(progress = { shown },
+                modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter).fillMaxWidth().padding(horizontal = 12.dp))
+            // What's being done, just above the floating tab bar (the page's own header buttons sit at the top)
+            Column(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = LocalNavBarPadding.current + 8.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.padding(top = 4.dp)) {
+                    Text("${p.label} · ${(shown * 100).toInt()}%", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                }
+                p.hint?.let {
+                    androidx.compose.material3.Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.padding(top = 4.dp, start = 48.dp, end = 48.dp)) {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    }
+                }
+            }
+        } else if (isRefreshing) androidx.compose.material3.ContainedLoadingIndicator(
+            Modifier.align(androidx.compose.ui.Alignment.TopCenter).padding(top = 12.dp))
+        else if (state.distanceFraction > 0f) androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
+            state = state, isRefreshing = false, modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter))
+    }, content = content)
+}
+
+
+/** Room for the floating navigation bar at the bottom of a tab's list: tab pages scroll underneath it. */
+val LocalNavBarPadding = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
+
+/** Whether the AI coach is on (Settings): every AI card, button and summary is hidden when it isn't. */
+val LocalAiEnabled = androidx.compose.runtime.compositionLocalOf { false }
+
+
+/** "14:32" in the phone's time zone, from an ISO instant. */
+fun clockOf(iso: String): String = runCatching {
+    java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+}.getOrDefault("")
+
+/** The time a manual Garmin sync is next allowed, while it's still ahead; null once it's allowed (re-checked when it passes). */
+@androidx.compose.runtime.Composable
+fun syncWait(nextAllowedAt: String?): String? {
+    var tick by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val at = nextAllowedAt?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() }
+    androidx.compose.runtime.LaunchedEffect(at, tick) {
+        if (at != null && at.isAfter(java.time.Instant.now())) {
+            kotlinx.coroutines.delay(java.time.Duration.between(java.time.Instant.now(), at).toMillis() + 500)
+            tick++
+        }
+    }
+    return if (at != null && at.isAfter(java.time.Instant.now())) clockOf(nextAllowedAt) else null
+}

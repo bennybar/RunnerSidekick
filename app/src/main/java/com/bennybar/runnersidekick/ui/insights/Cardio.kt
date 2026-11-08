@@ -1,0 +1,251 @@
+package com.bennybar.runnersidekick.ui.insights
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import com.bennybar.runnersidekick.data.remote.Cardio
+import com.bennybar.runnersidekick.data.remote.CardioPart
+import com.bennybar.runnersidekick.data.remote.SettingsDto
+import com.bennybar.runnersidekick.ui.Format
+import com.bennybar.runnersidekick.ui.components.DetailPage
+import com.bennybar.runnersidekick.ui.components.Group
+import com.bennybar.runnersidekick.ui.components.Tile
+import com.bennybar.runnersidekick.ui.theme.Tint
+import com.bennybar.runnersidekick.ui.theme.ink
+
+/** One line per piece of evidence, in the Summary tab; the detail page has the rest. */
+@Composable
+fun CardioCard(c: Cardio, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val parts = listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire).filter { it.value != null }
+    Tile(tint = Tint.TEAL, onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.MonitorHeart, null, Modifier.size(22.dp), tint = ink(Tint.TEAL))
+            Spacer(Modifier.width(10.dp))
+            Text("Cardio fitness (experimental)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = cs.onSurfaceVariant)
+        }
+        Text(parts.joinToString(" · ") { "${short(it)} ${it.value!!.toInt()}" }.ifEmpty { "Not enough evidence yet" },
+            style = MaterialTheme.typography.titleMedium)
+        Text(listOfNotNull(c.runs.comparison?.headline ?: c.garmin.comparison?.headline,
+            c.performance.value?.let { "Running performance: VDOT ${it.toInt()}" },
+            "VO₂ max estimates side by side, each with its method").joinToString("\n"),
+            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+    }
+}
+
+private fun short(p: CardioPart) = when (p.id) { "runs" -> "Your runs"; "garmin" -> p.maker ?: "Garmin"; "questionnaire" -> "Questionnaire"; "hunt" -> "HUNT"; else -> p.title }
+
+@Composable
+fun CardioSheet(c: Cardio, answers: SettingsDto?, onSave: ((SettingsDto) -> SettingsDto) -> Unit, onOpenRun: (String) -> Unit,
+                onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var editing by remember { mutableStateOf<String?>(null) }
+    DetailPage("Cardio fitness", onDismiss) {
+        Text(c.basis, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
+        listOfNotNull(c.runs, c.garmin, c.hunt, c.questionnaire, c.performance).forEach { p -> Evidence(p, onOpenRun) }
+        if (c.notes.isNotEmpty()) Tile(spacing = 6.dp) {
+            Text("How they relate", style = MaterialTheme.typography.titleSmall)
+            c.notes.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        }
+        // Technical detail, collapsed: the estimates side by side already show how far apart they are
+        c.combined?.let { m ->
+            var open by remember { mutableStateOf(false) }
+            Tile(onClick = { open = !open }, spacing = 4.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (open) "Hide the median of the estimates" else "Median of the estimates", style = MaterialTheme.typography.titleSmall)
+                        Text("Technical detail · not used by any score", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    }
+                    Icon(if (open) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null, tint = cs.onSurfaceVariant)
+                }
+                if (open) {
+                    Text("${fmt(m.value)} from " + m.inputs.joinToString(" · ") { "${it.title} ${fmt(it.value)}" },
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text("Not used by any score or by fitness age, which use the VO₂ max chosen in Settings. HUNT counts only with a " +
+                        "seated pulse.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+            }
+        }
+        // The answers these estimates use, each with the day it was given
+        Group(title = "Your answers") {
+            val a = answers
+            row("Activity level, last month", supporting = a?.activityPar?.let { "$it of 7" + (a.activityParAt?.let { d -> " · answered ${Format.shortDate(d)}" } ?: "") }
+                ?: "Not answered", onClick = { editing = "par" })
+            row("Weight", supporting = c.inputs.weightKg?.let { "${fmt(it)} kg · " + from(c.inputs.weightFrom) } ?: "Not set",
+                onClick = { editing = "weight" })
+            row("Height", supporting = c.inputs.heightCm?.let { "${fmt(it)} cm · " + from(c.inputs.heightFrom) } ?: "Not set",
+                onClick = { editing = "height" })
+            row("Maximum heart rate", supporting = c.hrMax.value?.let { "${it.toInt()} bpm · ${c.hrMax.source}" } ?: "Not known yet",
+                onClick = { editing = "hrmax" })
+            row("Resting pulse, seated", supporting = a?.restingPulseSeated?.let { "$it bpm · " + from(a.restingPulseSeatedAt) }
+                ?: "Not set (HUNT uses your watch's overnight value)", onClick = { editing = "seated" })
+            row("Waist", supporting = a?.profileWaistCm?.let { "${fmt(it)} cm · " + from(a.profileWaistCmAt) } ?: "Not set",
+                onClick = { editing = "waist" })
+            c.huntQuestions.forEach { q ->
+                val (v, at) = huntAnswer(a, q.key)
+                row(q.title, supporting = q.options.firstOrNull { it.value == v }?.let { o -> o.text + (at?.let { " · answered ${Format.shortDate(it)}" } ?: "") }
+                    ?: "Not answered", onClick = { editing = q.key })
+            }
+        }
+    }
+    when (editing) {
+        "par" -> ParDialog(c, answers?.activityPar, onDismiss = { editing = null }) { v -> onSave { it.copy(activityPar = v) }; editing = null }
+        "weight" -> NumberDialog("Weight (kg)", answers?.profileWeightKg, 30.0..250.0, "Clear (use Garmin's)",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(profileWeightKg = v) }; editing = null }
+        "height" -> NumberDialog("Height (cm)", answers?.profileHeightCm, 100.0..250.0, "Clear (use Garmin's)",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(profileHeightCm = v) }; editing = null }
+        "hrmax" -> NumberDialog("Maximum heart rate (bpm)", answers?.hrMax?.toDouble(), 120.0..230.0, "Clear (work it out from your runs)",
+            hint = "Only if you know it from an all-out race finish or a test. Otherwise leave it: the app uses the higher of Garmin's setting " +
+                "and the highest you've held for a minute.",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(hrMax = v?.toInt()) }; editing = null }
+        "seated" -> NumberDialog("Resting pulse, seated (bpm)", answers?.restingPulseSeated?.toDouble(), 30.0..120.0, "Clear (use the watch's overnight value)",
+            hint = "Sit quietly for 5 minutes. Take a fresh heart-rate measurement on your watch (not its daily resting heart rate), or count " +
+                "your pulse for 60 seconds. The study measured resting heart rate by ECG after 5 minutes of rest.",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(restingPulseSeated = v?.toInt()) }; editing = null }
+        "waist" -> NumberDialog("Waist (cm)", answers?.profileWaistCm, 50.0..200.0, "Clear",
+            hint = "Around your waist at the navel, standing relaxed, after breathing out.",
+            onDismiss = { editing = null }) { v -> onSave { it.copy(profileWaistCm = v) }; editing = null }
+        else -> c.huntQuestions.firstOrNull { it.key == editing }?.let { q ->
+            ChoiceDialog(q.title, q.options.map { it.value to it.text }, huntAnswer(answers, q.key).first, onDismiss = { editing = null }) { v ->
+                onSave {
+                    when (q.key) {
+                        "hunt_frequency" -> it.copy(huntFrequency = v)
+                        "hunt_intensity" -> it.copy(huntIntensity = v)
+                        else -> it.copy(huntDuration = v)
+                    }
+                }
+                editing = null
+            }
+        }
+    }
+}
+
+private fun huntAnswer(a: SettingsDto?, key: String): Pair<String?, String?> = when (key) {
+    "hunt_frequency" -> a?.huntFrequency to a?.huntFrequencyAt
+    "hunt_intensity" -> a?.huntIntensity to a?.huntIntensityAt
+    else -> a?.huntDuration to a?.huntDurationAt
+}
+
+private fun from(src: String?) = when {
+    src == null -> "set by you"
+    src.startsWith("from") -> src
+    else -> "set ${runCatching { Format.shortDate(src) }.getOrDefault(src)}"
+}
+
+private fun fmt(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
+
+@Composable
+private fun Evidence(p: CardioPart, onOpenRun: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    // Running performance is a different quantity (orange, like runs); an estimate without a value stays plain
+    val tint = when {
+        p.id == "performance" -> Tint.ORANGE
+        p.value != null -> Tint.TEAL
+        else -> Tint.NEUTRAL
+    }
+    Tile(tint = tint, spacing = 4.dp) {
+        Text(p.title, style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = Alignment.Bottom) {
+            p.value?.let { Text("${it.toInt()}", style = MaterialTheme.typography.headlineLarge); Spacer(Modifier.width(10.dp)) }
+            Text(p.headline ?: "", style = MaterialTheme.typography.bodyLarge, color = if (p.value != null) cs.onSurfaceVariant else cs.onSurface,
+                modifier = Modifier.padding(bottom = if (p.value != null) 4.dp else 0.dp))
+        }
+        p.comparison?.let { Text(listOfNotNull(it.headline, it.detail).joinToString(". "), style = MaterialTheme.typography.bodyMedium) }
+        p.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+        p.sensitivity?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+        p.leftOut?.takeIf { it.isNotEmpty() }?.let { lo ->
+            Text("Left out: " + lo.entries.joinToString(", ") { (why, n) -> "$n $why" }, style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant)
+        }
+        if (p.points.isNotEmpty()) Text("Runs used: " + p.points.takeLast(8).joinToString(", ") { "${Format.shortDate(it.date)} ${it.value.toInt()}" },
+            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        p.caveat?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
+        p.comparison?.source?.let { Text("Reference: $it", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
+        p.sourceId?.let { id -> TextButton(onClick = { onOpenRun(id) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("Open the run") } }
+    }
+}
+
+/** The NASA/JSC activity rating, with its published wording, for the previous month. */
+@Composable
+private fun ParDialog(c: Cardio, current: Int?, onDismiss: () -> Unit, onPick: (Int?) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Your activity, last month") }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            c.parScale.forEach { o ->
+                Row(Modifier.fillMaxWidth().selectable(o.value == current, role = Role.RadioButton) { onPick(o.value) }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.Top) {
+                    RadioButton(selected = o.value == current, onClick = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text("${o.value}. ${o.text}", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }, confirmButton = { if (current != null) TextButton(onClick = { onPick(null) }) { Text("Clear") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+}
+
+/** One of HUNT's activity questions, with its published answers. */
+@Composable
+private fun ChoiceDialog(title: String, options: List<Pair<String, String>>, current: String?, onDismiss: () -> Unit,
+                         onPick: (String?) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { (v, text) ->
+                Row(Modifier.fillMaxWidth().selectable(v == current, role = Role.RadioButton) { onPick(v) }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = v == current, onClick = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text(text, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }, confirmButton = { if (current != null) TextButton(onClick = { onPick(null) }) { Text("Clear") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+}
+
+@Composable
+private fun NumberDialog(title: String, current: Double?, range: ClosedFloatingPointRange<Double>, clearLabel: String,
+                         hint: String? = null, onDismiss: () -> Unit, onSave: (Double?) -> Unit) {
+    var text by remember { mutableStateOf(current?.let { fmt(it) } ?: "") }
+    val v = text.replace(',', '.').toDoubleOrNull()
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            hint?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            OutlinedTextField(text, { text = it.take(5) }, singleLine = true, isError = text.isNotBlank() && (v == null || v !in range),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+            if (current != null) TextButton(onClick = { onSave(null) }) { Text(clearLabel) }
+        }
+    }, confirmButton = { TextButton(onClick = { onSave(v) }, enabled = v != null && v in range) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}

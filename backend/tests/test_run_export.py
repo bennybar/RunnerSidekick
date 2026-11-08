@@ -1,0 +1,160 @@
+from datetime import date, datetime, timedelta, timezone
+
+from sidekick import reports as rp
+from sidekick import run_export, weather
+from sidekick.connectors.base import Samples
+from sidekick.connectors.fixture import FixtureConnector
+from sidekick.db import connect, next_id, user_db_name, utc_now
+from sidekick.sync import run_sync
+
+ANCHOR = date(2026, 9, 30)
+
+
+def synced():
+    conn = connect(user_db_name(1, "fixture"))
+    run_sync(conn, FixtureConnector(ANCHOR), ANCHOR, 45, 3, max_backfill_days=60)
+    return conn, rp.activities(conn, "fixture", "2026-09-01", ANCHOR.isoformat())[-1]["source_id"]
+
+
+def no_net(*a, **k):
+    raise AssertionError("no network in tests")
+
+
+def test_export_v2_sections_in_order_and_the_layers_kept_apart():
+    conn, sid = synced()
+    name, md = run_export.markdown(conn, "fixture", sid, app_version="0.30.0", fetch=no_net)
+    assert name.endswith("-running.md") and md.startswith("# Running")
+    order = ["## How it went", "## Pace and splits", "## Aerobic decoupling (heart-rate drift)", "## AI input",
+             "## App-generated interpretation", "## Minute by minute", "## Data provenance"]
+    assert [md.index(s) for s in order] == sorted(md.index(s) for s in order)
+    assert "## Athlete context" not in md  # nothing entered: no section, no placeholders
+    assert "Data-based classification:" in md and "Not stated by the runner." in md
+    assert "<details>" in md and "Export schema: **Runner Sidekick LLM Export v2.1**" in md and "App version: **0.30.0**" in md
+    assert "| Metric | First half | Second half | Change |" in md and "Warm-up excluded: **first 10 min" in md
+    assert "No AI interpretation for this run yet." in md
+    conn.run_ai.insert_one({"id": next_id(conn, "run_ai"), "source_id": sid, "input_hash": "x", "model": "m", "status": "ok",
+                            "output": {"tldr": "Solid run.", "summary": "Even effort.", "went_well": [{"text": "Pacing"}],
+                                       "to_work_on": [], "next_time": {"text": "Keep it easy.", "direction": "easier"}},
+                            "created_at": utc_now()})
+    _, md = run_export.markdown(conn, "fixture", sid, fetch=no_net)
+    interp = md[md.index("## App-generated interpretation"):md.index("## Minute by minute")]
+    assert "**TL;DR:** Solid run." in interp and "Interpretation, not source data" in interp
+    assert "Solid run" not in md[:md.index("## App-generated interpretation")]  # never mixed into the facts
+    assert run_export.markdown(conn, "fixture", "nope", fetch=no_net) is None
+
+
+def test_stated_intent_and_context_override_the_inferred_type():
+    conn, sid = synced()
+    a = rp.activity_by_source_id(conn, "fixture", sid)
+    conn.run_intent.insert_one({"activity_source_id": sid, "kind": "steady", "note": "Feet tired after standing all day.",
+                                "source": "user", "client_updated_at": utc_now(), "target": "HR <= 160 bpm",
+                                "feel": "good", "limiter": "feet", "health": "recovering"})
+    r = rp.build_post_run(conn, "fixture", sid, False)
+    assert r["intent"]["kind"] == "steady" and r["intent"]["feel"] == "good"
+    assert r["classified"]["source"] == "inferred"  # kept beside it, not in its place
+    hr = a["avg_hr"]
+    assert ("cap worked" in r["next_focus"]) == (hr <= 162)
+    _, md = run_export.markdown(conn, "fixture", sid, fetch=no_net)
+    ctx = md[md.index("## Athlete context"):md.index("## How it went")]
+    assert "Intent: **Steady aerobic**" in ctx and "Target: **HR <= 160 bpm**" in ctx and "Primary limiter: **Feet**" in ctx
+    assert "Health status: **Recovering from illness**" in ctx and "Feet tired" in ctx
+    assert "User intent: **Steady aerobic**" in md and "the runner's intent comes first" in md
+    assert "reported limiter (feet)" in md
+
+
+def test_hr_cap_from_target_text():
+    assert rp.hr_cap("HR <= 160 bpm") == 160 and rp.hr_cap("stay below 150") == 150 and rp.hr_cap("155 bpm") == 155
+    assert rp.hr_cap("5:30–5:40 /km") is None and rp.hr_cap(None) is None
+
+
+class Resp:
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.body
+
+
+def test_weather_sends_only_rounded_position_and_is_kept():
+    conn, sid = synced()
+    a = rp.activity_by_source_id(conn, "fixture", sid)
+    assert weather.for_run(conn, a, no_net) is None  # no GPS position stored: no lookup at all
+    conn.raw_payload.insert_one({"source": "fixture", "kind": "activity_summary", "source_key": sid,
+                                 "payload": {"startLatitude": 31.785141, "startLongitude": 34.762619}})
+    start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00"))
+    hour = (start + timedelta(seconds=a["elapsed_s"] / 2 + 1800)).replace(minute=0, second=0, microsecond=0)
+    seen = {}
+
+    def fake(url, params, timeout):
+        seen.update(params)
+        return Resp({"hourly": {"time": [hour.strftime("%Y-%m-%dT%H:00")], "temperature_2m": [25.2], "relative_humidity_2m": [70],
+                                "dew_point_2m": [19.1], "apparent_temperature": [26.4], "wind_speed_10m": [8.0]}})
+    w = weather.for_run(conn, a, fake)
+    assert seen["latitude"] == 31.79 and seen["longitude"] == 34.76 and w["temperature_2m"] == 25.2
+    assert weather.for_run(conn, a, no_net) == w  # kept with the run
+    _, md = run_export.markdown(conn, "fixture", sid, fetch=no_net)
+    assert "## Conditions" in md and "Temperature: **25°C**" in md and "not recorded by the watch" in md
+    assert "Weather: **Open-Meteo" in md
+
+
+def test_halves_and_dynamics_round_trip():
+    t = [float(i) for i in range(0, 1200, 2)]
+    s = Samples(t, [150.0] * len(t), [3.0] * len(t), [3.0 * x for x in t], [10.0] * len(t), [170.0] * len(t),
+                [300.0] * len(t), {"gct": [260.0 if x < 600 else 270.0 for x in t], "bb": [60.0] * len(t)})
+    assert Samples.from_json(s.to_json()).dyn == s.dyn
+    h = run_export.halves(s, s.dyn["gct"])
+    assert round(h[0]) == 260 and round(h[1]) == 270
+    assert run_export.halves(s, [None] * len(t)) is None
+
+
+def test_weather_start_finish_wind_and_heat_stress():
+    conn, sid = synced()
+    a = rp.activity_by_source_id(conn, "fixture", sid)
+    conn.raw_payload.insert_one({"source": "fixture", "kind": "activity_summary", "source_key": sid,
+                                 "payload": {"startLatitude": 31.785141, "startLongitude": 34.762619}})
+    start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00"))
+    h0 = start.replace(minute=0, second=0, microsecond=0)
+    hours = [h0 + timedelta(hours=k) for k in range(4)]
+
+    def fake(url, params, timeout):
+        return Resp({"hourly": {"time": [h.strftime("%Y-%m-%dT%H:00") for h in hours], "temperature_2m": [20, 22, 24, 26],
+                                "relative_humidity_2m": [80, 75, 70, 65], "dew_point_2m": [16, 18.5, 19, 19],
+                                "apparent_temperature": [21, 23, 25, 27], "wind_speed_10m": [10, 12, 14, 16],
+                                "wind_gusts_10m": [20, 24, 28, 32], "wind_direction_10m": [350, 10, 30, 50]}})
+    w = weather.for_run(conn, a, fake)
+    f = (start - h0).total_seconds() / 3600
+    assert w["v"] == weather.WX_VERSION and abs(w["start"]["temperature_2m"] - (20 + 2 * f)) < 0.11
+    assert w["start"]["wind_direction_10m"] in range(350, 361) or w["start"]["wind_direction_10m"] <= 10  # across north
+    assert weather.compass(350) == "N" and weather.compass(225) == "SW"
+    assert weather.heat_stress(w) == "Hot"  # dew point 18.5 °C at the hour after the start: humid enough to count as hot
+    _, md = run_export.markdown(conn, "fixture", sid, fetch=no_net)
+    assert "Heat stress: **Hot**" in md and "| Start (" in md and "| Wind from |" in md and "gusts" in md
+    assert "interpolated" in md and "not recorded by the watch" in md
+
+
+def test_runs_recorded_by_a_former_samsung_or_watchletic_setup_still_load_as_ordinary_runs():
+    """Older databases can hold runs from the Samsung watch or Watchletic (no longer supported) and the settings and
+    readings that came with them: they show as ordinary runs, and nothing trips over the leftovers."""
+    from sidekick import cardio, compare, numbers, scores, trends
+    from sidekick.db import set_setting
+    conn, sid = synced()
+    other = rp.activities(conn, "fixture", "2026-09-01", ANCHOR.isoformat())[-2]["source_id"]
+    conn.activity.update_one({"source_id": sid}, {"$set": {"manufacturer": "Samsung"}})
+    conn.activity.update_one({"source_id": other}, {"$set": {"manufacturer": "DEVELOPMENT", "recorded_with": "Watchletic",
+                                                             "hr_sensor": {"name": "Strap", "kind": "external"}}})
+    set_setting(conn, "watch_history", [{"watch": "samsung", "from": "2026-09-20"}])
+    conn.daily_observation.insert_one({"source": "fixture", "local_date": ANCHOR.isoformat(), "metric": "samsung_sleep_score",
+                                       "value": 80, "unit": "samsung_score_0_100", "state": "measured", "method": "samsung"})
+    for s in (sid, other):
+        body = rp.build_post_run(conn, "fixture", s, True)
+        assert body["watch"] == "Garmin" and "recorded_with" not in body
+        md = run_export.markdown(conn, "fixture", s, fetch=no_net)[1]
+        assert "Galaxy" not in md and "Watchletic" not in md and "## Data provenance" in md
+    morning = rp.build_morning(conn, "fixture", ANCHOR, True)
+    assert all(g["metric"] != "samsung_sleep_score" for g in morning["garmin_context"])
+    for build in (cardio.build, compare.build, numbers.build, scores.build):
+        build(conn, "fixture", ANCHOR)
+    trends.build_trends(conn, "fixture", ANCHOR, 28, True)

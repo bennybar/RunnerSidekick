@@ -1,0 +1,43 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Backend: virtualenv, local data, secrets. Runtime data lives in ~/.runner-sidekick by default.
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-journal
+garmin_tokens/
+.env
+
+# Server data dir (health data, Garmin session) when deployed in-place
+/data/
+
+# Live data audit describes personal data coverage; generated locally, never committed
+docs/data-audit.md
+
+# Samsung Health Data SDK: licensed download from developer.samsung.com, kept out of this public repo
+/app/libs/samsung-health-data-api-*.aar
+
+# iOS: per-user Xcode state and local build output
+ios/**/xcuserdata/
+ios/build/
+
+# IDE state and the maintainer's private working log
+.idea/
+docs/STATUS.md
+.kotlin/

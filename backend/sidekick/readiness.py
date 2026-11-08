@@ -1,0 +1,447 @@
+"""Training readiness (0–100) and the next run, both calculated, no language model. Readiness combines last night's
+HRV and resting heart rate against your usual level, sleep, the last 7 days of running against the 4 weeks before, and
+how hard your most recent run was. The next run turns that into a session: kind, distance, a heart-rate cap and a
+pace guide, sized from your own recent runs and Garmin's zones. Garmin's own training readiness is not used."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta, timezone
+from math import exp
+from zoneinfo import ZoneInfo
+from statistics import median
+
+from . import reports as rp
+from .db import one
+from .scores import clamp, combine
+
+READINESS_VERSION = "readiness-1.9"  # 1.9: a night without the watch is "not measured", not yesterday's reading; 1.8: one weak part alone floors the final score, also with other parts missing; 1.7: routine recovery (usual after this weekday) floors at 55, an exceptional one at 45; HRV from −10%, resting HR from +3 bpm; 1.6: load ratio as of the end of the local day; 1.5: all-days baseline again; one weak part (overnight or recovery) alone floors at easy; 1.4: same-weekday baseline, one overnight signal never forces rest; 1.3: cap 25 above the weakest part, Garmin cross-check; 1.2: recovery above your usual leftover effort; local days; elapsed end
+WEIGHTS = {"hrv": 20, "resting_hr": 15, "sleep": 20, "load": 20, "recovery": 25}
+# Training load: Edwards' heart-rate-zone method (minutes × 1 to 5 by zone, half below zone 1), as fitness/fatigue
+# averages that fade exponentially (Banister-style): acute over about 7 days, chronic over about 28.
+ZONE_WEIGHT = [0.5, 1, 2, 3, 4, 5]
+ACUTE_DAYS, CHRONIC_DAYS, RECOVERY_HOURS = 7, 28, 48
+LOAD_OK, LOAD_SLOPE = 1.1, 160      # acute/chronic up to 1.1 scores 100; 1.35 → 60; 1.6 → 20
+RECOVERY_SLOPE = 80                 # recovery points = 100 − 80 × (remaining effort / typical run)
+CAP_ABOVE_LOWEST = 25  # the score is never more than 25 points above its weakest part (40 let 82 "High" through the
+                       # morning after a threshold run with recovery at 45)
+SINGLE_SIGNAL_FLOOR = 50  # the lowest one weak overnight reading alone can take the score (easy, not rest)
+ROUTINE_FLOOR, EXCEPTIONAL_FLOOR = 55, 45  # recovery alone: leftover usual after this weekday (the weekly long run) / more
+ROUTINE_RATIO = 1.25  # leftover up to 1.25× what the same weekday usually shows counts as routine
+HRV_FREE_PCT, HRV_SLOPE = -10, 3  # HRV down to 10% below usual scores 100 (nightly noise); 3 points per % below that
+RHR_FREE_BPM, RHR_SLOPE = 3, 10   # resting HR up to 3 bpm above usual scores 100; 10 points per bpm above that
+GARMIN_HOLD_HOURS = 24  # Garmin's recovery timer at or above this holds intensity back (a cross-check, not in the score)
+HARD_SHARE = 0.3
+OVERNIGHT = {"hrv", "resting_hr", "sleep"}
+PAIN_CAP = 35  # reported pain or illness: never above this  # a run with at least 30% of its time in zones 4–5 counts as hard
+
+
+def label(score: int) -> str:
+    return "High" if score >= 75 else "Moderate" if score >= 50 else "Low"
+
+
+def current(f: dict | None, today: date) -> tuple[float | None, str | None]:
+    """Today's value, or yesterday's when today's isn't in yet; with a note on which."""
+    if f is None:
+        return None, None
+    if (f.get("observed") or {}).get("value") is not None:
+        return f["observed"]["value"], None
+    last = f.get("last")
+    if last and last["date"] >= (today - timedelta(days=1)).isoformat():
+        return last["value"], "yesterday's value"
+    return None, None
+
+
+def usual(f: dict, today: date) -> tuple[float | None, str]:
+    """Your usual level: the personal range's median, or while that's still being learned, the median of at least 4
+    earlier days of the last two weeks (marked provisional)."""
+    if f.get("comparison"):
+        return f["comparison"]["median"], "your usual"
+    prior = [p["value"] for p in f.get("sparkline") or [] if p["date"] < today.isoformat()]
+    if len(prior) >= 4:
+        return median(prior), f"your last {len(prior)} days (provisional)"
+    return None, ""
+
+
+def recent_runs(conn, source: str, today: date, zones: dict | None) -> list[dict]:
+    """Runs of the last 2 days, newest first, each with whether it was hard."""
+    from .focus import zone_shares
+    out = []
+    for a in reversed(rp.activities(conn, source, (today - timedelta(days=2)).isoformat(), today.isoformat())):
+        z = zone_shares(conn, a, zones["floors"]) if zones else None
+        hard = (z["hard"] >= HARD_SHARE) if z else bool(zones and a.get("avg_hr") and a["avg_hr"] >= zones["floors"][3])
+        out.append({"days_ago": (today - date.fromisoformat(a["local_date"])).days, "hard": hard, "a": a})
+    return out
+
+
+_load_cache: dict[tuple, float] = {}
+
+
+def run_load(conn, a: dict, floors: list[float] | None) -> float:
+    """Edwards training load of one run: moving minutes in each heart-rate zone times 1–5. Without usable heart rate,
+    the run's minutes times 2 (a moderate guess)."""
+    # Per user database (activity ids are per user) and per revision of the run's data (corrected samples recompute)
+    key = (conn.name, a["id"], a.get("content_hash"), a.get("updated_at"), a.get("moving_s"), tuple(floors or ()))
+    if key in _load_cache:
+        return _load_cache[key]
+    from .analytics import insights as ins
+    from .analytics.running import MIN_ZONE_COVERAGE as MIN_HR_COVERAGE  # time in zones: the shared zone rule
+    mins = (a.get("moving_s") or 0) / 60
+    load = 2 * mins
+    s = rp.samples_for(conn, a["id"]) if floors else None
+    if s is not None:
+        r = ins.RunData(a["source_id"], a["local_date"], datetime.min, None, a["distance_m"], a["moving_s"], None, s, [], "steady")
+        zt = ins.zone_time(r, floors)
+        if sum(zt) and sum(zt) >= MIN_HR_COVERAGE * (a.get("moving_s") or 0):
+            load = sum(w * t / 60 for w, t in zip(ZONE_WEIGHT, zt)) * (a["moving_s"] / sum(zt))
+    _load_cache[key] = load
+    return load
+
+
+def moment(conn, d: date) -> datetime:
+    """When readiness is judged: now for today, 8:00 local for an earlier day."""
+    tz = ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))
+    now = datetime.now(timezone.utc)
+    if d >= now.astimezone(tz).date():
+        return now
+    return datetime.combine(d, time(8), tz).astimezone(timezone.utc)
+
+
+def training_load(conn, source: str, at: datetime, zones: dict | None) -> dict | None:
+    """Acute and chronic load (exponentially fading sums per day) and the effort of recent runs not yet recovered from,
+    above what's usual for you at this time of day. None with fewer than 3 weeks of runs."""
+    # Activities are stored by local date: query the runner's calendar days, then keep runs finished by `at` (in UTC,
+    # by elapsed time, so a paused run doesn't seem to end early)
+    local = at.astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()
+    runs = [a for a in rp.activities(conn, source, (local - timedelta(days=84)).isoformat(), local.isoformat())
+            if a.get("start_utc") and (a.get("elapsed_s") or a.get("moving_s"))]
+    ends = [(datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=a.get("elapsed_s") or a["moving_s"]), a)
+            for a in runs]
+    ends = sorted(((e, a) for e, a in ends if e <= at), key=lambda x: x[0])
+    if len(ends) < 6 or (at - ends[0][0]).days < 21:
+        return None
+    floors = zones["floors"] if zones else None
+    loads = [(e, run_load(conn, a, floors)) for e, a in ends]
+    # Fading averages per day (a per-day rate, so acute and chronic are comparable)
+    # Fading averages start from zero; divided by the share of each one's weight the history actually covers, so a short
+    # history doesn't read as a spike (the slower chronic average would otherwise lag far behind)
+    # The load ratio is taken as of the end of the local day (with the runs finished so far), so it doesn't drift through
+    # the day as the averages fade by the hour; it changes only when a run comes in
+    tz = ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))
+    day_end = datetime.combine(local + timedelta(days=1), time(0), tz).astimezone(timezone.utc)
+    span = (day_end - ends[0][0]).total_seconds() / 86400 + 1
+    acute = sum(l * exp(-(day_end - e).total_seconds() / 86400 / ACUTE_DAYS) for e, l in loads) / ACUTE_DAYS / (1 - exp(-span / ACUTE_DAYS))
+    chronic = sum(l * exp(-(day_end - e).total_seconds() / 86400 / CHRONIC_DAYS) for e, l in loads) / CHRONIC_DAYS / (1 - exp(-span / CHRONIC_DAYS))
+    typical = median(l for e, l in loads if (at - e).days < 28) if any((at - e).days < 28 for e, _ in loads) else median(l for _, l in loads)
+
+    def left(when: datetime) -> float:  # effort still fading at `when`, from runs finished by then
+        return sum(l * exp(-(when - e).total_seconds() / 3600 / RECOVERY_HOURS) for e, l in loads if e <= when)
+    # What's normally still there at this time of day (median of the last 4 weeks): a steady routine always leaves some,
+    # and that's your normal. Only what's above it counts, so the day after a long run or a weekly hard session shows as
+    # still recovering (it is) — and alone it can only hold the day to easy (SINGLE_SIGNAL_FLOOR), never to rest.
+    usual = median(left(at - timedelta(days=k)) for k in range(1, 29))
+    same_day = median(left(at - timedelta(days=7 * k)) for k in range(1, 5))  # this weekday, this time, the last 4 weeks
+    now = left(at)
+    fatigue = max(0.0, now - usual) / typical if typical else 0
+    days = (local - ends[-1][0].astimezone(ZoneInfo(rp.get_setting(conn, "timezone", "UTC"))).date()).days
+    return {"ratio": acute / chronic if chronic else 1.0, "fatigue": fatigue, "acute": acute, "chronic": chronic, "typical": typical,
+            "left_now": now / typical if typical else 0, "left_usual": usual / typical if typical else 0,
+            "left_same_day": same_day / typical if typical else 0, "routine": same_day > 0 and now <= ROUTINE_RATIO * same_day,
+            "last_when": "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago" if days < 7 else None}
+
+
+def garmin_check(conn, source: str, today: date, at: datetime | None) -> dict | None:
+    """Garmin's own training readiness for the day and what's left on its recovery timer now, for comparison and as a
+    safety cross-check. None when Garmin sent nothing for the day."""
+    raw = one(conn.raw_payload, {"source": source, "kind": "training_readiness", "source_key": today.isoformat()})
+    p = (raw or {}).get("payload")
+    p = p[0] if isinstance(p, list) and p else p
+    if not isinstance(p, dict) or p.get("score") is None:
+        return None
+    left = None
+    if p.get("recoveryTime") is not None and p.get("timestamp") and at is not None:
+        stamp = datetime.fromisoformat(p["timestamp"].split(".")[0]).replace(tzinfo=timezone.utc)
+        left = max(0.0, p["recoveryTime"] / 60 - (at - stamp).total_seconds() / 3600)
+    return {"score": p["score"], "level": (p.get("level") or "").replace("_", " ").lower() or None,
+            "recovery_hours": round(left) if left is not None else None}
+
+
+def build(conn, source: str, today: date, morning: dict) -> dict:
+    by = {f["metric"]: f for f in morning["findings"]}
+    zones = rp.hr_zones(conn)
+    parts = []
+    # Readings Garmin recorded as not measured last night (the watch was off): yesterday's value isn't last night's.
+    # (Yesterday's stands in only while last night's simply hasn't synced yet.)
+    off = {o["metric"] for o in conn.daily_observation.find({"local_date": today.isoformat(), "state": {"$ne": "measured"}}, {"metric": 1})} \
+        if conn is not None else set()
+
+    def reading(metric):
+        return (None, None) if metric in off else current(by.get(metric), today)
+
+    f = by.get("hrv_overnight_avg")
+    v, when = reading("hrv_overnight_avg")
+    base, against = usual(f, today) if v is not None else (None, "")
+    if base:
+        pct = 100 * (v - base) / base
+        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms", "points": round(100 if pct >= HRV_FREE_PCT else clamp(100 + HRV_SLOPE * (pct - HRV_FREE_PCT))),
+                      "say": "Normal for you" if pct >= HRV_FREE_PCT else f"Lower than usual ({pct:.0f}%)",
+                      "note": f"{pct:+.0f}% vs {against} {round(base)} ms" + (f" · {when}" if when else "") +
+                              f"; up to {-HRV_FREE_PCT}% below scores 100, then {HRV_SLOPE} points per %"})
+    else:
+        parts.append({"id": "hrv", "title": "HRV", "value": f"{round(v)} ms" if v else None, "points": None, "say": "Not known yet",
+                      "note": "Needs a few nights to know your usual"})
+
+    f = by.get("resting_hr")
+    v, when = reading("resting_hr")
+    base, against = usual(f, today) if v is not None else (None, "")
+    if (f or {}).get("status") == "not_compared":  # a daytime value: no night on the watch, so it doesn't count
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm" if v else None, "points": None,
+                      "say": "Not counted", "note": "A daytime value: the watch wasn't worn overnight"})
+    elif base:
+        d = v - base
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm",
+                      "points": round(100 if d <= RHR_FREE_BPM else clamp(100 - RHR_SLOPE * (d - RHR_FREE_BPM))),
+                      "say": "Normal for you" if d <= RHR_FREE_BPM else f"Higher than usual (+{d:.0f} bpm)",
+                      "note": f"{d:+.0f} bpm vs {against} {round(base)}" + (f" · {when}" if when else "") +
+                              f"; each bpm over +{RHR_FREE_BPM} costs {RHR_SLOPE} points"})
+    else:
+        parts.append({"id": "resting_hr", "title": "Resting heart rate", "value": f"{round(v)} bpm" if v else None, "points": None,
+                      "say": "Not known yet",
+                      "note": "Needs a few days to know your usual"})
+
+    v, when = reading("sleep_duration")
+    if v is not None:
+        h = v / 3600
+        hm = f"{round(v / 60) // 60} h {round(v / 60) % 60:02d} min"  # minutes rounded first: never "6 h 60 min"
+        parts.append({"id": "sleep", "title": "Sleep", "value": hm, "points": round(100 if h >= 7 else clamp(100 - 40 * (7 - h))),
+                      "say": f"Enough ({hm})" if h >= 7 else f"Short ({hm})",
+                      "note": "7 h or more scores 100; each hour short costs 40 points" + (f" · {when}" if when else "")})
+    else:
+        parts.append({"id": "sleep", "title": "Sleep", "value": None, "points": None, "say": "Not in yet", "note": "Not in yet"})
+
+    for p in parts:
+        if p.get("points") is None and {"hrv": "hrv_overnight_avg", "resting_hr": "resting_hr", "sleep": "sleep_duration"}[p["id"]] in off:
+            p.update(value=None, say="Not measured last night", note="The watch didn't record it last night, so this part is left out")
+
+    at = moment(conn, today)
+    tl = training_load(conn, source, at, zones)
+    if tl:
+        r = tl["ratio"]
+        parts.append({"id": "load", "title": "Training load", "value": f"{round(100 * r)}% of usual",
+                      "points": round(100 if r <= LOAD_OK else clamp(100 - LOAD_SLOPE * (r - LOAD_OK))),
+                      "say": "Normal for you" if r <= LOAD_OK else f"{'Heavier' if r <= 1.4 else 'Much heavier'} than usual ({round(100 * r)}%)",
+                      "note": "Last week's effort (heart-rate zones × minutes, fading over 7 days) against your usual (fading over 28 days)"})
+        f = tl["fatigue"]
+        when = tl["last_when"]
+        parts.append({"id": "recovery", "title": "Recovery", "value": f"{round(100 * f)}% of a typical run above usual",
+                      "points": round(clamp(100 - RECOVERY_SLOPE * f)),
+                      "say": ("Recovered" if f < 0.15 else "Mostly recovered" if f < 0.4 else "Still recovering" if f < 0.8
+                              else "Tired from recent runs")
+                             + ("" if f < 0.15 else ", as usual after this weekday" if tl.get("routine") else ", more than usual for this weekday")
+                             + (f" (last run {when})" if when else ""),
+                      "note": (f"Effort of recent runs still left after fading over about 2 days ({round(100 * tl['left_now'])}% of a "
+                               f"typical run), above what's usual for you at this time ({round(100 * tl['left_usual'])}%)")})
+    else:
+        parts.append({"id": "load", "title": "Training load", "value": None, "points": None, "say": "Not known yet",
+                      "note": "Needs 3 weeks of runs"})
+        parts.append({"id": "recovery", "title": "Recovery", "value": None, "points": None, "say": "Not known yet",
+                      "note": "Needs 3 weeks of runs"})
+
+    for p in parts:
+        pts = p.get("points")
+        p["verdict"] = "unknown" if pts is None else "good" if pts >= 85 else "ok" if pts >= 60 else "low"
+        if p["id"] == "load" and p["verdict"] == "good" and not p["say"].startswith("Normal"):
+            p["verdict"] = "ok"  # "heavier than usual" never reads as good
+    out = combine(parts, WEIGHTS)
+    # Load and recovery both come from the running history: without any overnight reading there's no score
+    if out["status"] == "ok" and not any(p.get("points") is not None for p in parts if p["id"] in OVERNIGHT):
+        out = {"status": "unavailable", "components": parts, "detail": "The watch didn't record last night, so there's no readiness today. Go by feel; easy is a safe choice."
+                if {"hrv_overnight_avg", "resting_hr", "sleep_duration"} <= off else "Waiting for last night's sleep, HRV or resting heart rate."}
+    if out["status"] == "ok":
+        # One very low part (a big jump in running, a short night) limits the whole score
+        low = min(p["points"] for p in parts if p.get("points") is not None)
+        cap = low + CAP_ABOVE_LOWEST
+        # One weak part on its own (a short night, resting HR a few beats up, or yesterday's long or hard run still
+        # fading) holds the day to easy, never to rest: alone it's likely noise or simply normal recovery. Two weak
+        # parts together cap as usual.
+        weak = [p for p in parts if p.get("points") is not None and p["points"] < 60]
+        # Recovery alone: what this weekday usually leaves (the morning after the weekly long run) floors higher than
+        # leftover beyond that, which still stays easy, not rest.
+        floor = None
+        if len(weak) == 1 and weak[0]["id"] in OVERNIGHT:
+            floor = SINGLE_SIGNAL_FLOOR
+        elif len(weak) == 1 and weak[0]["id"] == "recovery":
+            floor = ROUTINE_FLOOR if tl.get("routine") else EXCEPTIONAL_FLOOR
+        if floor is not None:
+            cap = max(cap, floor)
+        if out["score"] > cap:
+            out["score"], out["capped_by"] = cap, next(p["id"] for p in parts if p.get("points") == low)
+        # ...and it's a real floor: with other parts missing, the weighted score of that one part could be lower still
+        if floor is not None and out["score"] < floor:
+            out["score"], out["floored_by"] = floor, weak[0]["id"]
+        out["label"] = label(out["score"])
+        out["headline"] = {"High": "Ready to train", "Moderate": "Fine for an easy run", "Low": "Take it easy or rest"}[out["label"]]
+        weak = [p for p in parts if p.get("points") is not None and p["points"] < 85]
+        if weak:
+            out["held_back_by"] = min(weak, key=lambda p: p["points"])["title"]
+        if morning["recommendation"]["rule_id"] == "R0":
+            # Reported pain or illness overrides every reading
+            out.update(score=min(out["score"], PAIN_CAP), label="Low", headline="Take it easy or rest", held_back_by="What you reported")
+    out.update(algorithm_version=READINESS_VERSION, garmin=garmin_check(conn, source, today, at),
+               basis="Calculated from your own data, not Garmin's training readiness. The weakest part caps the score at 25 points "
+                     "above it, but one weak part on its own never takes it below easy (50 for a night's reading; 55 for recovery "
+                     "usual after this weekday, 45 beyond that). Two weak parts cap as usual. Garmin's recovery timer is a separate "
+                     "cross-check, not in the score: while it shows a day or more, nothing harder than easy. A guide, not a medical score.")
+    return out
+
+
+# ---------------------------------------------------------------- the next run
+
+KIND_TITLE = {"rest": "Rest or a short walk", "easy": "Easy run", "steady": "Steady run", "long": "Long run, easy effort",
+              "tempo": "Tempo run", "intervals": "Intervals", "race_pace": "Race-pace session", "race": "Race day"}
+
+
+def next_day(conn, source: str, today: date) -> date:
+    """Today if it's a running day without a run yet, otherwise the next running day."""
+    days = rp.get_setting(conn, "running_days", [0, 2, 4, 5]) or list(range(7))
+    ran_today = bool(rp.activities(conn, source, today.isoformat(), today.isoformat()))
+    start = 1 if ran_today else 0
+    return next(today + timedelta(days=k) for k in range(start, start + 8) if (today + timedelta(days=k)).weekday() in days)
+
+
+def session_day(conn, source: str, today: date, race: dict | None) -> date:
+    """The day of the next run. With a race week plan: its next session that's still to do (a planned rest day is
+    skipped, not turned into a run). A race before the next running day comes first, even on a day you don't
+    usually run."""
+    day = next_day(conn, source, today)
+    if race:
+        ran_today = bool(rp.activities(conn, source, today.isoformat(), today.isoformat()))
+        todo = [s for s in (race.get("week") or {}).get("sessions", [])
+                if s["kind"] != "rest" and s["status"] in ("today", "planned") and not (s["date"] == today.isoformat() and ran_today)]
+        if todo:
+            day = date.fromisoformat(todo[0]["date"])
+        elif race.get("week"):
+            # Nothing left to do this week (all rest, done or moved): the next run is next week's first running day
+            after = date.fromisoformat(race["week"]["week_start"]) + timedelta(days=7)
+            day = next_day(conn, source, after) if after > today else day
+        race_day = date.fromisoformat(race["date"])
+        if today <= race_day < day:
+            day = race_day
+    return day
+
+
+def day_label(d: date, today: date) -> str:
+    return "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%A")
+
+
+def next_run(conn, source: str, today: date, morning: dict, ready: dict, race: dict | None, hold: str | None = None,
+             allowed: str = "hard") -> dict | None:
+    """hold: why intensity is held back today (from decide.hold_reason), or None. allowed: the hardest session today
+    allows (decide.allows); a run today never goes past it."""
+    zones = rp.hr_zones(conn)
+    runs = rp.activities(conn, source, (today - timedelta(days=27)).isoformat(), today.isoformat())
+    if len(runs) < 3:
+        return None
+    rec = morning["recommendation"]
+    day = session_day(conn, source, today, race)
+    score = ready.get("score")
+    rr = recent_runs(conn, source, today, zones)
+    hard_recent = any(r["hard"] for r in rr)
+    from .stats import block
+    hard_share = block(conn, source, today - timedelta(days=27), today, zones)["hard_share"]
+    typical = median(a["distance_m"] or 0 for a in runs) / 1000
+    longest = max(a["distance_m"] or 0 for a in runs) / 1000
+    why = [f"Readiness {score} ({ready['label'].lower()})"] if score is not None else []
+
+    # 1. Choose one session. Safety first, then the race week's session for that day (any kind), then the history rules.
+    planned = next((s for s in (race or {}).get("week", {}).get("sessions", []) if s["date"] == day.isoformat()), None) if race else None
+    if day == today and rec["rule_id"] == "R0":
+        kind = "rest"
+        why.append("you said you're not feeling well")
+    elif day == today and score is not None and score < 40:
+        kind = "rest"
+        why.append("readiness is very low today")
+    elif (planned and planned["kind"] == "race") or (race and day.isoformat() == race["date"]):
+        kind = "race"
+        why.append(f"race day: {race['label']}")
+    elif day == today and hold:
+        kind = "easy"
+        why.append(hold)
+    elif planned and planned["kind"] != "rest":
+        kind = "easy" if planned["kind"] == "strides" else planned["kind"]
+        why.append(f"your race week plan ({race['label']})")
+    elif race and race.get("phase") == "recovery":
+        kind = "easy"
+        why.append(f"recovery after {race['label']}: easy running only")
+    elif hard_recent:
+        kind = "easy"
+        why.append("your last run was hard")
+    elif hard_share is not None and hard_share > HARD_SHARE:
+        kind = "easy"
+        why.append(f"{round(100 * hard_share)}% of your last 4 weeks was in zones 4–5; easy running builds the base")
+    elif day.weekday() == max(rp.get_setting(conn, "running_days", [0, 2, 4, 5]) or [6]):
+        kind = "long"
+        why.append("the last running day of your week")
+    else:
+        kind = "steady"
+        why.append("you're fresh and recent running was balanced")
+
+    # Moderate readiness: steady at most today, so tempo or intervals become a steady run (the headline says the same)
+    if day == today and allowed == "steady" and kind in ("tempo", "intervals", "race_pace"):
+        why.append(f"readiness is moderate: steady instead of {kind.replace('_', ' ')}")
+        kind = "steady"
+
+    # 2. Derive distance, time and effort from that one session, so they always agree with each other
+    easy_pace = None
+    ins = rp.latest_body(conn, "insights")
+    if ins:
+        e = next((i for i in ins["insights"] if i["id"] == "easy_pace" and i["verdict"] == "pattern"), None)
+        easy_pace = (e or {}).get("effect", {}).get("pace_s_per_km")
+    paced = [a for a in runs if a.get("distance_m") and a.get("moving_s")]
+    typical_pace = median(a["moving_s"] / (a["distance_m"] / 1000) for a in paced) if paced else None
+    pace_s = easy_pace if kind in ("easy", "long") else typical_pace if kind in ("steady", "tempo", "intervals", "race_pace") else None
+    km = minutes = None
+    if kind == "race":
+        from .race import DISTANCES
+        km = round(DISTANCES[race["distance"]][1] / 1000, 1)
+    elif kind != "rest" and planned and planned.get("minutes") and kind == (planned["kind"] if planned["kind"] != "strides" else "easy"):
+        minutes = planned["minutes"]  # the plan's duration leads; the distance follows from it at your pace
+        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else None
+    elif kind != "rest":
+        km = {"easy": typical * (0.7 if score is not None and score < 60 else 0.9), "steady": typical,
+              "long": min(longest * 1.1, max(longest, typical * 1.3))}.get(kind, typical)
+        km = max(1.0, round(km * 2) / 2)  # half-km steps; no larger floor, so "shorter" stays shorter
+        minutes = round(km * pace_s / 60 / 5) * 5 if pace_s else None
+    # A session turned easier (held back, or steady instead of tempo) never grows past the plan's duration: the week's
+    # budget still holds. Without a pace to turn it into distance, it's a time, not a guessed distance.
+    if planned and planned.get("minutes") and kind not in ("rest", "race") and (minutes is None or minutes > planned["minutes"]):
+        minutes = planned["minutes"]
+        km = round(minutes * 60 / pace_s * 2) / 2 if pace_s else None
+    hr = None
+    if zones:
+        f = [round(x) for x in zones["floors"]]
+        hr = {"easy": {"max": f[2], "text": f"under {f[2]} bpm (zone 2)"}, "long": {"max": f[2], "text": f"under {f[2]} bpm (zone 2)"},
+              "steady": {"min": f[2], "max": f[3], "text": f"{f[2]}–{f[3]} bpm (zone 3)"},
+              "tempo": {"min": f[3], "max": f[4], "text": f"{f[3]}–{f[4]} bpm (zone 4) in the middle block"},
+              "intervals": {"min": f[3], "text": f"repeats above {f[3]} bpm, easy jogs between"}}.get(kind)
+    # The pace as a number too, so the app can show it in the runner's units
+    pace_s, pace_way = ((easy_pace, "or_slower") if easy_pace and kind in ("easy", "long") else
+                        (race["target_pace_s_per_km"], "around") if kind in ("race", "race_pace") and race and race.get("target_pace_s_per_km")
+                        else (None, None))
+    pace = (f"about {rp.fmt_pace(pace_s)} or slower" if pace_way == "or_slower" else f"around {rp.fmt_pace(pace_s)}" if pace_way else None)
+    # Race day while today allows only easy (or rest): the race stays the day's event, and says so plainly
+    caution = None
+    if kind == "race" and day == today and allowed in ("easy", "rest"):
+        caution = (f"Readiness says {'rest' if allowed == 'rest' else 'easy only'} today ({hold or 'readiness is low'}). "
+                   "If you race, run it easy or start well below your target pace.")
+        pace = pace_s = pace_way = None  # no target-pace instruction next to that
+    # An optional session (the week's target already reached) stays optional here too
+    optional = bool(planned and planned.get("optional") and kind not in ("race", "rest"))
+    if optional:
+        why.append("optional: this week's target is already met" if (race.get("week") or {}).get("done_minutes", 0) >=
+                   ((race.get("week") or {}).get("target_minutes") or 1e9) else "optional this week")
+    return {"date": day.isoformat(), "day_label": day_label(day, today), "kind": kind, "title": KIND_TITLE[kind],
+            "optional": optional, "caution": caution,
+            "distance_km": km, "minutes": minutes, "hr": hr, "pace": pace,
+            "pace_s_per_km": round(pace_s) if pace_s else None, "pace_way": pace_way, "why": why, "algorithm_version": READINESS_VERSION,
+            "basis": "Sized from your runs of the last 4 weeks (typical distance, longest run), Garmin's heart-rate zones and "
+                     "your easy pace. Calculated, not written by AI."}
