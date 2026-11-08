@@ -9,10 +9,12 @@ HRV patterns and, optionally, AI summaries.
 Every number says what it is based on and how sure it is. It's a training aid, not medical advice.
 
 <p>
-<img src="docs/screenshots/today-light.png" width="220" alt="Today">
-<img src="docs/screenshots/activities.png" width="220" alt="Runs">
-<img src="docs/screenshots/run-detail-hr-dropout.png" width="220" alt="A run">
+<img src="docs/screenshots/today.png" width="200" alt="Today: readiness, the next run, this week's focus">
+<img src="docs/screenshots/run.png" width="200" alt="A run: distance, pace, verdict, aerobic decoupling">
+<img src="docs/screenshots/hrv.png" width="200" alt="Overnight HRV: the night's curve, first and last 3 hours, 7 days">
+<img src="docs/screenshots/trends.png" width="200" alt="Trends: the last 4 weeks">
 </p>
+<sub>iOS app, demo data.</sub>
 
 ## How it fits together
 

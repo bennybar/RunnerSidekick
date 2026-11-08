@@ -41,3 +41,6 @@ ios/build/
 .idea/
 docs/STATUS.md
 .kotlin/
+
+# Server-specific Docker Compose settings (e.g. labels for other tools on the host)
+docker-compose.override.yml
