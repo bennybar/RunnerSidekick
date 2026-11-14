@@ -25,7 +25,7 @@ struct MeView: View {
             LazyVStack(alignment: .leading, spacing: 10) {
                 if s?.synthetic == true { DemoBadge().padding(.leading, 8) }
                 // Only a Garmin problem is shown up here; everything else lives in its own section
-                if let st = s?.connection.state, ["reauth_required", "not_configured", "error"].contains(st) {
+                if let st = s?.connection.state, ["reauth_required", "not_configured", "error"].contains(st), !store.isApple {
                     CardGroup(tint: .orange) {
                         GroupRow(st == "error" ? "Garmin sync failing" : "Garmin sign-in needed",
                                  supporting: st == "error" ? s?.connection.detail ?? "The last sync failed; it retries on its own."
@@ -38,6 +38,7 @@ struct MeView: View {
                 CardGroup(title: "Reports", tint: .purple) {
                     GroupRow("Morning briefings, run reports, weekly reviews", supporting: "By month, with every version") { nav.open(.journal) }
                 }
+                if s?.synthetic != true { watchGroup(r) }
                 garminGroup(s)
                 if let r { training(r) }
                 appearance
@@ -91,6 +92,7 @@ struct MeView: View {
             try await store.remoteSettings()
         }
         if let m { store.toast = m }
+        if store.isApple { _ = try? await store.refreshApple() }  // a server without it yet: the phone's own record shows
     }
 
     @ViewBuilder private func profile(_ s: Status?) -> some View {
@@ -102,7 +104,7 @@ struct MeView: View {
                     .frame(width: 48, height: 48).background(Circle().fill(Palette.card.opacity(0.8)))
                 VStack(alignment: .leading) {
                     Text(name).font(Typo.titleMedium)
-                    let sub = [m.map { $0.role == "owner" ? "Server owner" : "Member" }, s.map { $0.synthetic ? "Demo data" : "Garmin" }]
+                    let sub = [m.map { $0.role == "owner" ? "Server owner" : "Member" }, s.map { $0.synthetic ? "Demo data" : store.watchName }]
                         .compactMap { $0 }.joined(separator: " · ")
                     if !sub.isEmpty { Text(sub).font(Typo.bodyMedium).foregroundStyle(Palette.onSurfaceVariant) }
                 }
@@ -115,6 +117,7 @@ struct MeView: View {
         let supporting: String = {
             guard let s else { return "" }
             if s.synthetic { return "Demo data source" }
+            if store.isApple { return "Not syncing while Apple Watch is your watch. What Garmin sent before is kept." }
             if g?.connected == true { return "Connected with Garmin's official sign-in. " + (g?.dataImport ?? "") }
             if !s.garminLinked { return "Not connected. Connect to download your runs, sleep and health data." }
             if s.connection.state == "connected" {
@@ -143,6 +146,63 @@ struct MeView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// One watch per account: Garmin (synced by the server) or Apple Watch (this phone uploads from Apple Health).
+    @ViewBuilder private func watchGroup(_ r: SettingsDto?) -> some View {
+        let apple = store.isApple
+        CardGroup(title: "Your watch") {
+            GroupCustom {
+                Text("Your watch").font(Typo.bodyLarge)
+                Text("Switching starts fresh baselines; while Apple Watch is chosen, Garmin stops syncing for this account (its data is kept).")
+                    .font(Typo.bodyMedium).foregroundStyle(Palette.onSurfaceVariant)
+                ChoiceGroup(labels: ["Garmin", "Apple Watch"], selected: r == nil ? nil : apple ? 1 : 0, enabled: !busy && r != nil) { i in
+                    if (i == 1) != apple { chooseWatch(apple: i == 1) }
+                }
+                .padding(.top, 4)
+            }
+            if apple {
+                let run = store.healthRun
+                GroupRow(headline: "Apple Health", supporting: appleHealthText()) {
+                    PillButton(title: run == nil ? "Sync now" : "Syncing", filled: false, busy: run != nil) { HealthImport.start() }
+                        .disabled(run != nil)
+                }
+            }
+        }
+    }
+
+    private func appleHealthText() -> String {
+        let st = store.healthState
+        let a = store.apple?.value
+        var lines: [String] = []
+        if let run = store.healthRun { lines.append("\(run.label) · \(Int(run.fraction * 100))%") }
+        else if st.since != nil && !st.importDone { lines.append("First import (the last 12 months) not finished: it carries on with Sync now or when the app opens.") }
+        if let up = Fmt.instant(a?.lastUploadAt) ?? st.lastUploadAt { lines.append("Last upload \(Fmt.ago(up))") }
+        else if store.healthRun == nil { lines.append("Nothing uploaded yet") }
+        if let c = a?.counts {
+            let parts = [c.workouts.map { "\($0) runs" }, c.nights.map { "\($0) nights" }, c.days.map { "\($0) days" }].compactMap { $0 }
+            if !parts.isEmpty { lines.append(parts.joined(separator: " · ") + " on your server") }
+        }
+        lines.append("Reads runs with routes, heart rate, power and cadence; sleep, HRV, resting heart rate, VO₂ max, steps, exercise minutes and weight.")
+        if let e = st.lastError, store.healthRun == nil { lines.append(e) }
+        return lines.joined(separator: "\n")
+    }
+
+    private func chooseWatch(apple: Bool) {
+        busy = true
+        Task {
+            let m = await store.attempt { try await store.saveSettings(["watch": apple ? "apple" : "garmin"]) }
+            busy = false
+            if let m { store.toast = m; return }
+            if apple {
+                await store.connectAppleHealth()
+            } else {
+                HealthSync.stopObservers()
+                await HealthSync.shared.cancel()
+                store.toast = "Garmin is your watch again"
+            }
+            _ = await store.attempt { try await store.refreshAll() }
         }
     }
 
@@ -209,6 +269,7 @@ struct MeView: View {
                 })).labelsHidden()
             }
             GroupRow(headline: "Background refresh", supporting: notif ? "Already on with notifications (about hourly)."
+                     : store.isApple ? "Keeps today's briefing and your runs ready offline, about every 3 hours. Apple Health uploads whenever iOS wakes the app for new data either way."
                      : "Keeps today's briefing and your runs ready offline, about every 3 hours. Garmin itself syncs on the server either way.") {
                 Toggle("", isOn: Binding(get: { notif || store.local.backgroundRefresh }, set: { on in
                     store.local.backgroundRefresh = on

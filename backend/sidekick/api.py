@@ -28,7 +28,8 @@ from .config import SOURCE_FIXTURE, Config
 from .connectors.base import Samples
 from .connectors.fixture import FixtureConnector
 from .connectors.garmin import GarminConnector
-from .db import WEEKDAYS, connect, many, one, put, put_if_newer, set_setting, utc_now
+from .db import WEEKDAYS, connect, get_setting, many, one, put, put_if_newer, set_setting, utc_now
+from . import apple
 from .sync import get_connection_row, next_manual_sync, run_sync
 
 log = logging.getLogger(__name__)
@@ -134,6 +135,63 @@ class SettingsIn(BaseModel):
     notifications: bool | None = None
     background_refresh: bool | None = None
     vo2_source: Literal["watch", "sidekick"] | None = None  # the VO2 max the scores use: the watch's (default) or our experimental one
+    watch: Literal["garmin", "apple"] | None = None  # one watch per account: Garmin (synced by the server) or Apple (the iPhone uploads)
+
+
+class AppleEventIn(BaseModel):
+    type: str = Field(max_length=20)   # pause | resume | lap | segment (others are ignored)
+    start: datetime
+    end: datetime | None = None
+
+
+class AppleWorkoutIn(BaseModel):
+    """One Apple Watch workout (see apple.py and the contract): series rows are [seconds from start, value, ...]."""
+    uuid: str = Field(min_length=1, max_length=100)
+    start: datetime
+    end: datetime
+    sport: str = Field(max_length=40)
+    indoor: bool = False
+    distance_m: float | None = Field(default=None, ge=0, le=1_000_000)
+    moving_s: float | None = Field(default=None, ge=0, le=7 * 86400)
+    elapsed_s: float | None = Field(default=None, ge=0, le=7 * 86400)
+    energy_kcal: float | None = Field(default=None, ge=0, le=100_000)
+    elevation_gain_m: float | None = Field(default=None, ge=0, le=20_000)
+    device: str | None = Field(default=None, max_length=100)
+    events: list[AppleEventIn] = Field(default_factory=list, max_length=5000)
+    # hr, distance, route, power, steps, speed (any other series is ignored)
+    series: dict[str, list[list[float | None]]] = Field(default_factory=dict)
+    dynamics: dict[str, float | None] | None = None
+
+
+class AppleDayIn(BaseModel):
+    date: date
+    resting_hr: float | None = Field(default=None, ge=20, le=200)
+    steps: float | None = Field(default=None, ge=0, le=300_000)
+    exercise_min: float | None = Field(default=None, ge=0, le=1440)
+    vo2max: float | None = Field(default=None, ge=10, le=100)
+    weight_kg: float | None = Field(default=None, ge=20, le=400)
+
+
+class AppleHrvIn(BaseModel):
+    time: datetime
+    sdnn_ms: float | None = Field(default=None, ge=0, le=1000)
+    rmssd_ms: float | None = Field(default=None, ge=0, le=1000)
+    beats: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class AppleSleepIn(BaseModel):
+    start: datetime
+    end: datetime
+    stage: str = Field(max_length=20)  # deep | core | rem | awake | asleep | in_bed (others are ignored)
+
+
+class AppleUploadIn(BaseModel):
+    """What the iPhone app read from Apple Health. Batches are bounded (checked in the handler, refused with 413)."""
+    tz: str | None = Field(default=None, max_length=60)
+    workouts: list[AppleWorkoutIn] = Field(default_factory=list)
+    days: list[AppleDayIn] = Field(default_factory=list)
+    hrv: list[AppleHrvIn] = Field(default_factory=list)
+    sleep: list[AppleSleepIn] = Field(default_factory=list)
 
 
 class Vo2HoldIn(BaseModel):
@@ -371,7 +429,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         cps = {r["stream"]: r for r in many(conn.sync_checkpoint, {"source": cfg.source})}
         job = one(conn.sync_job, {"source": cfg.source}, sort=[("id", -1)])
         return {
-            "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)), "watch": "garmin",
+            "mode": cfg.source, "synthetic": synthetic, "today": today(conn).isoformat(), "timezone": str(tz(conn)), "watch": rp.watch(conn),
             "week_start_day": WEEKDAYS[rp.first_weekday(conn)],
             "connection": {k: row[k] for k in ("state", "detail", "last_attempt_at", "last_success_at", "retry_not_before")} if row else
             {"state": make_connector(conn, user_cfg(user)).connection_state().value, "detail": None, "last_attempt_at": None, "last_success_at": None, "retry_not_before": None},
@@ -393,6 +451,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def sync_now(conn=Depends(db), user=Depends(current_user)):
         if user["id"] in running:
             return {"started": False, "detail": "sync already running"}
+        if rp.watch(conn) == "apple":  # nothing to fetch from Garmin: the iPhone app uploads the Apple Watch's data
+            return {"started": False, "detail": "The Apple Watch is this account's watch: the iPhone app sends its data"}
         # Not too often: Garmin can rate-limit or lock an account hit in bursts (demo data has no such limit)
         # No cooldown of the app's own; only Garmin's "please wait", when it sent one
         wait = None if synthetic else next_manual_sync(conn, cfg.source)
@@ -563,18 +623,19 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
 
     @api.get("/v1/fitness")
     def fitness(conn=Depends(db)):
-        """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace."""
+        """Garmin's own fitness numbers (labelled as Garmin's) plus Runner Sidekick's records and easy pace. With the Apple
+        Watch, Apple's VO2 max series instead, and none of Garmin's (they'd only be its last numbers before the switch)."""
         d = today(conn)
-        vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, "garmin_vo2max_running", d.isoformat()).items())
+        vo2 = [{"date": k, "value": v} for k, v in sorted(rp.series(conn, cfg.source, rp.vo2_metric(conn), d.isoformat()).items())
                if k >= (d - timedelta(days=365)).isoformat()]  # a year: the VO2 max sheet's progress chart
-        maker = "Garmin"
+        maker = rp.watch_maker(conn)
         from .scores import vo2_maker
         if vo2_maker(conn, d) == "Runner Sidekick":  # the runner chose Runner Sidekick's VO2 max in Settings
             from .cardio import own_vo2_series
             vo2, maker = own_vo2_series(conn, cfg.source, d, 365), "Runner Sidekick"
         report = rp.build_insights(conn, cfg.source, d, synthetic)
         easy = next((i for i in report["insights"] if i["id"] == "easy_pace"), None)
-        return {"garmin": rp.get_setting(conn, "garmin_fitness", None), "vo2max_series": vo2,
+        return {"garmin": rp.garmin_setting(conn, "garmin_fitness"), "vo2max_series": vo2,
                 "vo2_maker": maker, "records": rp.records(conn, cfg.source),
                 "easy_pace": easy, "zones": rp.hr_zones(conn), "synthetic": synthetic}
 
@@ -874,7 +935,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 # Answers that change over time, each with the day it was given
                 **{k: rp.get_setting(conn, k, None) for k in DATED_SETTINGS}, **{k + "_at": rp.get_setting(conn, k + "_at", None) for k in DATED_SETTINGS},
                 "week_start_effective": WEEKDAYS[rp.first_weekday(conn)],
-                "watch": "garmin",  # kept for older app builds: Garmin is the only watch
+                "watch": rp.watch(conn),
                 "fitness_age_source": rp.get_setting(conn, "fitness_age_source", "garmin"),
                 "vo2_source": rp.get_setting(conn, "vo2_source", "watch"),
                 **{k: rp.get_setting(conn, k, None) for k in ("units", "theme", "appearance", "notifications", "background_refresh")}}
@@ -904,8 +965,56 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 continue
             if k in DATED_SETTINGS and rp.get_setting(conn, k, None) != v:
                 set_setting(conn, k + "_at", today(conn).isoformat())
+            if k == "watch" and rp.watch(conn) != v:
+                switch_watch(conn, v)
+                continue
             set_setting(conn, k, v)
         return get_settings(conn)
+
+    def switch_watch(conn, watch: str) -> None:
+        """One watch per account. Each switch is kept with its day, only so baselines start again on the new watch
+        (rp.watch_switch_era); nothing is deleted. Garmin's sync skips the account while it's Apple's and picks up again
+        after a switch back. The reports are rebuilt for the new watch."""
+        d = today(conn)
+        sw = [x for x in get_setting(conn, "watch_switches", []) or [] if x["from"] < d.isoformat()]
+        sw.append({"watch": watch, "from": d.isoformat()})
+        with report_lock(conn):
+            set_setting(conn, "watch_switches", sw)
+            set_setting(conn, "watch", watch)
+            rp.regenerate(conn, cfg.source, synthetic, set(), [], d)
+
+    @api.get("/v1/apple")
+    def apple_status(conn=Depends(db)):
+        return apple.status(conn, cfg.source)
+
+    @api.post("/v1/apple")
+    def apple_upload(body: AppleUploadIn, conn=Depends(db)):
+        """The Apple Watch's runs, days, HRV readings and sleep stages, read by the iPhone app from Apple Health. Stored,
+        then the reports for the days and runs that changed are rebuilt, as after a Garmin sync."""
+        if rp.watch(conn) != "apple":
+            raise HTTPException(409, "The Apple Watch isn't this account's watch (Settings › Watch)")
+        over = [k for k, n, cap in (("workouts", len(body.workouts), apple.MAX_WORKOUTS), ("days", len(body.days), apple.MAX_ITEMS),
+                                    ("hrv", len(body.hrv), apple.MAX_ITEMS), ("sleep", len(body.sleep), apple.MAX_ITEMS)) if n > cap]
+        over += [f"workouts[{i}].series.{k}" for i, w in enumerate(body.workouts) for k, rows in w.series.items() if len(rows) > apple.MAX_SERIES_ROWS]
+        if over:
+            raise HTTPException(413, f"Batch too large: {', '.join(over)} (at most {apple.MAX_WORKOUTS} workouts and {apple.MAX_ITEMS} "
+                                     f"days, HRV readings or sleep stages, {apple.MAX_SERIES_ROWS} rows a series)")
+        for i, w in enumerate(body.workouts):
+            if w.end <= w.start:
+                raise HTTPException(422, f"workouts[{i}]: end is not after start")
+        try:
+            zone = ZoneInfo(body.tz) if body.tz else tz(conn)
+        except Exception:
+            raise HTTPException(422, "tz: unknown timezone")
+        with report_lock(conn):
+            dates, runs, accepted = apple.ingest(conn, cfg.source, body.model_dump(), zone)
+            if runs and not synthetic:
+                from . import weather
+                runs = list(dict.fromkeys(runs + weather.for_new_runs(conn, cfg.source, runs)))
+            if dates or runs:
+                rp.regenerate(conn, cfg.source, synthetic, dates, runs, today(conn))
+        auto_run_ai(conn, runs)
+        return {"accepted": accepted, "changed_dates": len(dates)}
 
     @api.delete("/v1/data")
     def delete_data(scope: Literal["raw", "reports", "all"], conn=Depends(db)):
@@ -913,7 +1022,7 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
         Garmin tokens are not touched (use `python -m sidekick garmin-logout`)."""
         tables = {"raw": ["raw_payload"], "reports": ["report", "narrative", "coach_analysis", "section_summary", "run_ai"],
                   # samsung_* and watchletic_raw: collections an older version kept, still wiped with everything else
-                  "all": ["deleted_run", "samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
+                  "all": ["deleted_run", "apple_hrv", "apple_sleep", "samsung_hr", "samsung_skin", "samsung_spo2", "raw_payload", "report", "narrative", "coach_analysis", "section_summary", "run_ai", "run_weather", "ai_call", "day_plan", "run_intent", "weekly_focus", "insight_state", "activity_samples", "activity_lap", "activity", "daily_observation",
                           "sleep_session", "checkin", "activity_effort", "sync_checkpoint", "sync_job", "user_settings", "route_shape", "route_override", "watchletic_raw"]}[scope]
         for t in tables:
             conn[t].delete_many({})

@@ -124,7 +124,7 @@ def cmd_sync(cfg, loop: bool) -> int:
               + (f" | backfill at {cp['oldest_done']} (target {cp['backfill_target']})" if cp else ""))
         done = cp is not None and cp["oldest_done"] is not None and cp["oldest_done"] <= cp["backfill_target"]
         if not loop or res.outcome not in ("ok", "partial") or (done and res.outcome == "ok"):
-            return 0 if res.outcome in ("ok", "partial") else 1
+            return 0 if res.outcome in ("ok", "partial", "skipped") else 1
 
 
 def cmd_audit(cfg, out: str | None) -> int:
@@ -197,6 +197,9 @@ def cmd_sync_all(cfg, loop: bool, only_user: int | None) -> int:
     worst = 0
     for uid in users:
         ucfg, _ = user_cfg(cfg, uid)
+        if rp.get_setting(connect(ucfg.db_name), "watch", "garmin") == "apple":
+            print(f"user {uid}: Apple Watch (the iPhone app uploads), skipped")
+            continue
         if cfg.source != SOURCE_FIXTURE and not (ucfg.garmin_token_dir / "garmin_tokens.json").exists():
             print(f"user {uid}: no Garmin connection, skipped")
             continue

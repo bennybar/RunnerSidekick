@@ -172,7 +172,7 @@ def hr_max(conn, source: str, today: date) -> dict:
     mine, at = _dated(conn, "hr_max")
     if mine:
         return {"value": float(mine), "source": "set by you" + (f" on {at}" if at else "")}
-    zones = rp.hr_zones(conn) or {}
+    zones = rp.garmin_hr_zones(conn) or {}  # Garmin's own, never the zones derived from this maximum (rp.derive_hr_zones)
     garmin = zones.get("max_hr")
     seen = None
     for a in rp.activities(conn, source, (today - timedelta(days=365)).isoformat(), today.isoformat()):
@@ -336,7 +336,7 @@ def run_estimates(conn, source: str, d: date, hm: dict, days: int = RECENT_DAYS)
             continue
         e, why = run_estimate(conn, a, rest_on(conn, source, a["local_date"]), hm["value"])
         if e:
-            e["watch"] = "garmin"
+            e["watch"] = "apple" if rp.is_apple(a) else "garmin"
             used.append(e)
         else:
             left[why] = left.get(why, 0) + 1
@@ -484,9 +484,12 @@ def build(conn, source: str, today: date) -> dict:
     from .scores import watch_vo2
     found = watch_vo2(conn, source, today, today)  # this place is the watch's own estimate, whatever the scores use  # the newest reading, from the daily series or Garmin's snapshot, and not stale
     gv = (found[0], found[1].isoformat()) if found else None
-    out["garmin"] = ({"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "ok", "value": round(gv[0]), "value_exact": gv[0], "date": gv[1],
-                      "headline": f"as of {gv[1]}", "detail": "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace."}
-                     if gv else {"id": "garmin", "maker": "Garmin", "title": "Garmin's VO₂ max", "status": "unavailable", "headline": "Not from Garmin yet"})
+    mk = rp.watch_maker(conn)  # the key stays "garmin" for the apps; the maker and wording follow the account's watch
+    how = ("Apple's Cardio Fitness estimate from your outdoor walks, runs and hikes with heart rate." if mk == "Apple"
+           else "Garmin's (Firstbeat's) estimate from your runs' heart rate and pace.")
+    out["garmin"] = ({"id": "garmin", "maker": mk, "title": f"{mk}'s VO₂ max", "status": "ok", "value": round(gv[0]), "value_exact": gv[0], "date": gv[1],
+                      "headline": f"as of {gv[1]}", "detail": how}
+                     if gv else {"id": "garmin", "maker": mk, "title": f"{mk}'s VO₂ max", "status": "unavailable", "headline": f"Not from {mk} yet"})
 
     # 5. The HUNT non-exercise formula
     out["hunt"] = hunt_part(conn, source, p.get("sex"), p.get("age"), today)

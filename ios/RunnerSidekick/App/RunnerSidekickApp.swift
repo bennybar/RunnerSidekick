@@ -28,6 +28,8 @@ struct RunnerSidekickApp: App {
             Store.shared.local.save()
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .provisional]) { _, _ in }
         }
+        // RSK_SEED_HEALTH=1: writes test runs, sleep, HRV and daily data into the Simulator's Apple Health (once)
+        if env["RSK_SEED_HEALTH"] == "1" { Task { await HealthSeed.run() } }
         #endif
     }
 
@@ -49,6 +51,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         Background.register()
         Background.schedule()  // also when the app is never sent to the background (closed from the switcher, say)
+        // Apple Watch: HealthKit wakes the app for new data through these, so they're set up on every launch
+        if Store.shared.local.hasToken && Store.shared.isApple { HealthSync.startObservers() }
         return true
     }
 
@@ -184,7 +188,11 @@ struct MainTabs: View {
                 store.local.garminPromptSkipped = true; store.local.save(); garminPrompt = false
             } : nil, onDone: { garminPrompt = false; nav.tab = .today })
         }
-        .onChange(of: phase) { _, p in if p == .background { Background.schedule() } }
+        .onChange(of: phase) { _, p in
+            if p == .background { Background.schedule() }
+            // An Apple Health import that was cut short carries on (from its saved place) when the app is back
+            if p == .active, store.isApple, !store.healthState.importDone, store.healthRun == nil, store.healthState.since != nil { HealthImport.start() }
+        }
         // Usage: the screen now shown (a tab, or the page pushed on it; never a page's id) and each run opened
         .onAppear { trackScreen() }
         .onChange(of: nav.tab) { _, _ in trackScreen() }
@@ -203,7 +211,7 @@ struct MainTabs: View {
     }
 
     private func promptGarmin() {
-        guard let s = store.status?.value, !prompted, !s.garminLinked, !s.synthetic, !store.local.garminPromptSkipped else { return }
+        guard let s = store.status?.value, !prompted, !s.garminLinked, !s.synthetic, !store.local.garminPromptSkipped, !store.isApple else { return }
         prompted = true
         garminPrompt = true
     }
@@ -249,7 +257,7 @@ struct StatusPills: View {
     @Environment(Store.self) private var store
     var body: some View {
         VStack(spacing: 4) {
-            if let p = store.progress {
+            if let p = store.progress ?? store.healthRun {
                 HStack(spacing: 8) {
                     ProgressView(value: p.fraction).frame(width: 60)
                     Text("\(p.label) · \(Int(p.fraction * 100))%").font(Typo.labelMedium)
@@ -278,6 +286,6 @@ struct StatusPills: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: store.toast)
-        .animation(.easeInOut(duration: 0.2), value: store.progress)
+        .animation(.easeInOut(duration: 0.2), value: store.progress ?? store.healthRun)
     }
 }

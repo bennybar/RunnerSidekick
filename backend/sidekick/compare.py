@@ -223,6 +223,9 @@ def rhr_item(conn, source: str, sex: str, age: int, today: date) -> dict:
                 "A low resting heart rate is common in people who train, but on its own it isn't a measure of health."]}
 
 
+HRV_KIND = {"apple_rmssd": "Apple Watch (RMSSD)", "apple_sdnn": "Apple Watch (SDNN)"}  # whose nightly HRV, by method
+
+
 def hrv_item(conn, source: str, today: date) -> dict:
     """Overnight HRV against your own usual range on the current watch (population norms aren't comparable with a
     whole-night average). Weekly medians for the last 12 weeks; a watch change starts a new segment."""
@@ -231,7 +234,8 @@ def hrv_item(conn, source: str, today: date) -> dict:
     # Comparable HRV only: the measurement method currently in use (as in Trends)
     latest = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured"}, sort=[("local_date", -1)])
     if latest is None:
-        return {**base, "status": "unavailable", "headline": "No overnight HRV yet", "detail": "A Garmin records it while you sleep with the watch on."}
+        return {**base, "status": "unavailable", "headline": "No overnight HRV yet",
+                "detail": ("An Apple Watch" if rp.watch(conn) == "apple" else "A Garmin") + " records it while you sleep with the watch on."}
     if latest["local_date"] < (today - timedelta(days=6)).isoformat():  # nothing this week: say when the last one was
         return {**base, "status": "unavailable", "headline": f"No overnight HRV since {latest['local_date']}",
                 "detail": f"The last reading was {round(latest['value'])} ms on {latest['local_date']}.."}
@@ -269,7 +273,7 @@ def hrv_item(conn, source: str, today: date) -> dict:
             "detail": f"Median of {len(week)} night{'s' if len(week) != 1 else ''} this week, against your usual {round(b.q1)}–{round(b.q3)} ms "
                       f"(middle half of the last {bl.WINDOW_DAYS} days on this watch). Higher or lower than usual is a change worth "
                       "noticing alongside sleep and training, not a verdict on its own.",
-            "method": "Weekly median of Garmin's overnight HRV; your usual range is the 25th–75th percentile of the last 28 days on the "
+            "method": f"Weekly median of {HRV_KIND.get(latest.get('method'), 'Garmin')}'s overnight HRV; your usual range is the 25th–75th percentile of the last 28 days on the "
                       "current watch, as for Today's readings.",
             "caveats": ["Population HRV norms are measured differently (short daytime or early-morning windows), so they aren't used."],
             "chart": chart}
@@ -333,7 +337,7 @@ def build(conn, source: str, today: date) -> dict:
     out = {"profile": p, "missing": missing, "items": [], "algorithm_version": COMPARE_VERSION}
     if missing:
         return out
-    g = rp.get_setting(conn, "garmin_fitness", None) or {}
+    g = rp.garmin_setting(conn, "garmin_fitness") or {}
     # The same VO2 max as the Fitness score: the newest dated reading, nothing older than the score allows
     from .scores import vo2_on
     now = vo2_on(conn, source, today, today)
@@ -342,7 +346,9 @@ def build(conn, source: str, today: date) -> dict:
     vo2 = vo2_item(p["sex"], p["age"], g)
     from .scores import vo2_maker
     fa = (own_fitness_age_item(p["sex"], p["age"], vo2, vo2_maker(conn, today))
-          if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick" else fitness_age_item(p["age"], g, vo2))
+          # Apple has no fitness age of its own: Runner Sidekick's (from the VO2 max) stands in
+          if rp.get_setting(conn, "fitness_age_source", "garmin") == "sidekick" or rp.watch(conn) == "apple"
+          else fitness_age_item(p["age"], g, vo2))
     out["items"] = [vo2, fa, rhr_item(conn, source, p["sex"], p["age"], today),
                     age_grade_item(conn, source, p["sex"], p["birth_date"], g, today), hrv_item(conn, source, today)]
     return out

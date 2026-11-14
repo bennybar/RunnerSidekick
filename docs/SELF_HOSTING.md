@@ -51,6 +51,20 @@ Either:
 The `sync` service then syncs every connected user once an hour (the first run backfills 90 days, in steps). To sync
 right away: `docker compose exec api python -m sidekick sync`.
 
+## Apple Watch
+
+Instead of Garmin, an account can use an Apple Watch: choose it in the iPhone app (Settings → Watch). Apple has no
+cloud API for this data, so the iPhone app reads Apple Health and uploads it to the server (`POST /v1/apple`); nothing
+needs setting up on the server. One watch per account: while it's the Apple Watch, the hourly sync skips that account,
+and what Garmin synced before is kept (a run or night Garmin already recorded isn't imported twice). Switching watches
+starts your personal baselines again, since watches measure differently. Switching back to Garmin resumes its sync.
+
+From the Apple Watch the server uses runs (heart rate, distance, route, pace, cadence, power, laps), sleep with stages,
+overnight HRV, resting heart rate, steps, exercise minutes, VO₂ max (Apple's Cardio Fitness) and weight. Heart-rate
+zones are worked out from your maximum and resting heart rate. Garmin-only numbers aren't available: Body Battery,
+stress, Garmin's training readiness, status, training effect and recovery time, sleep score, race predictions, fitness
+age (Runner Sidekick's own is shown instead) and the 5-minute overnight HRV detail.
+
 ## HTTPS
 
 Put any reverse proxy with a certificate in front of `127.0.0.1:8765` and forward `/v1/` only. With Caddy, which

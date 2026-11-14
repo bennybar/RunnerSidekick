@@ -128,6 +128,10 @@ def run_sync(conn: Database, connector: Connector, today: date, backfill_days: i
              force: bool = False, now: datetime | None = None) -> SyncResult:
     source = connector.source
     now = now or datetime.now(timezone.utc)
+    if get_setting(conn, "watch", "garmin") == "apple":
+        # One watch per account: while it's the Apple Watch, the iPhone app uploads and Garmin isn't asked for anything
+        # (what was synced before stays); a switch back to Garmin picks up from here
+        return SyncResult("skipped", "The Apple Watch is this account's watch: the iPhone app sends its data")
     set_connection(conn, source)
     row = get_connection_row(conn, source)
     if row["state"] == ConnectionState.REAUTH_REQUIRED.value and not force:

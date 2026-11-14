@@ -60,6 +60,7 @@ METRIC_UNITS: dict[str, str] = {
     "body_fat_pct": "%",                   # only from a Garmin scale (Index) when it reports it
     "garmin_training_readiness": "garmin_score_0_100",
     "garmin_vo2max_running": "ml/kg/min",
+    "apple_vo2max_running": "ml/kg/min",   # Apple's Cardio Fitness (VO2 max), from Apple Health on an Apple Watch account
     "garmin_sleep_score": "garmin_score_0_100",
     # Garmin's context for its own numbers: its HRV baseline band, what its morning readiness was built from, the
     # recovery time it reported then, and how much of the night the watch measured (0: not worn overnight)

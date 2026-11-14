@@ -119,7 +119,7 @@ def build(conn, source: str, today: date) -> dict:
         agree = sum(s["direction"] == verdict for s in known)
         confidence = "high" if agree >= 3 else "medium" if agree == 2 else "low"
     # One plain line: the agreement, or the tension between the signals
-    names = {"vo2": "Garmin's VO₂ estimate", "efficiency": "efficiency", "drift": "durability"}
+    names = {"vo2": f"{rp.watch_maker(conn) if conn is not None else 'Garmin'}'s VO₂ estimate", "efficiency": "efficiency", "drift": "durability"}
     verb = lambda s: "dipped" if s["id"] == "vo2" and s["direction"] == "declining" else s["direction"]  # noqa: E731
     agree = sum(s["direction"] == verdict for s in known) if verdict != "insufficient" else 0
     if verdict == "insufficient":

@@ -77,7 +77,7 @@ def build_weekly(conn, source: str, ws: date, synthetic: bool) -> dict:
                 f"{round(100 * easy)}% in zones 1–3.",
                 observed={"value": round(100 * hard), "unit": "%"}, n=len(week), evidence=[r.source_id for r in week],
                 date_range=[wid, we.isoformat()], status="outside" if hard >= 0.7 else "within",
-                limitations=[f"Garmin zones ({zones.get('method')}, max HR {zones.get('max_hr')})."]))
+                limitations=[f"{'Heart-rate reserve' if zones.get('source') == 'derived' else 'Garmin'} zones ({zones.get('method')}, max HR {zones.get('max_hr')})."]))
 
     # Performance: pace at the user's usual HR band, this week vs the previous 4 weeks on the same watch
     eff = ins.efficiency_trend(prior + week)

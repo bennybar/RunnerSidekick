@@ -4,7 +4,8 @@ import os
 import UserNotifications
 
 /// Best-effort background refresh (iOS decides when): keeps today's briefing and runs fresh and posts the
-/// notifications. The server syncs Garmin itself, so this only fetches.
+/// notifications. The server syncs Garmin itself, so for Garmin this only fetches; with Apple Watch it also uploads
+/// what's new in Apple Health.
 enum Background {
     static let id = "com.bennybarak.runnersidekick.refresh"
     static let log = Logger(subsystem: "com.bennybarak.runnersidekick", category: "background")
@@ -29,7 +30,7 @@ enum Background {
     @MainActor
     static func schedule() {
         let s = Store.shared.local
-        guard s.hasToken, s.notificationsEnabled || s.backgroundRefresh else {
+        guard s.hasToken, s.notificationsEnabled || s.backgroundRefresh || Store.shared.isApple else {
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: id)
             return
         }
@@ -37,6 +38,59 @@ enum Background {
         r.earliestBeginDate = Date().addingTimeInterval(s.notificationsEnabled ? 3600 : 3 * 3600)
         do { try BGTaskScheduler.shared.submit(r); log.info("Background refresh scheduled from \(r.earliestBeginDate!, privacy: .public)") }
         catch { log.error("Background refresh not scheduled: \(error.localizedDescription, privacy: .public)") }
+    }
+}
+
+/// The Apple Health import (the first year, and Sync now) as an iOS 26 continued processing task: it keeps going after
+/// the runner leaves the app, with the system's progress on the Lock Screen and in the Dynamic Island. Submitted only
+/// from the foreground (the runner asked for it), under a fresh identifier each time (registering one twice is fatal);
+/// Info.plist permits com.bennybarak.runnersidekick.import.*. Where iOS won't take it, the import runs in the app.
+@MainActor
+enum HealthImport {
+    static let prefix = "com.bennybarak.runnersidekick.import."
+    nonisolated static let title = "Apple Health upload"
+
+    static func start() {
+        let id = prefix + UUID().uuidString.prefix(8)
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: id, using: nil) { task in
+            guard let task = task as? BGContinuedProcessingTask else { task.setTaskCompleted(success: false); return }
+            run(task)
+        }
+        let r = BGContinuedProcessingTaskRequest(identifier: id, title: title, subtitle: "Sending your runs and health data to your server")
+        r.strategy = .fail  // now or in the app, never queued for later
+        do {
+            guard registered else { throw CocoaError(.featureUnsupported) }
+            try BGTaskScheduler.shared.submit(r)
+            Background.log.info("Apple Health import submitted as \(id, privacy: .public)")
+        } catch {
+            Background.log.error("Continued processing not available (\(error.localizedDescription, privacy: .public)): importing in the app")
+            Task { if let m = await Store.shared.attempt({ try await HealthSync.shared.sync() }) { Store.shared.toast = m } }
+        }
+    }
+
+    /// The task's progress has to keep moving or iOS ends it: every page and every run read moves it on. On expiry the
+    /// sync stops between batches (each finished batch's anchor is already saved), so the next sync resumes there.
+    nonisolated static func run(_ task: BGContinuedProcessingTask) {
+        let p = task.progress
+        p.totalUnitCount = 1000
+        let work = Task { @MainActor in
+            await HealthSync.shared.setReporter { fraction, label in
+                p.completedUnitCount = min(999, max(p.completedUnitCount + 1, Int64(fraction * 1000)))
+                task.updateTitle(title, subtitle: label)
+            }
+            let m = await Store.shared.attempt { try await HealthSync.shared.sync() }
+            await HealthSync.shared.setReporter(nil)
+            let ok = m == nil && !Task.isCancelled
+            if ok { p.completedUnitCount = p.totalUnitCount }
+            Background.log.info("Apple Health import ended: \(m ?? (ok ? "ok" : "expired"), privacy: .public)")
+            if let m { Store.shared.toast = m }
+            task.setTaskCompleted(success: ok)
+            if ok { _ = await Store.shared.attempt { try await Store.shared.refreshAll() } }
+        }
+        task.expirationHandler = {
+            work.cancel()
+            Task { await HealthSync.shared.cancel() }
+        }
     }
 }
 

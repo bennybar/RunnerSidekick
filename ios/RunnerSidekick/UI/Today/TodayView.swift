@@ -31,7 +31,7 @@ struct TodayView: View {
         .refreshable { await refresh() }
         .screenBackground()
         .navigationTitle("Today")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { SyncButton(busy: busy, ready: "Sync Garmin") { Task { await sync() } } } }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { SyncButton(busy: busy, ready: "Sync \(store.watchName)") { Task { await sync() } } } }
         .sheet(item: $evidence) { f in EvidenceSheet(finding: f, note: store.today?.value.note(for: f.metric)) }
         .task { if refreshedAt == nil { await refresh() } }
     }
@@ -46,7 +46,8 @@ struct TodayView: View {
     }
 
     @ViewBuilder private func content(_ r: MorningReport) -> some View {
-        if let c = store.status?.value.connection, c.state != "connected" {
+        // The connection is Garmin's: while the watch is Apple it isn't syncing on purpose
+        if let c = store.status?.value.connection, c.state != "connected", !store.isApple {
             ConnectionNotice(state: c.state, detail: c.detail) { nav.tab = .me }
         }
         // "How am I and what do I do today" first (readiness, then the next run), then the slower health and fitness scores.
@@ -167,17 +168,19 @@ private struct Header: View {
     }
 }
 
-/// The sync line under the date: "Garmin synced 2 h ago", flagged in words and with a warning icon after 12 h.
+/// The sync line under the date: "Garmin synced 2 h ago" (or Apple Watch: its last upload), flagged in words and with a
+/// warning icon after 12 h.
 private struct Freshness: View {
     var status: Status?
     var report: MorningReport
+    @Environment(Store.self) private var store
     var body: some View {
-        let last = Fmt.instant(status?.connection.lastSuccessAt)
+        let last = store.isApple ? Fmt.instant(store.apple?.value.lastUploadAt) ?? store.healthState.lastUploadAt : Fmt.instant(status?.connection.lastSuccessAt)
         let stale = last.map { Date().timeIntervalSince($0) >= 12 * 3600 } ?? true
         HStack(spacing: 6) {
             Image(systemName: stale ? "exclamationmark.triangle" : "checkmark.circle").font(.footnote)
                 .foregroundStyle(stale ? Tint.orange.ink : Tint.green.ink)
-            Text((status?.synthetic == true ? "Demo source synced " : "Garmin synced ") + Fmt.ago(last)
+            Text((status?.synthetic == true ? "Demo source synced " : "\(store.watchName) synced ") + Fmt.ago(last)
                  + (report.provisional ? " · last night not in yet" : ""))
                 .font(Typo.bodyMedium).foregroundStyle(stale ? Tint.orange.ink : Palette.onSurfaceVariant)
         }
@@ -560,7 +563,7 @@ struct SyncButton: View {
     @Environment(Store.self) private var store
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { ctx in
-            let wait = syncWait(store.status?.value.syncNextAllowedAt, now: ctx.date)
+            let wait = store.isApple ? nil : syncWait(store.status?.value.syncNextAllowedAt, now: ctx.date)  // Garmin's cooldown
             Button(action: action) {
                 if busy { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing") } }
                 else if let w = wait { Text("Next sync \(w)") }

@@ -141,7 +141,7 @@ def week_plan(conn, source: str, today: date, held: bool = False) -> dict | None
             for k in range(1, 5) if began and ws - timedelta(days=7 * k) >= began]  # whole weeks only: a part-week isn't a week
     ran_weeks = sorted(past)
     recent = ran_weeks[len(ran_weeks) // 2] if ran_weeks else 0
-    g = get_setting(conn, "garmin_fitness", None) or {}
+    g = rp.garmin_setting(conn, "garmin_fitness") or {}
     ts = g.get("training_status") or {}
     over = ts.get("acute_load") and ts.get("chronic_max") and ts["acute_load"] > ts["chronic_max"]
     # The week's phase, from its first day (or race week when the race falls in it), so the plan doesn't change mid-week

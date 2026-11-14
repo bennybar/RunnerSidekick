@@ -165,7 +165,7 @@ def build_bundle(conn, source: str, today: date) -> Bundle:
                    f["observed"]["value"])
         b.item(f"today:{f['metric']}", "daily_finding", title=f["title"], status=f["status"], statement=f["statement"])
 
-    g = rp.get_setting(conn, "garmin_fitness", None) or {}
+    g = rp.garmin_setting(conn, "garmin_fitness") or {}
     if g:
         st = g.get("training_status") or {}
         b.item("garmin:fitness", "garmin_fitness", note="Garmin's own estimates",

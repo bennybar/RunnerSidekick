@@ -93,8 +93,8 @@ def build(conn, source: str, today: date) -> dict:
                         "date": wk, "source_id": None, "source": "the week starting that day"})
 
     body = []
-    vo2 = rp.series(conn, source, "garmin_vo2max_running", today.isoformat())
-    now = ((get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {})
+    vo2 = rp.series(conn, source, rp.vo2_metric(conn), today.isoformat())
+    now = ((rp.garmin_setting(conn, "garmin_fitness") or {}).get("vo2max") or {})
     if not vo2 and now.get("value") and now.get("date"):
         vo2 = {now["date"]: float(now["value"])}  # no daily history yet: Garmin's current estimate
     if vo2:
@@ -104,7 +104,7 @@ def build(conn, source: str, today: date) -> dict:
             it = cp.vo2_item(sex, cp.age_on(birth, date.fromisoformat(d)), {"vo2max": {"value": v}})
             cmp = {"headline": it.get("headline"), "detail": it.get("detail")} if it.get("status") == "ok" else None
         body.append({"id": "vo2max", "title": "Highest VO₂ max", "value": f"{v:.0f}", "date": d, "source_id": None,
-                     "source": "Garmin's estimate", "comparison": cmp})
+                     "source": f"{rp.watch_maker(conn)}'s estimate", "comparison": cmp})
     rhr = rp.rhr_series(conn, source, today.isoformat())  # no daytime-only values
     if len(rhr) >= 7:
         d, v = min(rhr.items(), key=lambda kv: (kv[1], kv[0]))
@@ -116,7 +116,7 @@ def build(conn, source: str, today: date) -> dict:
                 if it.get("status") == "ok" else None
         body.append({"id": "resting_hr", "title": "Lowest resting heart rate", "value": f"{v:.0f} bpm", "date": d, "source_id": None,
                      "source": "your nights", "comparison": cmp})
-    hrv = rp.series(conn, source, "hrv_overnight_avg", today.isoformat())
+    hrv = rp.hrv_series(conn, source, today.isoformat())  # one measurement method (Apple's SDNN reads higher than RMSSD)
     if len(hrv) >= 7:
         d, v = max(hrv.items(), key=lambda kv: (kv[1], kv[0]))
         body.append({"id": "hrv", "title": "Highest overnight HRV", "value": f"{v:.0f} ms", "date": d, "source_id": None,
@@ -205,8 +205,9 @@ def progressions(conn, source: str, today: date) -> dict[str, list[dict]]:
         ws = (d - timedelta(days=(d.weekday() - first) % 7)).isoformat()
         weeks[ws] = weeks.get(ws, 0.0) + (a["distance_m"] or 0)
     track("week", [(w, v, None) for w, v in sorted(weeks.items())], False)
-    for rid, metric, lower in (("vo2max", "garmin_vo2max_running", False), ("resting_hr", "resting_hr", True), ("hrv", "hrv_overnight_avg", False)):
-        s = rp.rhr_series(conn, source, today.isoformat()) if metric == "resting_hr" else rp.series(conn, source, metric, today.isoformat())
+    for rid, metric, lower in (("vo2max", rp.vo2_metric(conn), False), ("resting_hr", "resting_hr", True), ("hrv", "hrv_overnight_avg", False)):
+        s = rp.rhr_series(conn, source, today.isoformat()) if metric == "resting_hr" else \
+            rp.hrv_series(conn, source, today.isoformat()) if metric == "hrv_overnight_avg" else rp.series(conn, source, metric, today.isoformat())
         track(rid, [(d, v, None) for d, v in sorted(s.items())], lower)
     return out
 

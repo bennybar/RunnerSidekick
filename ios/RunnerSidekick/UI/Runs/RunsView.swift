@@ -57,7 +57,7 @@ struct RunsView: View {
                 Button { nav.open(.trophies) } label: { Label("Your records", systemImage: "trophy") }
             }
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
-            // Fetch a run you just finished from Garmin without waiting for the hourly sync
+            // Fetch a run you just finished from the watch without waiting for the next sync
             ToolbarItem(placement: .topBarTrailing) { SyncButton(busy: busy, ready: "New runs") { Task { await sync() } } }
         }
         // The newest run, if nothing's been said about it and it hasn't been asked about: a few questions, once (Me turns it off)
@@ -82,7 +82,7 @@ struct RunsView: View {
         defer { busy = false }
         var n = 0
         if let m = await store.attempt({ n = try await store.syncRunsNow() }) { store.toast = m; return }
-        store.toast = "Synced with Garmin · " + (n == 0 ? "no new runs" : n == 1 ? "1 new run" : "\(n) new runs")
+        store.toast = "Synced with \(store.watchName) · " + (n == 0 ? "no new runs" : n == 1 ? "1 new run" : "\(n) new runs")
     }
 }
 

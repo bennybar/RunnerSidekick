@@ -85,7 +85,7 @@ def options(conn, source: str, today: date) -> list[dict]:
     r = rp.latest_body(conn, "insights")
     if r:
         insights = {i["id"]: i for i in r["insights"]}
-    garmin = rp.get_setting(conn, "garmin_fitness", None) or {}
+    garmin = rp.garmin_setting(conn, "garmin_fitness") or {}
     status = ((garmin.get("training_status") or {}).get("phrase") or "").split("_")[0]
     reasons: dict[str, str] = {}
     p = insights.get("pacing")

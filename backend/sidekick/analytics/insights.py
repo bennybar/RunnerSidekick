@@ -119,7 +119,7 @@ def intensity_distribution(runs: list[RunData], zones: dict | None) -> dict:
     hard = (totals[4] + totals[5]) / T
     n = len(per_run)
     effect = {"share": share, "easy_share": round(easy, 3), "hard_share": round(hard, 3), "hard_runs": hard_runs, "runs": n}
-    caveat = [f"Zones from Garmin ({zones.get('method')}, max HR {zones.get('max_hr')} bpm). If max HR is estimated rather than "
+    caveat = [f"Zones from {'your heart-rate reserve' if zones.get('source') == 'derived' else 'Garmin'} ({zones.get('method')}, max HR {zones.get('max_hr')} bpm). If max HR is estimated rather than "
               "measured, zones may be shifted.", "Wrist heart rate can lag at the start of runs."]
     chart = {"type": "stacked_share", "labels": ["Z1", "Z2", "Z3", "Z4", "Z5"], "values": [share[f"z{k}"] for k in range(1, 6)]}
     if hard >= 0.5:

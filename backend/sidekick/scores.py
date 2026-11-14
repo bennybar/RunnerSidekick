@@ -94,7 +94,7 @@ def vo2_maker(conn, d: date) -> str:
     Settings."""
     if rp.get_setting(conn, "vo2_source", "watch") == "sidekick":
         return "Runner Sidekick"
-    return "Garmin"
+    return rp.watch_maker(conn)
 
 
 def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
@@ -108,10 +108,11 @@ def vo2_on(conn, source: str, d: date, today: date) -> tuple[float, date] | None
 
 def watch_vo2(conn, source: str, d: date, today: date) -> tuple[float, date] | None:
     """The watch's VO2 max as of d and the day it was measured: the latest daily reading up to then, or (for today)
-    Garmin's current value with its own date. Nothing older than VO2_MAX_AGE_DAYS."""
+    Garmin's current value with its own date. Nothing older than VO2_MAX_AGE_DAYS. With the Apple Watch, Apple's daily
+    Cardio Fitness readings."""
     oldest = (d - timedelta(days=VO2_MAX_AGE_DAYS)).isoformat()
-    found = [(k, v) for k, v in rp.series(conn, source, "garmin_vo2max_running", d.isoformat()).items() if k >= oldest]
-    snap = (rp.get_setting(conn, "garmin_fitness", None) or {}).get("vo2max") or {}
+    found = [(k, v) for k, v in rp.series(conn, source, rp.vo2_metric(conn), d.isoformat()).items() if k >= oldest]
+    snap = (rp.garmin_setting(conn, "garmin_fitness") or {}).get("vo2max") or {}
     if d == today and snap.get("value") and snap.get("date") and oldest <= snap["date"] <= d.isoformat():
         found.append((snap["date"], snap["value"]))
     if not found:
@@ -152,7 +153,7 @@ def fitness_parts(conn, source: str, d: date, today: date, sex: str, birth: str,
         when = "today" if ago == 0 else "yesterday" if ago == 1 else f"{ago} days ago"
         # With Runner Sidekick's VO2 max chosen, the watch's own stays in view beside it (never counted)
         wv = watch_vo2(conn, source, d, today) if maker == "Runner Sidekick" else None
-        also = f" · Garmin's {wv[0]:.1f}" if wv else ""
+        also = f" · {rp.watch_maker(conn)}'s {wv[0]:.1f}" if wv else ""
         vo2 = part("vo2max", "VO₂ max for your age", pts, f"{v:.1f} · {rank} of {grp} · measured {when}{also}",
                    f"{maker}'s VO₂ max against the Cooper/ACSM table for your age and sex", imp)
         vo2["vo2"], vo2["stale"] = v, ago > VO2_STALE_DAYS
@@ -206,18 +207,19 @@ def health_parts(conn, source: str, d: date, age: int | None) -> list[dict]:
     mod = {k: v for k, v in rp.series(conn, source, "intensity_minutes_moderate", done).items() if k >= since}
     vig = {k: v for k, v in rp.series(conn, source, "intensity_minutes_vigorous", done).items() if k >= since}
     days = sorted(set(mod) | set(vig))
+    what = "Apple's exercise minutes, counted as moderate" if rp.watch(conn) == "apple" else "Garmin's intensity minutes, vigorous counted double"
     if len(days) >= 10:
         m = 7 * sum(mod.get(x, 0) + 2 * vig.get(x, 0) for x in days) / len(days)
         goal = 150 if m < 150 else 300
         parts.append(part("activity", "Weekly activity", 70 * m / 150 if m <= 150 else 70 + 30 * min(1, (m - 150) / 150),
                           f"{round(m)} min a week · WHO: 150–300",
-                          f"Garmin's intensity minutes, vigorous counted double, over {len(days)} days with data in the last 4 weeks; "
+                          f"{what}, over {len(days)} days with data in the last 4 weeks; "
                           "150 scores 70, 300 scores 100",
                           (f"About {round(goal - m)} more active minutes a week would reach {goal}; vigorous minutes count double",
                            70 if goal == 150 else 100, "over 4 weeks")))
     else:
         parts.append(part("activity", "Weekly activity", None, f"Needs 10 days of intensity minutes ({len(days)} so far)",
-                          "Garmin's intensity minutes, last 4 weeks"))
+                          f"{what.split(',')[0]}, last 4 weeks"))
     # Daily steps against Paluch et al. 2022 (mortality falls up to about 8,000 under 60, about 6,000–8,000 from 60)
     # 8,000 up to 55, easing to 6,000 by 65 (no jump on a birthday)
     target = round(8000 - 2000 * min(1, max(0, ((age or 0) - 55) / 10)), -2)
@@ -297,12 +299,12 @@ def body_part(conn, source: str, d: date, age: int | None) -> dict:
     higher from 65)."""
     note = ("BMI = weight ÷ height². Usual healthy range 18.5–25" + (" (about 22–27 from 65)" if age is not None and age >= 65 else "") +
             "; it can't tell muscle from fat, so it isn't counted")
-    height = ((rp.get_setting(conn, "source_profile", None) or {}).get("height_cm"))
+    height = ((rp.get_setting(conn, "source_profile", None) or {}).get("height_cm")) or rp.get_setting(conn, "profile_height_cm", None)
     w = conn.daily_observation.find_one({"source": source, "metric": "weight", "state": "measured",
                                          "local_date": {"$gte": (d - timedelta(days=BODY_MAX_AGE_DAYS)).isoformat(), "$lte": d.isoformat()}},
                                         sort=[("local_date", -1)])
     if not height:
-        p = part("body", "Body (BMI)", None, "Needs your height from Garmin", note)
+        p = part("body", "Body (BMI)", None, "Needs your height from " + ("Settings" if rp.watch(conn) == "apple" else "Garmin"), note)
         p["verdict"] = "unknown"
         return p
     if not w:
@@ -313,7 +315,7 @@ def body_part(conn, source: str, d: date, age: int | None) -> dict:
     hi = 27 if age is not None and age >= 65 else 25
     lo = 22 if age is not None and age >= 65 else 18.5
     ago = (d - date.fromisoformat(w["local_date"])).days
-    src = "Garmin scale" if w.get("method") == "garmin_scale" else "entered in Garmin"
+    src = "Garmin scale" if w.get("method") == "garmin_scale" else "from Apple Health" if rp.is_apple(w) else "entered in Garmin"
     say = f"BMI {bmi:.1f} · {w['value']:.1f} kg, {height:.0f} cm · weight {src}, {'today' if ago == 0 else f'{ago} days ago'}"
     fat = conn.daily_observation.find_one({"source": source, "metric": "body_fat_pct", "state": "measured", "local_date": w["local_date"]})
     if fat:

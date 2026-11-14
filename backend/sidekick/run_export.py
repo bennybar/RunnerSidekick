@@ -76,7 +76,7 @@ def zone_table(conn, a: dict) -> list[str]:
     for k in range(5, -1, -1):
         if zt[k] or k > 0:
             rows.append(f"| {names[k]} | {clock(zt[k])} | {100 * zt[k] / total:.0f}% |")
-    return rows + ["", f"Zone thresholds: Garmin-derived ({zones.get('method') or 'heart-rate zones'}, max HR {zones.get('max_hr', '–')}); "
+    return rows + ["", f"Zone thresholds: {'from your maximum and resting heart rate' if zones.get('source') == 'derived' else 'Garmin-derived'} ({zones.get('method') or 'heart-rate zones'}, max HR {zones.get('max_hr', '–')}); "
                        "a training guide, not a physiological measurement."]
 
 
@@ -208,6 +208,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     start = datetime.fromisoformat(a["start_utc"].replace("Z", "+00:00")).astimezone(timezone(off))
     end = start + timedelta(seconds=a["elapsed_s"] or 0)
     g = r.get("garmin_metrics") or {}
+    apple = rp.is_apple(a)
+    maker = "Apple" if apple else "Garmin"
     intent = r.get("intent") or {}
     said = intent if intent.get("source") == "user" else {}
     cl = r.get("classified") or {}
@@ -236,7 +238,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     if r.get("step_length_m"):
         add(f"Cadence: **{num(a.get('avg_cadence_spm'))} spm** · step length **{r['step_length_m']:.2f} m** (distance ÷ steps)  ")
     if r.get("garmin_vo2max_day"):  # the watch's own estimate
-        add(f"VO₂ max (Garmin estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
+        add(f"VO₂ max ({maker} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
     ours = r.get("vo2_ours") or {}
     if ours:
         add(f"VO₂ max (Runner Sidekick, from this run{', hill-adjusted pace' if ours.get('hill_adjusted') else ''}): **{ours['value']:.1f}**  "
@@ -438,7 +440,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         add("|---|---:|---:|---:|---:|")
         L.extend(rows)
         add("")
-        add("Averages and maxima from Garmin; halves are equal halves of "
+        add(f"Averages and maxima from {maker}; halves are equal halves of "
             "moving time (warm-up included), time-weighted over the samples that hold a reading, and left out (–) when "
             "either half has readings for less than half its time.")
         add("")
@@ -452,7 +454,7 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     rc = recovery_context(conn, source, a, s)
     if rc:
         add("## Recovery context")
-        add("Garmin's readings for the day of the run; context, not a diagnosis.  ")
+        add(f"{maker}'s readings for the day of the run; context, not a diagnosis.  ")
         L.extend(f"{k}: **{v}**  " for k, v in rc)
         add("")
 
@@ -550,6 +552,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     lt = [p for p in (get_setting(conn, "garmin_threshold", None) or {}).get("points") or [] if p.get("hr") and p["date"] <= day]
     pr = [p for p in get_setting(conn, "garmin_predictions", None) or [] if p.get("5k") and p["date"] <= day]
     out = []
+    if apple:  # Garmin's numbers from before a switch say nothing about an Apple Watch run
+        st, lt, pr = None, [], []
     if st:
         bits = []
         if st.get("phrase"):
@@ -706,17 +710,18 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     add("## Data provenance")
     prov = [("Activity device", (a.get("manufacturer") or "Garmin").capitalize()
                                 + (f" ({a['device_id']})" if a.get("device_id") else "")),
-            ("Activity source", "Garmin Connect (watch recording)"),
-            ("HR source", "Garmin watch (wrist, or a paired strap)"),
-            ("Pace, cadence, elevation", "Garmin watch samples"),
-            ("Running dynamics source", "Garmin" if dyn else None),
-            ("Power", "Garmin" if g.get("avgPower") else None),
-            ("VO₂ source", "Garmin (device estimate)"),
-            ("Training effect, training load", "Garmin"),
-            ("HR-zone threshold source", "Garmin-derived (your Garmin profile)"),
+            ("Activity source", "Apple Health (Apple Watch workout, uploaded by the iPhone app)" if apple else "Garmin Connect (watch recording)"),
+            ("HR source", "Apple Watch (wrist, or a paired strap)" if apple else "Garmin watch (wrist, or a paired strap)"),
+            ("Pace, cadence, elevation", "Apple Watch samples (distance, route, steps)" if apple else "Garmin watch samples"),
+            ("Running dynamics source", maker if dyn or (apple and any(g.get(k) for k in ("avgStrideLength", "avgVerticalOscillation", "avgGroundContactTime"))) else None),
+            ("Power", maker if g.get("avgPower") else None),
+            ("VO₂ source", f"{maker} (device estimate)"),
+            ("Training effect, training load", None if apple else "Garmin"),
+            ("HR-zone threshold source", "from your maximum and resting heart rate" if (rp.hr_zones(conn) or {}).get("source") == "derived"
+             else "Garmin-derived (your Garmin profile)"),
             ("Performance condition, stamina, training status, load, lactate threshold, race predictions",
-             "Garmin estimates"),
-            ("Recovery context source", "Garmin daily data" if rc else None),
+             None if apple else "Garmin estimates"),
+            ("Recovery context source", f"{maker} daily data" if rc else None),
             ("Weather", f"{wx['source']} (external estimate)" if wx else None),
             ("Athlete context", "Entered by the runner" if said else None),
             ("Flat-equivalent pace, decoupling, checks, classification, similar runs, trend, next focus", "Runner Sidekick calculation"),

@@ -964,3 +964,13 @@ struct RunVo2: Codable {
     @D var heldOut: Bool
 }
 
+
+/// GET /v1/apple: the server's view of the Apple Health uploads.
+struct AppleInfo: Codable {
+    var watch: String?
+    var lastUploadAt: String?
+    var latest: AppleLatest?
+    var counts: AppleCounts?
+}
+struct AppleLatest: Codable { var workout: String?; var night: String? }
+struct AppleCounts: Codable { var workouts: Int?; var nights: Int?; var days: Int? }

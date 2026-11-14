@@ -38,6 +38,11 @@ final class Store {
     var trophies: Cached<Trophies>?
     var compare: Cached<CompareReport>?
     var settings: Cached<SettingsDto>?
+    /// The server's view of the Apple Health uploads (GET /v1/apple), while the watch is Apple
+    var apple: Cached<AppleInfo>?
+    /// The Apple Health sync now running (nil when none), and what this phone remembers about the uploads
+    var healthRun: Progress?
+    var healthState = HealthSync.State()
     /// The settings exactly as the server sent them (snake_case keys), for saving every field back
     private var settingsRaw: [String: JSONValue] = [:]
     var trends: [Int: Cached<Trends>] = [:]
@@ -63,6 +68,10 @@ final class Store {
 
     var aiEnabled: Bool { settings?.value.aiEnabled == true }
     var units: Units { local.units }
+
+    /// The account's watch (one per account, a server setting): Garmin unless it says Apple Watch.
+    var isApple: Bool { (settings?.value.watch ?? status?.value.watch) == "apple" }
+    var watchName: String { isApple ? "Apple Watch" : "Garmin" }
 
     /// The day weeks start on (Settings, else Garmin's profile, else Monday), as the backend reports it (1 = Sunday … 7 = Saturday).
     var firstWeekday: Int { Fmt.weekday(status?.value.weekStartDay) }
@@ -110,6 +119,8 @@ final class Store {
         cardio = cached("cardio", Cardio.self)
         trophies = cached("trophies", Trophies.self)
         compare = cached("compare", CompareReport.self)
+        apple = cached("apple", AppleInfo.self)
+        if let a = local.account { healthState = HealthSync.State.load(a) }
         if let (d, at) = DiskCache.read("settings") { applySettings(d, at: at) }
         journal = cached("journal", [ReportListItem].self)?.value ?? []
         if let (d, _) = DiskCache.read("checkins"), let c = try? JSONDecoder().decode([LocalCheckin].self, from: d) { checkins = c }
@@ -232,6 +243,8 @@ final class Store {
         local.account = nil
         local.garminPromptSkipped = false
         local.save()
+        HealthSync.stopObservers()
+        Task { await HealthSync.shared.cancel() }
     }
 
     func clearLocal(includeCheckins: Bool) {
@@ -239,7 +252,7 @@ final class Store {
         memo = [:]
         Task { await API.shared.forget() }
         status = nil; today = nil; activities = nil; insights = nil; weekly = nil; fitness = nil; me = nil; focus = nil
-        coach = nil; routes = nil; numbers = nil; cardio = nil; trophies = nil; compare = nil; settings = nil; settingsRaw = [:]
+        coach = nil; routes = nil; numbers = nil; cardio = nil; trophies = nil; compare = nil; settings = nil; settingsRaw = [:]; apple = nil
         trends = [:]; days = [:]; details = [:]; runAis = [:]; journal = []
         if includeCheckins { checkins = [] }
         saveCheckins()
@@ -247,6 +260,15 @@ final class Store {
 
     /// Identifies the signed-in account and scopes local data to it. A different account than last time clears the
     /// cached reports (never another account's check-ins, which stay hidden and are never uploaded under this account).
+    /// The signed-in account as "<server>#<user id>", checked against the current server first: a saved one from another
+    /// server (or before a sign-in finished) is never used, so per-account state (Apple Health anchors) can't leak across
+    func confirmedAccount() async throws -> String? {
+        if let a = local.account, a.hasPrefix(Backend.url + "#") { return a }
+        guard local.hasToken else { return nil }
+        try await establishAccount()
+        return local.account
+    }
+
     private func establishAccount() async throws {
         let body = try await API.shared.get("/v1/me")
         let m = try await put("me", body, Me.self)
@@ -266,6 +288,7 @@ final class Store {
             }
             local.account = key
             local.save()
+            healthState = HealthSync.State.load(key)
             timezoneChecked = false
             DiskCache.write("me", body)
         }
@@ -509,6 +532,13 @@ final class Store {
     func syncNow() async throws {
         Analytics.track("sync")
         defer { progress = nil }
+        // Apple Watch: the phone itself uploads what's new in Apple Health, then the results are loaded
+        if isApple {
+            try await HealthSync.shared.sync()
+            _ = try? await refreshApple()
+            try await refreshAll(from: 0.85, to: 1)
+            return
+        }
         progress = Progress(fraction: 0, label: "Starting the Garmin sync")
         // The server holds a sync back only when Garmin asked us to wait: say until when
         let started = (try? JSONSerialization.jsonObject(with: try await API.shared.post("/v1/sync")) as? [String: Any]) ?? [:]
@@ -544,6 +574,7 @@ final class Store {
 
     /// The background refresh: what the notifications read, nothing else.
     func backgroundRefresh() async throws {
+        if isApple { try await HealthSync.shared.sync() }
         try await pushPendingCheckins()
         try await refreshToday()
         try await refreshActivities()
@@ -643,6 +674,19 @@ final class Store {
         checkins.append(LocalCheckin(id: id, localDate: s.localDate, energy: s.energy, soreness: s.soreness, recovery: s.recovery, pain: s.pain,
                                      illness: s.illness, notes: s.notes, tags: s.tags, clientUpdatedAt: s.clientUpdatedAt, pendingSync: false,
                                      account: account))
+    }
+
+    // MARK: Apple Health
+
+    func refreshApple() async throws { apple = try await put("apple", try await API.shared.get("/v1/apple"), AppleInfo.self) }
+
+    /// Apple Watch was just chosen: read access (the system sheet), then the observers and the first import.
+    func connectAppleHealth() async {
+        guard HealthSync.available else { toast = "Apple Health isn't available on this device"; return }
+        do { try await HealthSync.authorize() } catch { toast = "Apple Health access wasn't set up: \(error.localizedDescription)"; return }
+        Analytics.track("apple_health_connected")
+        HealthSync.startObservers()
+        HealthImport.start()
     }
 
     // MARK: Garmin

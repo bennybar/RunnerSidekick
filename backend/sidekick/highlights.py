@@ -37,7 +37,7 @@ def _day(ds: str) -> str:
 def build(conn, source: str, today: date, comparison: dict | None = None, focus: dict | None = None,
           race: dict | None = None) -> list[dict]:
     out: list[dict] = []
-    g = rp.get_setting(conn, "garmin_fitness", None) or {}
+    g = rp.garmin_setting(conn, "garmin_fitness") or {}
 
     # Strain building (two or more signals agreeing over the last week): first, since it's about what to do now
     from . import strain
@@ -80,7 +80,7 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
     # VO2 max movement over four weeks (Garmin's values)
     # Only readings from the current watch: a device change makes earlier values incomparable
     era = rp.device_era_start(conn, source, today)
-    vo2 = {d: v for d, v in rp.series(conn, source, "garmin_vo2max_running", today.isoformat()).items() if not era or d >= era.isoformat()}
+    vo2 = {d: v for d, v in rp.series(conn, source, rp.vo2_metric(conn), today.isoformat()).items() if not era or d >= era.isoformat()}
     # Fitness progress's freshness rule, with a longer gap: a recent reading, and an earlier one 4–8 weeks before it
     from .progress import VO2_FRESH_DAYS, VO2_MIN_GAP_DAYS, VO2_OLDEST_DAYS
     latest_d = max(vo2) if vo2 else None
@@ -94,7 +94,7 @@ def build(conn, source: str, today: date, comparison: dict | None = None, focus:
             if abs(ch) >= VO2_MIN_CHANGE:
                 out.append({"id": "vo2_change", "tone": "positive" if ch > 0 else "info", "kind": "fitness",
                             "title": f"VO₂ estimate {'up' if ch > 0 else 'down'} {abs(ch):.1f} in {weeks} weeks",
-                            "text": f"Now {vo2[latest_d]:.1f} (Garmin).", "target": {"type": "insights"}, "source": "Garmin"})
+                            "text": f"Now {vo2[latest_d]:.1f} ({rp.watch_maker(conn)}).", "target": {"type": "insights"}, "source": rp.watch_maker(conn)})
 
     # Weekly focus outcome so far
     cur = (focus or {}).get("current") or {}

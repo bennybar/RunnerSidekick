@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.19"  # 2.19: Garmin only (no recording app or external sensor, no Samsung night); 2.18: overnight HRV shape and 7-day stability findings; 2.17: lap spread hill-adjusted on hilly runs; 2.16: one partial for a tail of short laps, pacing advice in context; 2.15: Garmin's in-run performance condition, stamina, threshold share; 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.20"  # 2.20: Apple Watch runs and nights, heart-rate-reserve zones without Garmin's, insights on one HRV method; 2.19: Garmin only (no recording app or external sensor, no Samsung night); 2.18: overnight HRV shape and 7-day stability findings; 2.17: lap spread hill-adjusted on hilly runs; 2.16: one partial for a tail of short laps, pacing advice in context; 2.15: Garmin's in-run performance condition, stamina, threshold share; 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -69,6 +69,14 @@ def series(conn, source: str, metric: str, until: str, method: str | None = None
     return {r["local_date"]: r["value"] for r in conn.daily_observation.find(q, {"_id": 0, "local_date": 1, "value": 1})}
 
 
+def hrv_series(conn, source: str, until: str) -> dict[str, float]:
+    """Overnight HRV by day, in the measurement method of the latest night only (Garmin's, Apple's RMSSD or Apple's SDNN
+    are never mixed)."""
+    r = conn.daily_observation.find_one({"source": source, "metric": "hrv_overnight_avg", "state": "measured", "local_date": {"$lte": until}},
+                                        sort=[("local_date", -1)])
+    return series(conn, source, "hrv_overnight_avg", until, r["method"]) if r else {}
+
+
 def daytime_rhr_days(conn, source: str, until: str) -> set[str]:
     """Days whose resting heart rate is Garmin's from a day it measured no sleep (the watch wasn't worn overnight): a
     daytime value, so it's never compared with the usual nor part of it."""
@@ -111,7 +119,61 @@ def samples_for(conn, aid: int) -> Samples | None:
     return Samples.from_json(r["samples"]) if r else None
 
 
+def watch(conn) -> str:
+    """The account's watch: "garmin" (default) or "apple" (the iPhone app uploads from Apple Health)."""
+    return get_setting(conn, "watch", "garmin")
+
+
+def watch_maker(conn) -> str:
+    """The maker named on the watch's own numbers ("Garmin's VO2 max", "Apple's")."""
+    return "Apple" if watch(conn) == "apple" else "Garmin"
+
+
+def vo2_metric(conn) -> str:
+    """The daily metric holding the watch's own VO2 max: Garmin's, or Apple's (its "Cardio Fitness")."""
+    return "apple_vo2max_running" if watch(conn) == "apple" else "garmin_vo2max_running"
+
+
+def garmin_setting(conn, key: str):
+    """One of Garmin's own stored numbers (fitness snapshot, threshold, predictions), or None while the account's watch is
+    Apple's: they'd only be Garmin's last values from before the switch."""
+    return None if watch(conn) == "apple" else get_setting(conn, key, None)
+
+
+def is_apple(r: dict | None) -> bool:
+    """A record from the Apple Watch (a run, or a day's reading)."""
+    return bool(r) and (r.get("manufacturer") == "Apple" or str(r.get("method") or "").startswith("apple_"))
+
+
+def watch_switch_era(conn, source: str, d: date) -> date | None:
+    """Where the latest watch switch on or before d starts a new era: the day after the previous watch's last data on or
+    before the switch (Garmin's last run or reading before moving to Apple, or the reverse). None without a switch, or
+    when the previous watch left no data (an account that started on Apple keeps its whole Apple Health history)."""
+    ds = d.isoformat()
+    sw = [x for x in get_setting(conn, "watch_switches", []) or [] if x["from"] <= ds]
+    if not sw:
+        return None
+    to_apple = sw[-1]["watch"] == "apple"
+    meth = {"$not": {"$regex": "^apple_"}} if to_apple else {"$regex": "^apple_"}
+    maker = {"$ne": "Apple"} if to_apple else "Apple"
+    o = conn.daily_observation.find_one({"source": source, "state": "measured", "method": meth, "local_date": {"$lte": sw[-1]["from"]}},
+                                        {"local_date": 1}, sort=[("local_date", -1)])
+    a = conn.activity.find_one({"source": source, "manufacturer": maker, "local_date": {"$lte": sw[-1]["from"]}},
+                               {"local_date": 1}, sort=[("local_date", -1)])
+    last = max([x["local_date"] for x in (o, a) if x], default=None)
+    return date.fromisoformat(last) + timedelta(days=1) if last else None
+
+
 def device_era_start(conn, source: str, d: date) -> date | None:
+    """First day of the device era containing d. A switch between Garmin and the Apple Watch (Settings) starts one (see
+    watch_switch_era); within a maker, it's inferred from activity device IDs (daily payloads carry none): the era starts
+    the day after the last run recorded by a different device of the same maker. Precision is limited to the days
+    between runs."""
+    eras = [e for e in (runs_era_start(conn, source, d), watch_switch_era(conn, source, d)) if e is not None and e <= d]
+    return max(eras) if eras else None
+
+
+def runs_era_start(conn, source: str, d: date) -> date | None:
     """First day of the device era containing d, inferred from activity device IDs (daily payloads carry none).
     The era starts the day after the last run recorded by a different device of the same maker. Precision is limited
     to the days between runs."""
@@ -130,14 +192,45 @@ def device_era_start(conn, source: str, d: date) -> date | None:
         return date.fromisoformat(max(others)) + timedelta(days=1)
     # No change since switching makers: the era in force at the switch carries on
     prev = [r for r in before if maker(r) != maker(cur)]
-    return device_era_start(conn, source, date.fromisoformat(prev[-1]["local_date"])) if prev else None
+    return runs_era_start(conn, source, date.fromisoformat(prev[-1]["local_date"])) if prev else None
 
 
-def hr_zones(conn) -> dict | None:
-    """The heart-rate zones analysis should use: Garmin's, unless the runner chose not to use zones."""
+def garmin_hr_zones(conn) -> dict | None:
+    """Garmin's own heart-rate zones (with its maximum), unless the runner chose not to use zones."""
     if get_setting(conn, "hr_zone_source", "garmin") == "none":
         return None
     return get_setting(conn, "source_hr_zones", None)
+
+
+def hr_zones(conn) -> dict | None:
+    """The heart-rate zones analysis should use: Garmin's; without them (an Apple Watch account), the ones derived from
+    your held maximum and resting heart rate (derive_hr_zones); none when the runner chose not to use zones."""
+    if get_setting(conn, "hr_zone_source", "garmin") == "none":
+        return None
+    return get_setting(conn, "source_hr_zones", None) or get_setting(conn, "derived_hr_zones", None)
+
+
+ZONE_FLOORS_PCT = (0.5, 0.6, 0.7, 0.8, 0.9)  # zones 1-5 start at 50/60/70/80/90%, Garmin's default split
+
+
+def derive_hr_zones(conn, source: str, today: date) -> None:
+    """Zones for an account without Garmin's: floors at 50–90% of heart-rate reserve (Karvonen) from the maximum the
+    estimates use (yours, or the highest you've held for a minute; cardio.hr_max, which never reads these zones) and the
+    28-day median resting heart rate; % of maximum while there's no resting heart rate yet. Stored as a setting so every
+    reader gets the same zones without recomputing them."""
+    if get_setting(conn, "source_hr_zones", None):
+        return
+    from .cardio import hr_max, rest_on
+    hm = hr_max(conn, source, today)["value"]
+    if not hm:
+        return
+    rest = rest_on(conn, source, today.isoformat())
+    floors = [round((rest or 0) + p * (hm - (rest or 0))) for p in ZONE_FLOORS_PCT]
+    zones = {"floors": floors, "method": "HRR" if rest else "HR_MAX", "max_hr": round(hm), "resting_hr": round(rest) if rest else None,
+             "lthr": None, "profile": "DERIVED", "source": "derived"}
+    if get_setting(conn, "derived_hr_zones", None) != zones:
+        from .db import set_setting
+        set_setting(conn, "derived_hr_zones", zones)
 
 
 def data_cutoff(conn, source: str) -> str | None:
@@ -585,11 +678,12 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
                               f"{round(100 * (1 - es))}% of it was at or above {zones['floors'][2]} bpm (zone 3+)."),
                 "interpretation": "Easy running only does its job when it's actually easy.",
                 "evidence": {"record_ids": [sid], "date_range": [a["local_date"]] * 2}, "sample_size": 1, "coverage": None,
-                "limitations": ["Garmin zones; wrist heart rate can read high early in a run."],
+                "limitations": [f"{'Garmin' if zones.get('source') != 'derived' else 'Heart-rate reserve'} zones; wrist heart rate can read high early in a run."],
                 "algorithm_version": rn.RUNNING_VERSION, "derived": True,
             })
-    # The watch's own VO2 max estimate
-    vo2_series = series(conn, source, "garmin_vo2max_running", a["local_date"])
+    # The watch's own VO2 max estimate (from the watch that recorded the run)
+    apple = is_apple(a)
+    vo2_series = series(conn, source, "apple_vo2max_running" if apple else "garmin_vo2max_running", a["local_date"])
     recent_vo2 = [k for k in vo2_series if k >= (d - timedelta(days=7)).isoformat()]
     vo2_day = {"value": vo2_series[max(recent_vo2)], "date": max(recent_vo2)} if recent_vo2 else None
     # Garmin's training readiness on the morning of the run (that day only)
@@ -631,7 +725,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
     }
     from . import cardio, verdict
     body["verdict"] = verdict.build(conn, source, body, a, laps, d)  # how it went against what it was meant to be
-    body["watch"] = "Garmin"  # which watch recorded it (kept for the apps)
+    body["watch"] = "Apple Watch" if apple else "Garmin"  # which watch recorded it (kept for the apps)
     body["vo2_ours"] = cardio.estimate_for_run(conn, source, a)  # Runner Sidekick's VO2 max from this run, beside the watch's
     body["garmin_extra"] = garmin_extra(conn, a, samples_for(conn, a["id"]))  # Garmin's own reads of the run, when it has them
     plan = one(conn.day_plan, {"local_date": a["local_date"]})
@@ -679,8 +773,10 @@ def readiness_basis(conn, rows: dict) -> str | None:
 def garmin_extra(conn, a: dict, s: Samples | None) -> list[dict]:
     """Garmin's own reads of a run, as label/value rows: how its in-run Performance Condition went (it starts after
     about 6 minutes), the stamina left at the end, and the run's average heart rate against Garmin's lactate threshold
-    as of that day. All Garmin estimates; whichever exists."""
+    as of that day. All Garmin estimates; whichever exists (none on an Apple Watch run)."""
     out = []
+    if is_apple(a):
+        return out
     dyn = (s.dyn or {}) if s is not None else {}
     pc = [x for x in dyn.get("pc") or [] if x is not None]
     if pc:
@@ -847,6 +943,7 @@ def build_insights(conn, source: str, today: date, synthetic: bool) -> dict:
     for r in conn.daily_observation.find({"source": source, "state": "measured", "local_date": {"$gte": since}},
                                          {"_id": 0, "local_date": 1, "metric": 1, "value": 1}):
         obs.setdefault(r["metric"], {})[r["local_date"]] = r["value"]
+    obs["hrv_overnight_avg"] = {k: v for k, v in hrv_series(conn, source, today.isoformat()).items() if k >= since}  # one method
     bedtimes = {}
     for r in many(conn.sleep_session, {"source": source, "is_nap": False, "wake_date": {"$gte": since}}):
         st = _dt.fromisoformat(r["start_utc"].replace("Z", "+00:00")) + timedelta(seconds=r["utc_offset_s"] or 0)
@@ -882,6 +979,7 @@ def regenerate(conn, source: str, synthetic: bool, changed_dates: set[str], chan
                morning_lookback_days: int = 7) -> None:
     """Regenerate reports affected by new/changed inputs. Morning reports older than the lookback stay as they were,
     except on first generation (backfill), so the journal reflects what was known at the time."""
+    derive_hr_zones(conn, source, today)  # zones from your own heart rate when Garmin has none (before anything uses them)
     existing = set(conn.report.distinct("subject_key", {"type": "morning"}))
     dates = set(changed_dates) | {today.isoformat()}
     # A changed day also changes the baseline of the following days within the lookback

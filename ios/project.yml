@@ -9,7 +9,7 @@ settings:
     DEVELOPMENT_TEAM: 57L2ULXB7Z
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.82.0"
+    MARKETING_VERSION: "0.83.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   Aptabase:
@@ -40,8 +40,28 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.bennybarak.runnersidekick
             CFBundleURLSchemes: [runnersidekick]
-        BGTaskSchedulerPermittedIdentifiers: [com.bennybarak.runnersidekick.refresh]
-        UIBackgroundModes: [fetch]
+        # .refresh: the BGAppRefreshTask; .import.*: the Apple Health import as a continued processing task (iOS 26),
+        # submitted as com.bennybarak.runnersidekick.import.<unique>
+        BGTaskSchedulerPermittedIdentifiers: [com.bennybarak.runnersidekick.refresh, com.bennybarak.runnersidekick.import.*]
+        UIBackgroundModes: [fetch, processing]
+        NSHealthShareUsageDescription: Runner Sidekick reads your runs, sleep, heart rate and HRV from Apple Health and sends them to your own server for analysis.
+    # HealthKit read access, and background delivery so iOS wakes the app when the watch syncs new data
+    entitlements:
+      path: RunnerSidekick/RunnerSidekick.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+        com.apple.developer.healthkit.background-delivery: true
+    # Debug only: the RSK_SEED_HEALTH test data writes to HealthKit, which needs a share usage string
+    postBuildScripts:
+      - name: Debug HealthKit write usage
+        basedOnDependencyAnalysis: false
+        inputFiles: [$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)]  # after Info.plist is written
+        script: |
+          if [ "$CONFIGURATION" = "Debug" ]; then
+            /usr/libexec/PlistBuddy -c "Delete :NSHealthUpdateUsageDescription" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSHealthUpdateUsageDescription string 'Debug builds write test data to Apple Health in the Simulator.'" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bennybarak.runnersidekick

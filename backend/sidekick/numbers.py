@@ -75,7 +75,7 @@ def threshold(conn, today: date) -> dict:
     base = {"id": "threshold", "title": "Lactate threshold", "lower_is_better": True,
             "basis": "Garmin's estimate of the heart rate and pace you could hold for about an hour. It's what tempo and "
                      "threshold sessions are built around. Not calculated by the app."}
-    th = get_setting(conn, "garmin_threshold", None) or {}
+    th = rp.garmin_setting(conn, "garmin_threshold") or {}
     pts = [p for p in th.get("points", []) if p.get("speed_m_s")]
     if not pts:
         return {**base, "status": "unavailable", "headline": "Not from Garmin yet",
@@ -196,8 +196,8 @@ def current_predictions(conn) -> dict:
     """Garmin's current race predictions (seconds by "5k", "10k", "half", "marathon", with their "date"): the newer of
     the latest snapshot and the last row of the daily history. The snapshot can lag days behind, or be one kept from
     an earlier fetch."""
-    snap = (get_setting(conn, "garmin_fitness", None) or {}).get("race_predictions") or {}
-    rows = [r for r in get_setting(conn, "garmin_predictions", None) or [] if r.get("5k")]
+    snap = (rp.garmin_setting(conn, "garmin_fitness") or {}).get("race_predictions") or {}
+    rows = [r for r in rp.garmin_setting(conn, "garmin_predictions") or [] if r.get("5k")]
     last = rows[-1] if rows else {}
     return last if (last.get("date") or "") > (snap.get("date") or "") else snap
 
@@ -206,7 +206,7 @@ def predictions(conn, source: str, today: date) -> dict:
     """Garmin's race predictions when it has them; Runner Sidekick's own otherwise."""
     base = {"id": "predictions", "title": "Race predictions over time", "lower_is_better": True, "source": "Garmin",
             "basis": "Garmin's predicted race times, day by day. Garmin's estimate from your VO₂ max and training, not a result."}
-    rows = [r for r in get_setting(conn, "garmin_predictions", None) or [] if r.get("5k")]
+    rows = [r for r in rp.garmin_setting(conn, "garmin_predictions") or [] if r.get("5k")]
     if len(rows) < 2:
         return own_predictions(conn, source, today)
     series = [{"date": r["date"], "v": r["5k"], "label": hms(r["5k"])} for r in rows]
