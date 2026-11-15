@@ -22,7 +22,7 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "run-ai-1.5"  # 1.5: watch, conditions, pacing windows and shape, drift suitability, cross-watch flags; 1.4: each lap with its climbing and hill-adjusted pace; 1.3: pacing advice weighs heat, terrain and the runner's own report
+PROMPT_VERSION = "run-ai-1.6"  # 1.6: the app's verified checks as fact, never contradicted (checked, one retry); 1.5: watch, conditions, pacing windows and shape, drift suitability, cross-watch flags; 1.4: each lap with its climbing and hill-adjusted pace; 1.3: pacing advice weighs heat, terrain and the runner's own report
 MAX_POINTS = 3
 MAX_LAPS = 30             # laps sent to the model (a very long run's tail is left out)
 HILL_GRADE = 0.01         # a lap rising or falling 1%+ overall is uphill or downhill
@@ -70,12 +70,15 @@ and the effort was not hard, or when conditions were hot. When the runner names 
 it. Don't contradict the runner's own report without clear data, and don't repeat generic advice after a run that went
 as intended.
 
+Verified: run:verified is the app's checked reading of this run (pacing, effort, drift, hills, conditions) and its
+next focus. Lead with those findings and never contradict them; for pacing use its reading (e.g. a quick start then a
+steady pace) rather than comparing the raw halves yourself. Add only what the bundle supports.
 Windows: run:pacing has two different windows. halves_whole_run compares the two halves of the whole run's complete
 kilometres (warm-up included); drift_window compares the halves after the first 10 minutes. When they disagree, explain
 that they measure different stretches (e.g. a quick start that the drift window leaves out), never as a contradiction.
 "where" says if a slowdown was a quick opening, a late slowing or gradual. A quick opening followed by a steady effort is
 not a fade.
-Drift: run:drift says whether the effort held between its halves (suitability). With "caution", don't read the drift as
+Drift: run:drift says whether the effort held between its halves (suitability). With "limited" or "unsuitable", don't read the drift as
 aerobic fitness; when power and pace drift differ, say why from power_vs_pace. One run's drift is never proof of fitness.
 Watches: run:this.watch names the device. Never compare power in watts, HRV, or a watch's VO2 max between Garmin and
 Apple Watch; run:comparability says when similar runs come from another watch. Never mention metrics the bundle doesn't
@@ -187,6 +190,11 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
                power_vs_pace=dc.get("power_vs_pace"), power_is_device_estimate=dc.get("power_decoupling_pct") is not None)
         if dc.get("power_decoupling_pct") is not None:
             b.fact("power_drift", "power:HR decoupling", f"{dc['power_decoupling_pct']:.1f}%", dc["power_decoupling_pct"])
+    # The app's own checked reading of the run, as the model's ground truth
+    from . import run_checks
+    checks = run_checks.build(conn, source, r)
+    b.item("run:verified", "verified_findings", next_focus=r.get("next_focus"),
+           checks=[{"check": c["title"], "reading": c["say"], "verdict": c["verdict"]} for c in checks])
     comp_runs = (r.get("comparable") or {}).get("runs") or []
     if comp_runs:
         mine = "apple" if rp.is_apple(a) else (a.get("manufacturer") or "garmin").lower()
@@ -208,7 +216,7 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
         b.fact("similar_pace", "median pace of similar runs", rp.fmt_pace(sm["median_pace_s_per_km"]), sm["median_pace_s_per_km"])
         if sm.get("median_avg_hr"):
             b.fact("similar_hr", "median average heart rate of similar runs", f"{round(sm['median_avg_hr'])} bpm", sm["median_avg_hr"])
-    zones = rp.hr_zones(conn)
+    zones = rp.hr_zones(conn, a)
     if zones:
         b.fact("zone2_top", "top of zone two (easy)", f"{zones['floors'][2]} bpm", zones["floors"][2])
         b.fact("zone4_floor", "start of zone four", f"{zones['floors'][3]} bpm", zones["floors"][3])
@@ -257,6 +265,11 @@ def validate(raw: str, b: ch.Bundle) -> dict:
     nt = d["next_time"]
     if nt.get("direction") not in ch.DIRECTIONS:
         raise ch.CoachError("bad direction")
+    if b.items.get("run:pacing", {}).get("where") == "opening":
+        said = " ".join([d.get("tldr") or "", d.get("summary") or "", nt.get("text") or ""]
+                        + [p.get("text") or "" for k in ("went_well", "to_work_on") for p in d[k]]).lower()
+        if any(w in said for w in ("fade", "faded", "fading")):
+            raise ch.CoachError("contradicts the pacing analysis: the run started quickly and then held steady; it didn't fade")
     if b.items.get("today:advice", {}).get("intensity_held_back") and nt["direction"] == "harder":
         raise ch.CoachError("next_time: harder while today's advice holds intensity back")
     points = lambda key: [{"text": ch.check_text(p.get("text"), b, f"{key} {k}", 300),  # noqa: E731
@@ -300,7 +313,11 @@ def generate(conn, source: str, sid: str, b: ch.Bundle, model: str, api_key: str
     else:
         provider = provider or OpenAIProvider(model, api_key)
         try:
-            out = validate(provider.generate(SYSTEM, b.to_json(), SCHEMA, 60.0, 2000), b)
+            try:
+                out = validate(provider.generate(SYSTEM, b.to_json(), SCHEMA, 60.0, 2000), b)
+            except ch.CoachError as e:  # one more try, told what was wrong
+                out = validate(provider.generate(SYSTEM + f"\nYour previous answer was rejected: {e}. Correct that.",
+                                                 b.to_json(), SCHEMA, 60.0, 2000), b)
         except ch.CoachError as e:
             status, detail = "rejected", str(e)
         except Exception as e:  # network, auth, timeout; never log the key or the bundle

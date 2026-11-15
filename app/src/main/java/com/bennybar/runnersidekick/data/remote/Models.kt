@@ -662,12 +662,20 @@ data class TrophyComparison(val headline: String? = null, val detail: String? = 
 data class Decision(@SerialName("unwell_applied") val unwellApplied: Boolean = false)
 
 @Serializable
+data class HrZonesEffective(val floors: List<Int> = emptyList(), val label: String = "")
+
+@Serializable
 data class SettingsDto(
     val timezone: String,
     @SerialName("running_days") val runningDays: List<Int>,
     val goal: String? = null,
     @SerialName("available_minutes") val availableMinutes: Int? = null,
-    @SerialName("hr_zone_source") val hrZoneSource: String = "garmin",
+    /** "shared" | "per_watch" | "custom" | "none" (an older server says "garmin" for "shared") */
+    @SerialName("hr_zone_source") val hrZoneSource: String = "shared",
+    /** Your own zone starts (bpm where zones 1–5 start), or null */
+    @SerialName("hr_zones_custom") val hrZonesCustom: List<Int>? = null,
+    /** What the current watch's runs use, and where it comes from in plain words (null: no zones) */
+    @SerialName("hr_zones_effective") val hrZonesEffective: HrZonesEffective? = null,
     @SerialName("goal_type") val goalType: String? = null,
     @SerialName("ai_enabled") val aiEnabled: Boolean = false,
     @SerialName("weather_enabled") val weatherEnabled: Boolean = true,

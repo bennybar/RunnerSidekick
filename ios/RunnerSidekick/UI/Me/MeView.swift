@@ -221,6 +221,7 @@ struct MeView: View {
                       ["Watch", "Sidekick"], ["watch", "sidekick"], r.vo2Source, key: "vo2_source")
             choiceRow("Fitness age", r.fitnessAgeSource == "sidekick" ? "Runner Sidekick's: the age your VO₂ max (as chosen above) is typical for"
                       : "Garmin's (VO₂ max, resting HR, activity, BMI)", ["Garmin", "Sidekick"], ["garmin", "sidekick"], r.fitnessAgeSource, key: "fitness_age_source")
+            HrZonesRow(r: r)
         }
     }
 
@@ -381,6 +382,116 @@ struct MeView: View {
     }
 }
 
+/// Why five typed zone starts can't be saved, or nil when they can: whole bpm, 60–230, each higher than the one before.
+private func zoneStartsError(_ texts: [String]) -> String? {
+    let v = texts.map { Int($0.trimmingCharacters(in: .whitespaces)) }
+    if v.count != 5 || v.contains(where: { $0 == nil }) { return "Enter all five zone starts" }
+    let n = v.compactMap { $0 }
+    if n.contains(where: { !(60...230).contains($0) }) { return "Each zone start has to be between 60 and 230 bpm" }
+    if zip(n, n.dropFirst()).contains(where: { $1 <= $0 }) { return "Each zone has to start higher than the one before" }
+    return nil
+}
+
+/// Heart-rate zones: shared, per watch, your own, or off. Each choice saves at once, except Custom before any numbers are
+/// saved: then it only opens the five fields, and their Save sends both.
+private struct HrZonesRow: View {
+    var r: SettingsDto
+    @Environment(Store.self) private var store
+    @State private var editing = false  // Custom chosen here, no numbers saved yet
+    @State private var fields: [String] = []
+    @State private var error: String?
+    @State private var busy = false
+
+    private static let sources = [("shared", "Shared"), ("per_watch", "Per watch"), ("custom", "Custom"), ("none", "Off")]
+    private static let hints = [
+        "shared": "One set of zones for every watch: your own if you entered them, else the zones imported from your Garmin profile, else worked out from your heart rate.",
+        "per_watch": "Each watch's runs use that watch's zones; Apple Watch runs use zones worked out from your maximum and resting heart rate.",
+        "custom": "Your own five zone starts, for every watch.",
+        "none": "No zones: runs aren't read by heart-rate zone.",
+    ]
+
+    private var source: String { r.hrZoneSource == nil || r.hrZoneSource == "garmin" ? "shared" : r.hrZoneSource! }
+    private var prefill: [String] {
+        let v = r.hrZonesCustom ?? r.hrZonesEffective?.floors ?? []
+        return (0..<5).map { $0 < v.count ? String(v[$0]) : "" }
+    }
+
+    var body: some View {
+        let shown = editing ? "custom" : source
+        GroupCustom {
+            Text("Heart-rate zones").font(Typo.bodyLarge)
+            ChoiceGroup(labels: Self.sources.map(\.1), selected: Self.sources.firstIndex { $0.0 == shown }, enabled: !busy) { i in
+                choose(Self.sources[i].0)
+            }
+            .padding(.top, 4)
+            if let h = Self.hints[shown] { Text(h).font(Typo.bodyMedium).foregroundStyle(Palette.onSurfaceVariant) }
+            if let e = r.hrZonesEffective, !e.floors.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(e.floors.enumerated().map { "Z\($0.offset + 1) \($0.element)" }.joined(separator: " · ")).font(Typo.bodyMedium)
+                    if !e.label.isEmpty {
+                        Text(e.label.prefix(1).uppercased() + e.label.dropFirst()).font(Typo.bodySmall).foregroundStyle(Palette.onSurfaceVariant)
+                    }
+                }
+            }
+            if shown == "custom" { editor }
+        }
+        .onAppear { if fields.isEmpty { fields = prefill } }
+        .onChange(of: prefill) { fields = prefill }
+    }
+
+    @ViewBuilder private var editor: some View {
+        let unchanged = source == "custom" && fields.map { Int($0) } == (r.hrZonesCustom ?? []).map { Optional($0) }
+        Text("Where each zone starts, in bpm").font(Typo.bodySmall).foregroundStyle(Palette.onSurfaceVariant).padding(.top, 8)
+        HStack(spacing: 6) {
+            ForEach(0..<5, id: \.self) { i in
+                VStack(spacing: 4) {
+                    Text("Z\(i + 1)").font(Typo.bodySmall).foregroundStyle(Palette.onSurfaceVariant)
+                    TextField("bpm", text: Binding(get: { i < fields.count ? fields[i] : "" }, set: { t in
+                        if fields.count < 5 { fields = prefill }
+                        fields[i] = String(t.filter(\.isNumber).prefix(3)); error = nil
+                    }))
+                    .keyboardType(.numberPad).multilineTextAlignment(.center).font(Typo.bodyLarge)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(error == nil ? Palette.outline : Palette.error))
+                    .accessibilityLabel("Zone \(i + 1) start, bpm")
+                }
+            }
+        }
+        if let error { Text(error).font(Typo.bodySmall).foregroundStyle(Palette.error) }
+        PillButton(title: unchanged ? "Saved" : "Save zones", busy: busy) { saveCustom() }
+            .disabled(busy || unchanged)
+    }
+
+    private func choose(_ k: String) {
+        error = nil
+        if k == "custom" && r.hrZonesCustom == nil { editing = true; return }
+        editing = false
+        if k != source { save(["hr_zone_source": k], inline: false) }
+    }
+
+    private func saveCustom() {
+        if let e = zoneStartsError(fields) { error = e; return }
+        var changes: [String: Any?] = ["hr_zones_custom": fields.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }]
+        if source != "custom" { changes["hr_zone_source"] = "custom" }
+        save(changes, inline: true)
+    }
+
+    /// Saves and refreshes, so the zones in use and where they come from update. A rejected set of numbers shows under them.
+    private func save(_ changes: [String: Any?], inline: Bool) {
+        busy = true
+        Task {
+            let m = await store.attempt { _ = try await store.saveSettings(changes) }
+            busy = false
+            if let m, inline { error = m; return }
+            store.toast = m ?? "Saved"
+            if m == nil {
+                editing = false
+                Task { _ = await store.attempt { try await store.refreshAll() } }
+            }
+        }
+    }
+}
+
 // MARK: Sheets
 
 /// One section's sheet with its own Save. Swiping it away with unsaved edits asks first, so nothing is lost silently.
@@ -464,24 +575,23 @@ private struct TrainingSheet: View {
     @State private var goal: String
     @State private var minutes: String
     @State private var weekStart: String?
-    @State private var zones: String?
     @State private var tz: String
 
     init(r: SettingsDto) {
         self.r = r
         _days = State(initialValue: Set(r.runningDays)); _goalType = State(initialValue: r.goalType); _goal = State(initialValue: r.goal ?? "")
         _minutes = State(initialValue: r.availableMinutes.map(String.init) ?? ""); _weekStart = State(initialValue: r.weekStartDay)
-        _zones = State(initialValue: r.hrZoneSource); _tz = State(initialValue: r.timezone)
+        _tz = State(initialValue: r.timezone)
     }
 
     var body: some View {
         let phoneTz = TimeZone.current.identifier
         let tzOk = TimeZone(identifier: tz.trimmingCharacters(in: .whitespaces)) != nil
         let dirty = days != Set(r.runningDays) || goalType != r.goalType || goal != (r.goal ?? "") || minutes != (r.availableMinutes.map(String.init) ?? "")
-            || weekStart != r.weekStartDay || zones != r.hrZoneSource || tz.trimmingCharacters(in: .whitespaces) != r.timezone
+            || weekStart != r.weekStartDay || tz.trimmingCharacters(in: .whitespaces) != r.timezone
         SectionSheet(title: "Training", dirty: dirty, canSave: tzOk, onSave: {
             await store.saveSheet(["running_days": days.sorted(), "goal_type": goalType, "goal": goal.nilIfEmpty, "available_minutes": Int(minutes),
-                                   "week_start_day": weekStart, "hr_zone_source": zones, "timezone": tz.trimmingCharacters(in: .whitespaces)])
+                                   "week_start_day": weekStart, "timezone": tz.trimmingCharacters(in: .whitespaces)])
         }) {
             FieldLabel(text: "Running days")
             ToggleRow(labels: dayNames, checked: { days.contains($0) }) { i in if days.contains(i) { days.remove(i) } else { days.insert(i) } }
@@ -493,8 +603,6 @@ private struct TrainingSheet: View {
                        : "Used for weekly reviews, the weekly focus, Runs and charts.")
             let starts: [(String?, String)] = [(nil, "As in Garmin"), ("monday", "Monday"), ("sunday", "Sunday"), ("saturday", "Saturday")]
             ToggleRow(labels: starts.map(\.1), checked: { weekStart == starts[$0].0 }) { weekStart = starts[$0].0 }
-            FieldLabel(text: "Heart-rate zones")
-            ChoiceGroup(labels: ["From Garmin", "Don't use"], selected: ["garmin", "none"].firstIndex { $0 == zones }) { zones = ["garmin", "none"][$0] }
             FieldLabel(text: "Time zone", hint: "Decides when your day starts and ends.")
             FieldBox(placeholder: "Europe/London", text: $tz)
             if !tzOk { Text("Not a time zone name, e.g. Europe/London").font(Typo.bodySmall).foregroundStyle(Palette.error) }

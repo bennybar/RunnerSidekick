@@ -641,7 +641,12 @@ struct SettingsDto: Codable {
     @D var runningDays: [Int]
     var goal: String?
     var availableMinutes: Int?
+    /// "shared" | "per_watch" | "custom" | "none" (an older server says "garmin" for "shared")
     var hrZoneSource: String?
+    /// Your own zone starts (bpm where zones 1–5 start), or nil
+    var hrZonesCustom: [Int]?
+    /// What the current watch's runs use, and where it comes from in plain words (nil: no zones)
+    var hrZonesEffective: HrZonesEffective?
     var goalType: String?
     @D var aiEnabled: Bool
     @DefaultTrue var weatherEnabled: Bool
@@ -687,6 +692,8 @@ struct SettingsDto: Codable {
     var windowStart: String { morningWindowStart ?? "06:00" }
     var windowEnd: String { morningWindowEnd ?? "10:00" }
 }
+
+struct HrZonesEffective: Codable { @D var floors: [Int]; @D var label: String }
 
 struct TrendRun: Codable, Identifiable { var id: String { sourceId }; var sourceId: String; var localDate: String; var distanceM: Double?; var movingS: Double? }
 

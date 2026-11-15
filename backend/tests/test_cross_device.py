@@ -74,9 +74,9 @@ def test_hills_in_raw_splits_dont_read_as_a_fade():
 def test_progressive_run_and_genuine_drift_are_told_apart():
     # (4) A progressive run: the second half 6% faster reads as low drift, so it's flagged, the number kept
     prog = drift(360, 340, pace_dc=-2.5)
-    assert prog["suitability"] == "caution" and "progressive" in prog["suitability_why"][0] and prog["decoupling_pct"] == -2.5
+    assert prog["suitability"] == "limited" and "progressive" in prog["suitability_why"][0] and prog["decoupling_pct"] == -2.5
     chk = checks({"splits": [], "decoupling": prog, "activity": {"source_id": "x"}})["drift"]
-    assert chk["verdict"] == "info" and "interpret with caution" in chk["say"]
+    assert chk["verdict"] == "info" and "limited as a drift measure" in chk["say"]
     # (9) A steady tempo whose heart rate genuinely drifted: a good measurement, judged as drift
     real = drift(345, 346, pace_dc=8.0)
     assert real["suitability"] == "good"
@@ -170,7 +170,124 @@ def test_ai_input_gets_the_watch_windows_and_comparability(tmp_path):
     b = run_ai.bundle(conn, "fixture", sid, ANCHOR + timedelta(days=2))
     assert b.items["run:this"]["watch"] == "Apple Watch"
     assert "warm-up included" in b.items["run:pacing"]["halves_whole_run"] and b.items["run:pacing"]["drift_window"]
-    assert b.items["run:drift"]["suitability"] in ("good", "caution")
+    assert b.items["run:drift"]["suitability"] in ("good", "limited", "unsuitable")
     assert b.items["run:comparability"]["from_another_watch"] >= 1 and b.items["run:comparability"]["power_comparable"] is False
     for rule in ("measure different stretches", "Never compare power in watts", 'automatically followed by "easy"'):
         assert rule in run_ai.SYSTEM
+
+
+# ---------------------------------------------------------------- final polish (zones, AI agreement, minute-level drift)
+
+def minutes_of(mps_by_minute):
+    return list(mps_by_minute)
+
+
+def test_nov15_keeps_its_drift_and_reads_as_steady():
+    # (1) The 15 Nov tempo after the warm-up: pace held (-0.4%), minute spread ~3.6%, a slight downward trend, power -2.4%
+    mins = [2.92 + 0.08 * ((i * 7) % 5 - 2) / 2 - 0.002 * i for i in range(35)]
+    out = rn.suitability(-0.4, -2.4, {"kind": "steady"}, 1.9, 3.9, mins, 2.0)
+    assert out["suitability"] == "good" and out["suitability_why"] == [] and "pace held" in out["power_vs_pace"]
+
+
+def test_progressive_run_is_never_called_stable():
+    # (4) Averages of the halves 2% apart (under the old bar) but the pace climbs steadily across the window
+    mins = [2.7 + 0.008 * i for i in range(30)]
+    out = rn.suitability(2.0, None, {"kind": "steady"}, -0.3, None, mins, 4.0)
+    assert out["suitability"] == "limited" and "progressive" in out["suitability_why"][0]
+
+
+def test_alternating_intervals_with_equal_half_averages_are_unsuitable():
+    # (5) 3 min hard / 2 min easy throughout: both halves average the same, the minutes don't
+    mins = [(3.6 if (i % 5) < 3 else 2.4) for i in range(30)]
+    out = rn.suitability(0.0, None, {"kind": "steady"}, 1.0, None, mins, 0.0)
+    assert out["suitability"] == "unsuitable" and "interval-like" in out["suitability_why"][0]
+
+
+def test_normal_hills_dont_look_like_intervals():
+    # (6) A rolling course at an even effort: the recorded pace swings with the hills, the hill-adjusted pace doesn't
+    import math
+    from sidekick.connectors.base import Samples
+    n = 2700
+    t = [float(i) for i in range(n)]
+    dist, elev, speed, d = [], [], [], 0.0
+    for i in range(n):
+        e = 20 + 12 * math.sin(2 * math.pi * d / 900)  # a 24 m hill every 900 m
+        g = 12 * 2 * math.pi / 900 * math.cos(2 * math.pi * d / 900)
+        v = 3.0 / (1 + 3.5 * g) if g > 0 else 3.0 / max(0.85, 1 + 2.0 * g)  # slower uphill, quicker downhill, same effort
+        dist.append(d); elev.append(e); speed.append(v)
+        d += v
+    s = Samples(t, [150.0] * n, speed, dist, elev, [170.0] * n)
+    dc = rn.decoupling(s, [], d, 200.0)
+    assert dc["suitability"] == "good", dc["suitability_why"]
+    assert dc["effort_spread_pct"] < rn.UNEVEN_LIMITED
+
+
+def test_easing_off_and_genuine_drift_are_told_apart():
+    # Slowing at the same heart rate is drift itself; slowing with heart rate falling is easing off
+    flat = [2.9] * 30
+    assert rn.suitability(-4.0, None, {"kind": "steady"}, 6.0, None, flat, 1.0)["suitability"] == "good"
+    eased = rn.suitability(-4.0, None, {"kind": "steady"}, 1.0, None, flat, -5.0)
+    assert eased["suitability"] == "limited" and "eased off" in eased["suitability_why"][0]
+
+
+def test_zones_keep_garmin_behaviour_unless_the_runner_chooses(tmp_path):
+    # (2, 3) The old setting means shared Garmin zones, as before; per-watch gives Apple runs their own; custom wins
+    _, _, conn, sid = mixed_history(tmp_path)
+    from sidekick.db import set_setting
+    garmin = {"floors": [94, 112, 131, 150, 168], "method": "HR_MAX", "max_hr": 187, "lthr": 166, "profile": "DEFAULT", "source": "garmin"}
+    set_setting(conn, "source_hr_zones", garmin)
+    set_setting(conn, "derived_hr_zones", {"floors": [118, 132, 146, 160, 173], "method": "HRR", "max_hr": 187, "resting_hr": 50,
+                                           "lthr": None, "profile": "DERIVED", "source": "derived"})
+    set_setting(conn, "hr_zone_source", "garmin")
+    apple_run = rp.activity_by_source_id(conn, "fixture", sid)
+    garmin_run = conn.activity.find_one({"manufacturer": {"$ne": "Apple"}})
+    assert rp.zone_source(conn) == "shared"
+    assert rp.hr_zones(conn, garmin_run)["floors"] == garmin["floors"] == rp.hr_zones(conn, apple_run)["floors"]
+    md = run_export.markdown(conn, "fixture", sid, app_version="test")[1]
+    assert "Zones: your zones, imported from your Garmin profile (% of max HR 187), applied to this Apple Watch's run" in md
+    set_setting(conn, "hr_zone_source", "per_watch")
+    assert rp.hr_zones(conn, garmin_run)["floors"] == garmin["floors"]
+    assert rp.hr_zones(conn, apple_run)["floors"] == [118, 132, 146, 160, 173]
+    assert "worked out from your maximum (187) and resting heart rate (50)" in run_export.markdown(conn, "fixture", sid, app_version="test")[1]
+    set_setting(conn, "hr_zones_custom", [100, 120, 135, 152, 170])
+    set_setting(conn, "hr_zone_source", "custom")
+    assert rp.hr_zones(conn, garmin_run)["floors"] == rp.hr_zones(conn, apple_run)["floors"] == [100, 120, 135, 152, 170]
+    assert rp.zone_label(rp.hr_zones(conn, apple_run)) == "your own zones"
+
+
+def test_custom_zones_are_validated_and_shown(tmp_path):
+    client, h, _ = app(tmp_path)
+    assert client.put("/v1/settings", json={"hr_zone_source": "custom"}, headers=h).status_code == 422  # no numbers yet
+    assert client.put("/v1/settings", json={"hr_zones_custom": [100, 99, 130, 150, 170]}, headers=h).status_code == 422
+    r = client.put("/v1/settings", json={"hr_zones_custom": [100, 120, 135, 152, 170], "hr_zone_source": "custom"}, headers=h).json()
+    assert r["hr_zone_source"] == "custom" and r["hr_zones_effective"] == {"floors": [100, 120, 135, 152, 170], "label": "your own zones"}
+
+
+def test_ai_must_agree_with_the_verified_reading(tmp_path):
+    # (7) The verified checks go in as fact; an answer calling a quick-start run a fade is rejected, then retried once
+    import json
+    import pytest
+    from sidekick import run_ai
+    from sidekick.coach import CoachError
+    _, _, conn, sid = mixed_history(tmp_path)
+    rp.build_post_run(conn, "fixture", sid, True)
+    b = run_ai.bundle(conn, "fixture", sid, ANCHOR + timedelta(days=2))
+    assert any(c["check"] == "Pacing" for c in b.items["run:verified"]["checks"])
+    b.items["run:pacing"] = {**b.items.get("run:pacing", {}), "where": "opening"}
+    bad = {"tldr": "You faded late.", "summary": "A tempo run.", "summary_evidence_ids": ["run:this"],
+           "went_well": [], "to_work_on": [{"text": "You faded in the second half.", "evidence_ids": ["run:pacing"]}],
+           "next_time": {"text": "Start easier.", "evidence_ids": ["run:pacing"], "direction": "same"}}
+    with pytest.raises(CoachError, match="didn't fade"):
+        run_ai.validate(json.dumps(bad), b)
+    good = {**bad, "tldr": "A quick start, then steady.", "to_work_on": [{"text": "Settle into the pace from the first km.",
+                                                                          "evidence_ids": ["run:pacing"]}]}
+    assert run_ai.validate(json.dumps(good), b)["tldr"] == "A quick start, then steady."
+    assert "never contradict them" in run_ai.SYSTEM
+
+
+def test_an_unrelated_save_never_clears_custom_zones(tmp_path):
+    # Android sends the whole settings object, with hr_zones_custom null when unchanged
+    client, h, _ = app(tmp_path)
+    client.put("/v1/settings", json={"hr_zones_custom": [100, 120, 135, 152, 170], "hr_zone_source": "custom"}, headers=h)
+    r = client.put("/v1/settings", json={"goal": "x", "hr_zones_custom": None, "hr_zones_effective": None}, headers=h).json()
+    assert r["hr_zones_custom"] == [100, 120, 135, 152, 170] and r["hr_zone_source"] == "custom"

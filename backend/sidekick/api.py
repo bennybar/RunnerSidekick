@@ -104,7 +104,8 @@ class SettingsIn(BaseModel):
     running_days: list[int] | None = Field(default=None, max_length=7)
     goal: str | None = Field(default=None, max_length=200)
     available_minutes: int | None = Field(default=None, ge=0, le=600)
-    hr_zone_source: Literal["garmin", "none"] | None = None
+    hr_zone_source: Literal["shared", "per_watch", "custom", "none", "garmin"] | None = None  # "garmin": the old name for shared
+    hr_zones_custom: list[int] | None = Field(default=None, min_length=5, max_length=5)  # bpm where zones 1–5 start
     goal_type: Literal["consistency", "distance", "performance", "health"] | None = None
     ai_enabled: bool | None = None
     weather_enabled: bool | None = None
@@ -920,7 +921,8 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
     def get_settings(conn=Depends(db)):
         return {"timezone": str(tz(conn)), "timezone_set": rp.get_setting(conn, "timezone", None) is not None, "running_days": rp.get_setting(conn, "running_days", [0, 2, 4, 5]),
                 "goal": rp.get_setting(conn, "goal", None), "available_minutes": rp.get_setting(conn, "available_minutes", None),
-                "hr_zone_source": rp.get_setting(conn, "hr_zone_source", "garmin"),
+                "hr_zone_source": rp.zone_source(conn), "hr_zones_custom": rp.get_setting(conn, "hr_zones_custom", None),
+                "hr_zones_effective": (lambda z: {"floors": z["floors"], "label": rp.zone_label(z)} if z else None)(rp.hr_zones(conn)),
                 "goal_type": rp.get_setting(conn, "goal_type", None),
                 "ai_enabled": rp.get_setting(conn, "ai_enabled", False),
                 "weather_enabled": rp.get_setting(conn, "weather_enabled", True),
@@ -947,6 +949,14 @@ def create_app(cfg: Config, connector=None, narrative_provider=None, google_veri
                 ZoneInfo(body.timezone)
             except Exception:
                 raise HTTPException(422, "unknown timezone")
+        if body.hr_zones_custom is not None:
+            z = body.hr_zones_custom
+            if any(not 60 <= v <= 230 for v in z) or any(b <= a for a, b in zip(z, z[1:])):
+                raise HTTPException(422, "Zone starts must be 5 heart rates between 60 and 230 bpm, each higher than the one before")
+        if body.hr_zone_source == "custom" and body.hr_zones_custom is None and not rp.get_setting(conn, "hr_zones_custom", None):
+            raise HTTPException(422, "Enter your five zone starts to use your own zones")
+        if body.hr_zone_source == "garmin":
+            body.hr_zone_source = "shared"
         if body.running_days is not None and any(not 0 <= d <= 6 for d in body.running_days):
             raise HTTPException(422, "running_days are 0 (Mon) .. 6 (Sun)")
         for k in ("profile_birth_date", "race_date"):

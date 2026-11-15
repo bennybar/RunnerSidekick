@@ -360,7 +360,7 @@ def readiness_with(monkeypatch, at, runs):
     monkeypatch.setattr(rd, "run_load", lambda conn, a, floors: a["load"])
     monkeypatch.setattr(rd.rp, "get_setting", lambda conn, kk, d: d)
     monkeypatch.setattr(rd.rp, "activities", lambda conn, s, a, b: runs)
-    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: at)
     monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, a: None)
     return rd.build(None, "x", at.date(), morning(sleep_h=8))
@@ -378,7 +378,7 @@ def test_the_day_after_a_weekly_long_run_or_hard_session_is_easy_not_rest(monkey
 def test_one_short_night_holds_to_easy_not_rest(monkeypatch):
     from sidekick import readiness as rd
     from test_readiness import morning, TODAY
-    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: None)
     monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: None)
     monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.0, "fatigue": 0.0, "left_now": 0.5, "left_usual": 0.5,
@@ -501,7 +501,7 @@ def strain_runs(today, recent_hr, recent_cad, recent_load=60.0):
 def test_strain_needs_two_signals(monkeypatch):
     from sidekick import strain
     today = date(2026, 10, 5)
-    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr("sidekick.readiness.training_load", lambda conn, s, at, z: {"ratio": 1.0})
     monkeypatch.setattr("sidekick.readiness.moment", lambda conn, d: None)
     monkeypatch.setattr("sidekick.readiness.run_load", lambda conn, a, floors: a["load"])
@@ -630,7 +630,7 @@ def test_weather_switch_and_catch_up():
 
 def test_an_out_and_back_on_a_hill_isnt_read_as_a_fade(monkeypatch):
     from sidekick import run_checks
-    monkeypatch.setattr(rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rp, "hr_zones", lambda conn, a=None: None)
     up = [{"idx": i, "distance_m": 1000.0, "pace_s_per_km": 330.0, "gap_pace_s_per_km": 330.0, "complete": True,
            "elevation_gain_m": 2.0, "elevation_loss_m": 25.0} for i in range(4)]  # down the hill and easy...
     back = [{"idx": i + 4, "distance_m": 1000.0, "pace_s_per_km": 360.0, "gap_pace_s_per_km": 350.0, "complete": True,
@@ -646,7 +646,7 @@ def test_an_out_and_back_on_a_hill_isnt_read_as_a_fade(monkeypatch):
 
 def test_a_hot_day_loosens_the_pacing_bar(monkeypatch):
     from sidekick import run_checks
-    monkeypatch.setattr(rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rp, "hr_zones", lambda conn, a=None: None)
     sp = [{"idx": i, "distance_m": 1000.0, "pace_s_per_km": 330.0 + (20 if i >= 2 else 0), "complete": True} for i in range(4)]
     rep = {"splits": sp, "activity": {"source_id": "x"}, "intent": {}}
     verdict = lambda r: next(c for c in run_checks.build(None, "fixture", r) if c["id"] == "pacing")["verdict"]  # noqa: E731
@@ -671,7 +671,7 @@ def test_weekly_long_run_leftover_is_routine_an_unusual_one_isnt(monkeypatch):
 def test_strain_leaves_hard_sessions_out_of_felt_harder_and_reads_identical_days_as_monotony(monkeypatch):
     from sidekick import strain
     today = date(2026, 10, 5)
-    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn: {"floors": [100, 120, 140, 160, 175]})
+    monkeypatch.setattr(strain.rp, "hr_zones", lambda conn, a=None: {"floors": [100, 120, 140, 160, 175]})
     monkeypatch.setattr("sidekick.readiness.training_load", lambda conn, s, at, z: {"ratio": 1.0})
     monkeypatch.setattr("sidekick.readiness.moment", lambda conn, d: None)
     monkeypatch.setattr("sidekick.focus.zone_shares", lambda conn, a, f: {"hard": 0.05, "easy": 0.9})
@@ -799,7 +799,7 @@ def test_one_weak_part_floors_the_final_score_with_other_parts_missing(monkeypat
     monkeypatch.setattr(rd, "training_load", lambda *a, **k: None)
     monkeypatch.setattr(rd, "garmin_check", lambda *a, **k: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: None)
-    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr(rd, "current", lambda f, d: ((f or {}).get("v"), None))
     monkeypatch.setattr(rd, "usual", lambda f, d: ((f or {}).get("base"), "your usual"))
     morning = {"recommendation": {"rule_id": "R1"}, "findings": [

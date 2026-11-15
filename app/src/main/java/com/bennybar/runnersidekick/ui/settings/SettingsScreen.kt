@@ -122,6 +122,17 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
         Analytics.track("setting_changed", mapOf("key" to key))
     }
 
+    /** Why the custom zone starts weren't saved (the server's own words), shown under the fields rather than as a snackbar. */
+    val zonesError = MutableStateFlow<String?>(null)
+    fun saveZones(s: SettingsDto) = viewModelScope.launch {
+        zonesError.value = null
+        var ok = false
+        runIo { remote.value = repo.saveRemoteSettings(s); Analytics.track("setting_changed", mapOf("key" to "hr_zones_custom")); ok = true }
+        if (!ok) { zonesError.value = error.value; clearError(); return@launch }
+        message.value = "Saved"
+        launch { runCatching { repo.refreshAll() } }
+    }
+
     /** AI input on this phone or the server. Choosing the phone downloads Gemini Nano first when it isn't there yet. */
     fun setOwnAiKey(key: String?) = launchIo {
         repo.settings.setOwnAiKey(key)
@@ -160,6 +171,25 @@ class SettingsVm(repo: Repository) : BaseVm(repo) {
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 private val GOALS = listOf("consistency" to "Consistency", "distance" to "Go longer", "performance" to "Get faster", "health" to "Health")
 private val RACES = listOf("5k" to "5K", "10k" to "10K", "half" to "Half", "marathon" to "Marathon")
+private val ZONE_SOURCES = listOf("shared" to "Shared", "per_watch" to "Per watch", "custom" to "Custom", "none" to "Off")
+private val ZONE_HINTS = mapOf(
+    "shared" to "One set of zones for every watch: your own if you entered them, else the zones imported from your Garmin profile, else worked out from your heart rate.",
+    "per_watch" to "Each watch's runs use that watch's zones; Apple Watch runs use zones worked out from your maximum and resting heart rate.",
+    "custom" to "Your own five zone starts, for every watch.",
+    "none" to "No zones: runs aren't read by heart-rate zone.",
+)
+
+/** Why five typed zone starts can't be saved, or null when they can: whole bpm, 60–230, each higher than the one before. */
+internal fun zoneStartsError(texts: List<String>): String? {
+    val v = texts.map { it.trim().toIntOrNull() }
+    return when {
+        v.size != 5 || v.any { it == null } -> "Enter all five zone starts"
+        v.any { it!! !in 60..230 } -> "Each zone start has to be between 60 and 230 bpm"
+        v.zipWithNext().any { (a, b) -> b!! <= a!! } -> "Each zone has to start higher than the one before"
+        else -> null
+    }
+}
+
 private fun hms(s: Int) = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -295,6 +325,7 @@ fun SettingsScreen(onConnectGarmin: () -> Unit = {}, onOpenReports: () -> Unit =
                                     modifier = Modifier.width(184.dp),
                                     onSelect = { if (r.fitnessAgeSource != keys[it]) vm.saveRemote(r.copy(fitnessAgeSource = keys[it]), key = "fitness_age_source") })
                             })
+                        custom { HrZones(r, busy, vm) }
                     }
                 }
             }
@@ -489,12 +520,11 @@ private fun TrainingSheet(r: SettingsDto, busy: Boolean, error: String?, onClose
     var goal by rememberSaveable { mutableStateOf(r.goal ?: "") }
     var minutes by rememberSaveable { mutableStateOf(r.availableMinutes?.toString() ?: "") }
     var weekStart by rememberSaveable { mutableStateOf(r.weekStartDay) }
-    var zones by rememberSaveable { mutableStateOf(r.hrZoneSource) }
     var tz by rememberSaveable { mutableStateOf(r.timezone) }
     val phoneTz = java.time.ZoneId.systemDefault().id
     val tzOk = runCatching { java.time.ZoneId.of(tz.trim()) }.isSuccess
     val edited = r.copy(runningDays = days.sorted(), goalType = goalType, goal = goal.ifBlank { null }, availableMinutes = minutes.toIntOrNull(),
-        weekStartDay = weekStart, hrZoneSource = zones, timezone = tz.trim())
+        weekStartDay = weekStart, timezone = tz.trim())
     SectionSheet("Training", dirty = edited != r, canSave = !busy && tzOk, onSave = { onSave(edited) }, onClose = onClose, error = error) {
         Label("Running days")
         com.bennybar.runnersidekick.ui.components.ToggleRow(DAYS, { it in days }, { i -> days = if (i in days) days - i else days + i })
@@ -507,9 +537,6 @@ private fun TrainingSheet(r: SettingsDto, busy: Boolean, error: String?, onClose
             else "Used for weekly reviews, the weekly focus, Activities and charts.")
         val starts = listOf(null to "As in Garmin", "monday" to "Monday", "sunday" to "Sunday", "saturday" to "Saturday")
         com.bennybar.runnersidekick.ui.components.ToggleRow(starts.map { it.second }, { weekStart == starts[it].first }, { weekStart = starts[it].first })
-        Label("Heart-rate zones")
-        val zoneKeys = listOf("garmin", "none")
-        com.bennybar.runnersidekick.ui.components.ChoiceGroup(listOf("From Garmin", "Don't use"), zoneKeys.indexOf(zones).takeIf { it >= 0 }, { zones = zoneKeys[it] })
         Label("Time zone", "Decides when your day starts and ends.")
         OutlinedTextField(tz, { tz = it }, singleLine = true, isError = !tzOk, modifier = Modifier.fillMaxWidth(),
             supportingText = { if (!tzOk) Text("Not a time zone name, e.g. Europe/London") })
@@ -646,3 +673,49 @@ private fun TimeDialog(value: String, onClose: () -> Unit, onPick: (String) -> U
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } })
 }
 
+/** Heart-rate zones: shared, per watch, your own, or off. Each choice saves at once, except Custom before any numbers are
+ *  saved: then it only opens the five fields, and their Save sends both. */
+@Composable
+private fun HrZones(r: SettingsDto, busy: Boolean, vm: SettingsVm) {
+    val source = if (r.hrZoneSource == "garmin") "shared" else r.hrZoneSource
+    var editing by rememberSaveable { mutableStateOf(false) }  // Custom chosen here, no numbers saved yet
+    val shown = if (editing) "custom" else source
+    val start = r.hrZonesCustom ?: r.hrZonesEffective?.floors
+    var fields by rememberSaveable(start) { mutableStateOf(List(5) { i -> start?.getOrNull(i)?.toString() ?: "" }) }
+    var localError by remember { mutableStateOf<String?>(null) }
+    val serverError by vm.zonesError.collectAsStateWithLifecycle()
+    val error = localError ?: serverError
+    Text("Heart-rate zones", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 8.dp))
+    com.bennybar.runnersidekick.ui.components.ChoiceGroup(ZONE_SOURCES.map { it.second }, ZONE_SOURCES.indexOfFirst { it.first == shown }.takeIf { it >= 0 },
+        enabled = !busy, onSelect = { i ->
+            val k = ZONE_SOURCES[i].first
+            localError = null; vm.zonesError.value = null
+            if (k == "custom" && r.hrZonesCustom == null) editing = true
+            else { editing = false; if (k != source) vm.saveRemote(r.copy(hrZoneSource = k), key = "hr_zone_source") }
+        })
+    ZONE_HINTS[shown]?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp)) }
+    r.hrZonesEffective?.takeIf { it.floors.isNotEmpty() }?.let { e ->
+        Text(e.floors.mapIndexed { i, f -> "Z${i + 1} $f" }.joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(top = 6.dp))
+        if (e.label.isNotBlank()) Text(e.label.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (shown == "custom") {
+        Text("Where each zone starts, in bpm", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            fields.forEachIndexed { i, v ->
+                OutlinedTextField(v, { t -> fields = fields.toMutableList().also { it[i] = t.filter(Char::isDigit).take(3) }; localError = null; vm.zonesError.value = null },
+                    label = { Text("Z${i + 1}") }, singleLine = true, isError = error != null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+            }
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp)) }
+        val unchanged = source == "custom" && fields.map { it.toIntOrNull() } == r.hrZonesCustom
+        Button(onClick = {
+            localError = zoneStartsError(fields)
+            if (localError == null) vm.saveZones(r.copy(hrZoneSource = "custom", hrZonesCustom = fields.map { it.trim().toInt() }))
+        }, enabled = !busy && !unchanged, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(if (unchanged) "Saved" else "Save zones") }
+    }
+}

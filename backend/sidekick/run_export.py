@@ -59,7 +59,7 @@ def signed(v: float, fmt: str = "{:+.0f}", unit: str = "") -> str:
 
 
 def zone_table(conn, a: dict) -> list[str]:
-    zones = rp.hr_zones(conn)
+    zones = rp.hr_zones(conn, a)
     s = rp.samples_for(conn, a["id"])
     if not zones or s is None:
         return []
@@ -76,8 +76,9 @@ def zone_table(conn, a: dict) -> list[str]:
     for k in range(5, -1, -1):
         if zt[k] or k > 0:
             rows.append(f"| {names[k]} | {clock(zt[k])} | {100 * zt[k] / total:.0f}% |")
-    return rows + ["", f"Zone thresholds: {'from your maximum and resting heart rate' if zones.get('source') == 'derived' else 'Garmin-derived'} ({zones.get('method') or 'heart-rate zones'}, max HR {zones.get('max_hr', '–')}); "
-                       "a training guide, not a physiological measurement."]
+    on_other = zones.get("source") == "garmin" and not rp.is_garmin_run(a)
+    return rows + ["", f"Zones: {rp.zone_label(zones)}" + (f", applied to this {'Apple Watch' if rp.is_apple(a) else 'other watch'}'s run (your shared zones)" if on_other else "")
+                   + "; a training guide, not a physiological measurement."]
 
 
 def halves(s, values: list | None) -> tuple[float, float] | None:
@@ -399,13 +400,13 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         else:
             add("Power:HR decoupling: not available (no running power recorded)  ")
         add("")
-        if dc.get("suitability") == "caution":
-            add("Measurement suitability: **interpret with caution**: " + "; ".join(dc.get("suitability_why") or []) + ". "
-                "The numbers are kept as calculated.  ")
+        if dc.get("suitability") in ("limited", "unsuitable"):
+            add(f"Measurement suitability: **{dc['suitability'].capitalize()}**: " + "; ".join(dc.get("suitability_why") or [])
+                + ". The numbers are kept as calculated.  ")
         elif dc.get("suitability") == "good":
-            pc = dc.get("power_change_pct")
-            add(f"Measurement suitability: **good**: the effort held between the halves (hill-adjusted speed "
-                f"{dc['effort_change_pct']:+.1f}%" + (f", power {pc:+.1f}%" if pc is not None else "") + ").  ")
+            spread = dc.get("effort_spread_pct")
+            add(f"Measurement suitability: **Good**: a steady effort (hill-adjusted speed {dc['effort_change_pct']:+.1f}% between the "
+                "halves" + (f", {spread:.0f}% minute to minute" if spread is not None else "") + ").  ")
         if dc.get("power_vs_pace"):
             add(dc["power_vs_pace"] + "  ")
         if dc.get("power_decoupling_pct") is not None:
@@ -757,8 +758,8 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             ("Power", maker if g.get("avgPower") else None),
             ("VO₂ source", f"{maker} (device estimate)"),
             ("Training effect, training load", None if apple else "Garmin"),
-            ("HR-zone threshold source", "from your maximum and resting heart rate" if (rp.hr_zones(conn) or {}).get("source") == "derived"
-             else "Garmin-derived (your Garmin profile)"),
+            ("HR zones", ((lambda z: rp.zone_label(z) + (f", applied to this {maker} run" if z.get("source") == "garmin" and apple else "")
+                           if z else "none (turned off)")(rp.hr_zones(conn, a)))),
             ("Performance condition, stamina, training status, load, lactate threshold, race predictions",
              None if apple else "Garmin estimates"),
             ("Recovery context source", f"{maker} daily data" if rc else None),

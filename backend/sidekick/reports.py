@@ -210,19 +210,61 @@ def runs_era_start(conn, source: str, d: date) -> date | None:
     return runs_era_start(conn, source, date.fromisoformat(prev[-1]["local_date"])) if prev else None
 
 
+def zone_source(conn) -> str:
+    """The runner's choice: "shared" (one set for every watch), "per_watch", "custom" (their own numbers, every watch) or
+    "none". The old "garmin" value is "shared": the zones it used stay exactly as they were."""
+    v = get_setting(conn, "hr_zone_source", "shared")
+    return "shared" if v == "garmin" else v
+
+
 def garmin_hr_zones(conn) -> dict | None:
     """Garmin's own heart-rate zones (with its maximum), unless the runner chose not to use zones."""
-    if get_setting(conn, "hr_zone_source", "garmin") == "none":
+    if zone_source(conn) == "none":
         return None
     return get_setting(conn, "source_hr_zones", None)
 
 
-def hr_zones(conn) -> dict | None:
-    """The heart-rate zones analysis should use: Garmin's; without them (an Apple Watch account), the ones derived from
-    your held maximum and resting heart rate (derive_hr_zones); none when the runner chose not to use zones."""
-    if get_setting(conn, "hr_zone_source", "garmin") == "none":
+def custom_hr_zones(conn) -> dict | None:
+    floors = get_setting(conn, "hr_zones_custom", None)
+    return {"floors": floors, "method": "CUSTOM", "max_hr": None, "lthr": None, "profile": "CUSTOM", "source": "custom"} if floors else None
+
+
+def is_garmin_run(a: dict | None) -> bool:
+    # Garmin's own runs (the demo source stands in for Garmin); Apple, Samsung and Watchletic (Galaxy Watch) runs aren't
+    return a is not None and not is_apple(a) and (a.get("manufacturer") or "garmin").lower() in ("garmin", "fixture")
+
+
+def hr_zones(conn, a: dict | None = None) -> dict | None:
+    """The heart-rate zones to use, for one run (a) or the account. Never a watch's zones on another watch's run without
+    the runner choosing so:
+    - custom: the runner's own numbers, for every watch;
+    - shared: one set for every watch: their own numbers if entered, else the zones imported from Garmin, else derived;
+    - per_watch: Garmin's zones for Garmin runs, derived ones (heart-rate reserve) for other watches' runs; without a run,
+      the current watch's;
+    - none: no zones."""
+    src = zone_source(conn)
+    if src == "none":
         return None
-    return get_setting(conn, "source_hr_zones", None) or get_setting(conn, "derived_hr_zones", None)
+    garmin, derived = get_setting(conn, "source_hr_zones", None), get_setting(conn, "derived_hr_zones", None)
+    if src in ("custom", "shared") and custom_hr_zones(conn):
+        return custom_hr_zones(conn)
+    if src == "per_watch":
+        on_garmin = is_garmin_run(a) if a is not None else get_setting(conn, "watch", "garmin") == "garmin"
+        return (garmin if on_garmin else derived) or derived or garmin
+    return garmin or derived
+
+
+def zone_label(z: dict | None) -> str | None:
+    """Where zones come from, in plain words, for the apps and exports."""
+    if not z:
+        return None
+    if z.get("source") == "custom":
+        return "your own zones"
+    if z.get("source") == "garmin":
+        how = {"HR_MAX": f"% of max HR {z.get('max_hr')}", "LTHR": f"% of threshold HR {z.get('lthr')}", "HRR": "% of heart-rate reserve"}
+        return "your zones, imported from your Garmin profile" + (f" ({how[z['method']]})" if z.get("method") in how else "")
+    return f"worked out from your maximum ({z.get('max_hr')}) and resting heart rate ({z.get('resting_hr')})" if z.get("resting_hr") \
+        else f"worked out from your maximum heart rate ({z.get('max_hr')})"
 
 
 ZONE_FLOORS_PCT = (0.5, 0.6, 0.7, 0.8, 0.9)  # zones 1-5 start at 50/60/70/80/90%, Garmin's default split
@@ -233,8 +275,6 @@ def derive_hr_zones(conn, source: str, today: date) -> None:
     estimates use (yours, or the highest you've held for a minute; cardio.hr_max, which never reads these zones) and the
     28-day median resting heart rate; % of maximum while there's no resting heart rate yet. Stored as a setting so every
     reader gets the same zones without recomputing them."""
-    if get_setting(conn, "source_hr_zones", None):
-        return
     from .cardio import hr_max, rest_on
     hm = hr_max(conn, source, today)["value"]
     if not hm:
@@ -682,7 +722,7 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             "limitations": ["Only runs synced to Runner Sidekick count; GPS distance has some error."],
             "algorithm_version": rn.RUNNING_VERSION, "derived": True,
         })
-    zones = hr_zones(conn)
+    zones = hr_zones(conn, a)  # this run's zones (its watch's, when the runner chose per-watch zones)
     details = rn.split_details(samples_for(conn, a["id"]), laps, zones["floors"] if zones else None)
     story = rn.run_story(splits, details, fmt_pace)
     intent = run_intent(conn, a)
@@ -829,7 +869,7 @@ def run_intent(conn, a: dict) -> dict | None:
 def infer_intent(conn, a: dict) -> dict | None:
     """What the run looks like from the data alone (labelled 'inferred', with a confidence and the reason; never used to
     flag 'meant to be easy')."""
-    zones = hr_zones(conn)
+    zones = hr_zones(conn, a)
     an = run_analysis(conn, a)
     cls = an["classification"]
     out = lambda kind, conf, why: {"kind": kind, "note": None, "source": "inferred", "confidence": conf, "reason": why}  # noqa: E731

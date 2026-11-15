@@ -53,7 +53,7 @@ def build(conn, source: str, report: dict, act: dict, laps: list[dict], today: d
 
     # A heart-rate cap written as the target ("HR <= 150", "HR < 150", "under 150 bpm")
     cap = re.search(r"(?:hr\s*(?:<=|<|≤)|under)\s*(\d{2,3})", (intent.get("target") or "").lower())
-    zones = rp.hr_zones(conn)
+    zones = rp.hr_zones(conn, act)
     from .focus import zone_shares
     z = zone_shares(conn, act, zones["floors"]) if zones else None
     if cap:

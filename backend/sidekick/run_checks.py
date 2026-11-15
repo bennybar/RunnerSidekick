@@ -86,9 +86,10 @@ def build(conn, source: str, report: dict) -> list[dict]:
             out.append(pacing_check(report, splits, fade))
 
     # Effort against what the run was meant to be
-    zones = rp.hr_zones(conn)
     a = report["activity"]
-    act = rp.activity_by_source_id(conn, source, a["source_id"]) if zones else None
+    act = rp.activity_by_source_id(conn, source, a["source_id"]) if rp.hr_zones(conn) else None
+    zones = rp.hr_zones(conn, act) if act is not None else None  # this run's zones (its watch's, if chosen per watch)
+    act = act if zones else None
     if act is not None:
         from .focus import zone_shares
         z = zone_shares(conn, act, zones["floors"])
@@ -127,10 +128,10 @@ def build(conn, source: str, report: dict) -> list[dict]:
         hot = (report.get("heat") or {}).get("hot")
         # Heat raises heart rate at the same effort: on a hot, humid day the bars are looser, not gone
         good, ok = (HOT_DRIFT_GOOD, HOT_DRIFT_OK) if hot else (DRIFT_GOOD, DRIFT_OK)
-        if dc.get("suitability") == "caution":
+        if dc.get("suitability") in ("limited", "unsuitable"):
             # The number is kept; it just doesn't read as aerobic drift when the effort itself changed
-            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}%: interpret with caution, "
-                                                            + "; ".join(dc.get("suitability_why") or []), "info"))
+            word = "limited as a drift measure" if dc["suitability"] == "limited" else "not a drift measure here"
+            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}%: {word}, " + "; ".join(dc.get("suitability_why") or []), "info"))
         else:
             v = "good" if d <= good else "ok" if d <= ok else "low"
             out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'}"

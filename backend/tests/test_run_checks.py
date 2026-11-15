@@ -15,7 +15,7 @@ def by_id(checks):
 
 
 def test_pacing_cadence_and_training_effect_verdicts(monkeypatch):
-    monkeypatch.setattr(rc.rp, "hr_zones", lambda conn: None)  # no zones: the effort check is skipped
+    monkeypatch.setattr(rc.rp, "hr_zones", lambda conn, a=None: None)  # no zones: the effort check is skipped
     c = by_id(rc.build(None, "x", report([split(i, p) for i, p in enumerate([340, 342, 344, 352, 354, 356])], "easy", 4.6)))
     assert c["pacing"]["verdict"] == "ok" and "Slowed 12 s/km" in c["pacing"]["say"]
     assert c["cadence"]["verdict"] == "good" and "Steady at 170" in c["cadence"]["say"]
@@ -28,7 +28,7 @@ def test_pacing_cadence_and_training_effect_verdicts(monkeypatch):
 
 def test_easy_run_all_in_zone_3_is_not_easy(monkeypatch):
     from sidekick import focus
-    monkeypatch.setattr(rc.rp, "hr_zones", lambda conn: {"floors": [100, 120, 140, 160, 175]})
+    monkeypatch.setattr(rc.rp, "hr_zones", lambda conn, a=None: {"floors": [100, 120, 140, 160, 175]})
     monkeypatch.setattr(rc.rp, "activity_by_source_id", lambda conn, s, sid: {"id": 1})
     monkeypatch.setattr(focus, "zone_shares", lambda conn, a, floors: {"easy": 0.0, "hard": 0.0})
     c = by_id(rc.build(None, "x", report([split(i, 350) for i in range(5)], "easy")))

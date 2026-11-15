@@ -69,7 +69,7 @@ def morning(rule="R5", sleep_h=None):
 
 
 def test_no_score_without_overnight_data_and_pain_overrides(monkeypatch):
-    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: None)
     monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.0, "fatigue": 0.0, "left_now": 0.5, "left_usual": 0.5, "last_when": None})
     monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: None)
@@ -123,7 +123,7 @@ def test_runs_are_found_by_local_date_and_end_on_elapsed_time(monkeypatch):
 
 def test_the_weakest_part_caps_the_score_closer(monkeypatch):
     # The morning after a threshold run: HRV, resting HR and sleep normal, load 122% of usual, recovery 45 points
-    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn: None)
+    monkeypatch.setattr(rd.rp, "hr_zones", lambda conn, a=None: None)
     monkeypatch.setattr(rd, "moment", lambda conn, d: None)
     monkeypatch.setattr(rd, "garmin_check", lambda conn, s, d, at: {"score": 1, "level": "poor", "recovery_hours": 52})
     monkeypatch.setattr(rd, "training_load", lambda conn, s, at, z: {"ratio": 1.22, "fatigue": 0.68, "left_now": 1.19, "left_usual": 0.5,
