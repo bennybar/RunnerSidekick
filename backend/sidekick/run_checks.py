@@ -27,6 +27,43 @@ def te_label(v: float) -> str:
     return next(l for top, l in TE_LABELS if v < top)
 
 
+def pacing_check(report: dict, splits: list[dict], fade: float) -> dict:
+    """A slower second half, judged in context rather than by the number alone:
+    - where it happened (rn.pacing_shape): a quick opening and then a steady effort is "ok", with both pace windows named;
+    - a slowdown at the end or throughout: "ok" up to 15 s/km (25 on a warm, humid day), else "low" (review);
+    - heart rate falling with the pace (eased off, not faded) or the runner reporting a moderate-or-easier effort that
+      felt good or great keeps it at "ok" up to twice that bar: supporting context, never a replacement for the data."""
+    from .analytics import running as rn
+    adj = [s.get("gap_pace_s_per_km") or s["pace_s_per_km"] for s in splits]
+    sh = rn.pacing_shape(adj) or {}
+    hot = (report.get("heat") or {}).get("hot")
+    fmt = rp.fmt_pace
+    dc = report.get("decoupling") or {}
+    if sh.get("where") == "opening":
+        n = sh["laps"]
+        say = (f"Quick first {n} km ({fmt(sh['opening'])} hill-adjusted), then steady ({fmt(sh['after_opening'])}): the "
+               f"second half reads {round(fade)} s/km slower because of the start")
+        if dc.get("first_half") and dc.get("second_half") and dc.get("eligible") is not None:
+            p1, p2 = (1000.0 / dc[h]["mean_speed_mps"] for h in ("first_half", "second_half"))
+            say += f"; after the first 10 minutes it held ({fmt(p1)} → {fmt(p2)})"
+        return check("pacing", "Pacing", say, "ok")
+    bar = HOT_FADE_OK if hot else FADE_OK
+    where = {"final": " at the end", "throughout": " gradually"}.get(sh.get("where"), "")
+    say = f"Slowed {round(fade)} s/km in the second half{where}" + (" (a warm, humid day)" if hot else "")
+    if fade <= bar:
+        return check("pacing", "Pacing", say, "ok")
+    h = len(splits) // 2
+    hr1 = [s.get("avg_hr") for s in splits[:h] if s.get("avg_hr")]
+    hr2 = [s.get("avg_hr") for s in splits[-h:] if s.get("avg_hr")]
+    eased = hr1 and hr2 and mean(hr2) <= mean(hr1) - 3
+    intent = report.get("intent") or {}
+    felt_fine = intent.get("feel") in ("good", "great") and intent.get("effort") in ("very_easy", "easy", "easy_moderate", "moderate")
+    if fade <= 2 * bar and (eased or felt_fine):
+        why = "heart rate fell too: eased off rather than faded" if eased else f"you felt {intent['feel']} at a {intent['effort'].replace('_', ' ')} effort"
+        return check("pacing", "Pacing", f"{say}; {why}", "ok")
+    return check("pacing", "Pacing", say, "low")
+
+
 def build(conn, source: str, report: dict) -> list[dict]:
     out = []
     splits = [s for s in report.get("splits", []) if s.get("complete") and s.get("pace_s_per_km")]
@@ -46,10 +83,7 @@ def build(conn, source: str, report: dict) -> list[dict]:
         elif fade <= rn.FADE_S_PER_KM:
             out.append(check("pacing", "Pacing", "Even all the way", "good"))
         else:
-            hot = (report.get("heat") or {}).get("hot")
-            # Heat slows the same effort: on a warm, humid day the bar is looser, not gone
-            out.append(check("pacing", "Pacing", f"Slowed {round(fade)} s/km in the second half" + (" (a warm, humid day)" if hot else ""),
-                             "ok" if fade <= (HOT_FADE_OK if hot else FADE_OK) else "low"))
+            out.append(pacing_check(report, splits, fade))
 
     # Effort against what the run was meant to be
     zones = rp.hr_zones(conn)
@@ -93,9 +127,14 @@ def build(conn, source: str, report: dict) -> list[dict]:
         hot = (report.get("heat") or {}).get("hot")
         # Heat raises heart rate at the same effort: on a hot, humid day the bars are looser, not gone
         good, ok = (HOT_DRIFT_GOOD, HOT_DRIFT_OK) if hot else (DRIFT_GOOD, DRIFT_OK)
-        v = "good" if d <= good else "ok" if d <= ok else "low"
-        out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'}"
-                                                        f"{'; a warm, humid day raises it' if hot and d > DRIFT_GOOD else ''})", v))
+        if dc.get("suitability") == "caution":
+            # The number is kept; it just doesn't read as aerobic drift when the effort itself changed
+            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}%: interpret with caution, "
+                                                            + "; ".join(dc.get("suitability_why") or []), "info"))
+        else:
+            v = "good" if d <= good else "ok" if d <= ok else "low"
+            out.append(check("drift", "Aerobic decoupling", f"{d:.1f}% ({'held steady' if v == 'good' else 'rose as you went'}"
+                                                            f"{'; a warm, humid day raises it' if hot and d > DRIFT_GOOD else ''})", v))
 
     # Hills: where the climb cost time, using the flat-equivalent pace
     climb = a.get("elevation_gain_m") or 0

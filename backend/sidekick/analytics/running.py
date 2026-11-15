@@ -12,7 +12,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.14"  # 1.14: laps placed by their own start times; 1.13: fastest/slowest lap and the lap spread hill-adjusted on hilly runs; 1.12: gradients ease in from 0.5% to 1.5% (no jump at 1%); 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.15"  # 1.15: where a slowdown happened (pacing_shape); decoupling suitability; 1.14: laps placed by their own start times; 1.13: fastest/slowest lap and the lap spread hill-adjusted on hilly runs; 1.12: gradients ease in from 0.5% to 1.5% (no jump at 1%); 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -204,12 +204,43 @@ def decoupling(s: Samples | None, laps: list[dict], distance_m: float | None, ga
                   "time-weighted, warm-up 10 min excluded, stopped samples and gaps > 10 s excluded",
     }
     # Power:HR on the same halves, when power covers most of the segment
+    p_change = None
     if s.power is not None:
         pw_cov = sum(w[i] for i in seg if s.power[i] is not None and s.power[i] > 0) / seg_time
         p1, p2 = ef(first, s.power), ef(second, s.power)
         if pw_cov >= MIN_HR_COVERAGE and p1 and p2:
             out["power_decoupling_pct"] = round(100.0 * (p1[0] - p2[0]) / p1[0], 2)
             out["power_first_half_w"], out["power_second_half_w"] = round(p1[1]), round(p2[1])
+            p_change = 100.0 * (p2[1] - p1[1]) / p1[1]
+    out.update(suitability(100.0 * (sp2 - sp1) / sp1, p_change, cls, out.get("decoupling_pct"), out.get("power_decoupling_pct")))
+    return out
+
+
+STEADY_EFFORT_PCT = 3.0   # decoupling reads as aerobic drift only when the effort held: the analysed halves' hill-adjusted
+                          # speed (and power) within ±3% (about 10 s/km at 5:45 /km); beyond it the number is kept but
+                          # mostly reflects the change of effort (a progressive run reads low or negative, a fade high)
+POWER_PACE_GAP = 1.5      # pace- and power-based drift differing by this many points gets an explanation
+
+
+def suitability(speed_change_pct: float, power_change_pct: float | None, cls: dict, pace_dc: float | None,
+                power_dc: float | None) -> dict:
+    """Whether the analysed window was a steady effort, so its decoupling means aerobic drift. The raw numbers stay as
+    they are; this only says how far to trust their reading."""
+    why = []
+    if cls.get("kind") != "steady":
+        why.append("the run wasn't steady (" + cls.get("reason", "varied pace") + ")")
+    if speed_change_pct > STEADY_EFFORT_PCT:
+        why.append(f"the second half was {speed_change_pct:.0f}% faster (hill-adjusted): a progressive run reads low")
+    elif speed_change_pct < -STEADY_EFFORT_PCT:
+        why.append(f"the second half was {-speed_change_pct:.0f}% slower (hill-adjusted): easing off reads as drift")
+    if power_change_pct is not None and abs(power_change_pct) > STEADY_EFFORT_PCT and not why:
+        why.append(f"power changed {power_change_pct:+.0f}% between the halves")
+    out = {"effort_change_pct": round(speed_change_pct, 1), "power_change_pct": round(power_change_pct, 1) if power_change_pct is not None else None,
+           "suitability": "caution" if why else "good", "suitability_why": why}
+    if pace_dc is not None and power_dc is not None and abs(power_dc - pace_dc) >= POWER_PACE_GAP:
+        out["power_vs_pace"] = (f"Power-based drift ({power_dc:.1f}%) differs from pace-based ({pace_dc:.1f}%): the watch's power "
+                                f"{'fell' if (power_change_pct or 0) < 0 else 'rose'} {abs(power_change_pct or 0):.0f}% while the hill-adjusted pace "
+                                f"changed {speed_change_pct:+.0f}%. Power is the watch's own estimate (each brand computes it differently).")
     return out
 
 
@@ -458,6 +489,30 @@ def fade(paces: list[float]) -> float | None:
     return hv[1] - hv[0] if hv else None
 
 
+def pacing_shape(paces: list[float]) -> dict | None:
+    """Where a slower second half came from, on complete laps (hill-adjusted where known): the opening, middle and final
+    thirds (at least one lap each). "opening": a quick start, then steady (the middle and final within ±5 s/km of each
+    other); "final": steady, then slower at the end; "throughout": a gradual slowdown. None under 4 laps."""
+    n = len(paces)
+    if n < 4:
+        return None
+    k = max(1, n // 3)
+    opening, final = sum(paces[:k]) / k, sum(paces[-k:]) / k
+    mid = paces[k:n - k]
+    middle = sum(mid) / len(mid) if mid else None
+    f = fade(paces)
+    where = None
+    if f is not None and f > FADE_S_PER_KM and middle is not None:
+        if middle - opening > FADE_S_PER_KM and abs(final - middle) <= FADE_S_PER_KM:
+            where = "opening"
+        elif final - middle > FADE_S_PER_KM and abs(middle - opening) <= FADE_S_PER_KM:
+            where = "final"
+        else:
+            where = "throughout"
+    return {"laps": k, "opening": opening, "middle": middle, "final": final, "fade": f, "where": where,
+            "after_opening": sum(paces[k:]) / (n - k)}
+
+
 def uneven_halves(splits: list[dict]) -> tuple[float, float] | None:
     """The halves' net grades (as fractions) when they can't be compared for a fade: an out-and-back on a hill, where one
     half descends by more than 1% and the other differs by over 1.5 points. Hill-adjusted pace credits a descent least
@@ -501,6 +556,10 @@ def run_story(splits: list[Split], details: list[dict], fmt_pace) -> list[str]:
     if uneven_halves([{"distance_m": s.distance_m, "elevation_gain_m": s.elevation_gain_m,
                        "elevation_loss_m": d.get("elevation_loss_m")} for s, d in full]):
         out.append("The two halves climb differently (out and back on a hill), so their paces aren't compared.")
+    elif f > FADE_S_PER_KM and (pacing_shape(adj) or {}).get("where") == "opening":
+        sh = pacing_shape(adj)
+        out.append(f"The first {sh['laps']} {unit}{'s' if sh['laps'] > 1 else ''} were quicker ({fmt_pace(sh['opening'])}"
+                   f"{' hill-adjusted' if hills else ''}); after that the pace held steady ({fmt_pace(sh['after_opening'])}).")
     elif f > FADE_S_PER_KM:
         mean_first = halves(adj)[0]
         k = next((s.idx for (s, _), p in zip(full[-h:], adj[-h:]) if p > mean_first + FADE_S_PER_KM), None)  # the second half (no middle split)

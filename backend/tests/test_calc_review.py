@@ -472,7 +472,7 @@ def test_a_hot_humid_run_is_said_to_be_hot_and_its_drift_isnt_poor_durability():
     assert r["heat"]["hot"] and r["heat"]["say"] == "29°C, dew point 21°C"
     cond = next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "conditions")
     assert "warm and humid" in cond["say"]
-    r["decoupling"].update(eligible=True, decoupling_pct=8.0)
+    r["decoupling"].update(eligible=True, decoupling_pct=8.0, suitability="good")  # a steady measurement, to test the heat bars
     drift = next(c for c in run_checks.build(conn, "fixture", r) if c["id"] == "drift")
     assert drift["verdict"] == "good" and "warm, humid" in drift["say"]  # heat loosens the bars: 8% is fine when hot
     for pct, want in ((11.0, "ok"), (14.0, "low")):  # ...but they don't vanish

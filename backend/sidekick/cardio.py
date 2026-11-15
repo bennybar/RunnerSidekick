@@ -367,6 +367,19 @@ def own_vo2(conn, source: str, d: date) -> tuple[float, date] | None:
     return median(e["exact"] for e in recent), date.fromisoformat(recent[-1]["date"])
 
 
+def own_vo2_watches(conn, source: str, d: date) -> set[str]:
+    """Which watches recorded the runs behind own_vo2 at d ("apple", "garmin", ...). The estimate's method is the same
+    for every watch, but GPS pace, altitude and wrist heart rate differ between them: its trend is only read within one."""
+    hm = hr_max(conn, source, d)
+    if not hm.get("value"):
+        return set()
+    out = set()
+    for e in run_estimates(conn, source, d, hm)[0][-RECENT_RUNS:]:
+        act = rp.activity_by_source_id(conn, source, e["source_id"])
+        out.add("apple" if act is not None and rp.is_apple(act) else (((act or {}).get("manufacturer") or "garmin").lower()))
+    return out
+
+
 def own_vo2_series(conn, source: str, today: date, days: int = 120) -> list[dict]:
     """Runner Sidekick's VO2 max as it stood after each qualifying run of the last `days` (the same rule as own_vo2, with
     today's maximum heart rate), for the VO2 max tile and its trend."""

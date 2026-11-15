@@ -37,6 +37,14 @@ def vo2_signal(conn, source: str, today: date) -> dict:
     title = f"{maker} VO₂ estimate"
     if vo2_maker(conn, today - timedelta(days=28)) != maker:  # a watch switch: different formulas, not a change in fitness
         return signal("vo2", title, None, "Needs 4 weeks of readings from your current watch", note)
+    if maker == "Runner Sidekick":
+        # Ours is one method for every watch, but its inputs (GPS pace, altitude, wrist heart rate) differ by watch: the
+        # trend compares estimates from the same single watch only
+        from .cardio import own_vo2_watches
+        w_now, w_then = own_vo2_watches(conn, source, today), own_vo2_watches(conn, source, today - timedelta(days=28))
+        if len(w_now) > 1 or w_now != w_then:
+            return signal("vo2", title, None, "Not comparable yet: its recent runs come from different watches; needs 4 "
+                                              "weeks of runs on your current watch", note)
     # Two different, dated measurements: the same old reading twice isn't evidence of stability
     if not now or not then or now[1] < today - timedelta(days=VO2_FRESH_DAYS) or (now[1] - then[1]).days < VO2_MIN_GAP_DAYS \
             or then[1] < today - timedelta(days=VO2_OLDEST_DAYS):

@@ -22,7 +22,7 @@ from .narrative import OpenAIProvider, finish_call, reserve_call
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "run-ai-1.4"  # 1.4: each lap with its climbing and hill-adjusted pace; 1.3: pacing advice weighs heat, terrain and the runner's own report
+PROMPT_VERSION = "run-ai-1.5"  # 1.5: watch, conditions, pacing windows and shape, drift suitability, cross-watch flags; 1.4: each lap with its climbing and hill-adjusted pace; 1.3: pacing advice weighs heat, terrain and the runner's own report
 MAX_POINTS = 3
 MAX_LAPS = 30             # laps sent to the model (a very long run's tail is left out)
 HILL_GRADE = 0.01         # a lap rising or falling 1%+ overall is uphill or downhill
@@ -70,6 +70,19 @@ and the effort was not hard, or when conditions were hot. When the runner names 
 it. Don't contradict the runner's own report without clear data, and don't repeat generic advice after a run that went
 as intended.
 
+Windows: run:pacing has two different windows. halves_whole_run compares the two halves of the whole run's complete
+kilometres (warm-up included); drift_window compares the halves after the first 10 minutes. When they disagree, explain
+that they measure different stretches (e.g. a quick start that the drift window leaves out), never as a contradiction.
+"where" says if a slowdown was a quick opening, a late slowing or gradual. A quick opening followed by a steady effort is
+not a fade.
+Drift: run:drift says whether the effort held between its halves (suitability). With "caution", don't read the drift as
+aerobic fitness; when power and pace drift differ, say why from power_vs_pace. One run's drift is never proof of fitness.
+Watches: run:this.watch names the device. Never compare power in watts, HRV, or a watch's VO2 max between Garmin and
+Apple Watch; run:comparability says when similar runs come from another watch. Never mention metrics the bundle doesn't
+have (no Body Battery, readiness or training effect for Apple Watch runs).
+Next time: base it on this run and the week, not a rule. A hard or tempo run isn't automatically followed by "easy"
+unless the bundle's advice or week says so.
+
 Hills: run:laps gives each lap its terrain (flat, rolling, uphill, downhill), climb, descent, recorded pace and
 hill-adjusted pace (the flat-ground pace for the same effort). Judge pace changes between laps by the hill-adjusted pace:
 a slow uphill lap or a quick downhill one is terrain, not pacing, and an even hill-adjusted pace over hills is even effort.
@@ -101,6 +114,7 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
     findings = {f.get("metric"): f for f in r.get("findings", [])}
     b.item("run:this", "run", weekday=local.strftime("%A"), time_of_day="morning" if local.hour < 12 else "afternoon" if local.hour < EVENING_HOUR else "evening",
            days_ago=(today - date.fromisoformat(a["local_date"])).days, meant_to_be=intent.get("kind"),
+           watch=r.get("watch") or "Garmin", conditions=((r.get("heat") or {}).get("stress") or "unknown").lower(),
            meant_to_be_source=intent.get("source"), effort_type=(r.get("classification") or {}).get("kind"),
            data_based_type=(r.get("classified") or {}).get("kind"),
            story=r.get("story", []), next_focus=r.get("next_focus"), has_heart_rate=bool(a.get("avg_hr")),
@@ -150,6 +164,38 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
     if laps:
         b.item("run:laps", "laps", laps=laps)
     full = [x for x in r.get("splits", []) if x.get("complete") and x.get("pace_s_per_km")]
+    # The two pacing windows, where a slowdown happened, and whether the drift window held a steady effort
+    adj = [x.get("gap_pace_s_per_km") or x["pace_s_per_km"] for x in full]
+    sh = rn.pacing_shape(adj) if len(adj) >= 4 else None
+    if sh:
+        pac_item = {"halves_whole_run": "the two halves of the whole run's complete kilometres, warm-up included",
+                    "where": sh["where"] or "even"}
+        if sh["where"] == "opening":
+            pac_item["opening_laps"] = sh["laps"]
+            pac_item["opening_pace"] = b.fact("opening_flat_pace", f"hill-adjusted pace over the first {sh['laps']} km",
+                                              rp.fmt_pace(sh["opening"]), sh["opening"])
+            pac_item["after_opening_pace"] = b.fact("after_opening_flat_pace", "hill-adjusted pace after the opening",
+                                                    rp.fmt_pace(sh["after_opening"]), sh["after_opening"])
+        if dc.get("first_half") and dc.get("second_half"):
+            pac_item["drift_window"] = "after the first 10 minutes, its two equal-time halves"
+            p1, p2 = (1000.0 / dc[h]["mean_speed_mps"] for h in ("first_half", "second_half"))
+            pac_item["drift_window_first"] = b.fact("drift_first_pace", "hill-adjusted pace, first half after the warm-up", rp.fmt_pace(p1), p1)
+            pac_item["drift_window_second"] = b.fact("drift_second_pace", "hill-adjusted pace, second half after the warm-up", rp.fmt_pace(p2), p2)
+        b.item("run:pacing", "pacing_windows", **pac_item)
+    if dc.get("suitability"):
+        b.item("run:drift", "drift_measurement", suitability=dc["suitability"], why=dc.get("suitability_why") or [],
+               power_vs_pace=dc.get("power_vs_pace"), power_is_device_estimate=dc.get("power_decoupling_pct") is not None)
+        if dc.get("power_decoupling_pct") is not None:
+            b.fact("power_drift", "power:HR decoupling", f"{dc['power_decoupling_pct']:.1f}%", dc["power_decoupling_pct"])
+    comp_runs = (r.get("comparable") or {}).get("runs") or []
+    if comp_runs:
+        mine = "apple" if rp.is_apple(a) else (a.get("manufacturer") or "garmin").lower()
+        other = 0
+        for c in comp_runs:
+            ca = rp.activity_by_source_id(conn, source, c["source_id"])
+            other += ca is not None and ("apple" if rp.is_apple(ca) else (ca.get("manufacturer") or "garmin").lower()) != mine
+        b.item("run:comparability", "cross_watch", similar_runs=len(comp_runs), from_another_watch=other,
+               power_comparable=other == 0, heart_rate_and_drift="compare loosely" if other else "same watch")
     if len(full) >= 4 and any(x.get("gap_pace_s_per_km") for x in full):
         h1, h2 = rn.halves([x.get("gap_pace_s_per_km") or x["pace_s_per_km"] for x in full])
         b.fact("first_half_flat_pace", "first-half hill-adjusted pace", rp.fmt_pace(h1), h1)

@@ -21,7 +21,7 @@ from .connectors.base import GARMIN_PROPRIETARY, Samples
 from .db import first_weekday, get_setting, many, next_id, one, plain, utc_now
 from .db import week_start
 
-REPORT_VERSION = "report-2.20"  # 2.20: Apple Watch runs and nights, heart-rate-reserve zones without Garmin's, insights on one HRV method; 2.19: Garmin only (no recording app or external sensor, no Samsung night); 2.18: overnight HRV shape and 7-day stability findings; 2.17: lap spread hill-adjusted on hilly runs; 2.16: one partial for a tail of short laps, pacing advice in context; 2.15: Garmin's in-run performance condition, stamina, threshold share; 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
+REPORT_VERSION = "report-2.21"  # 2.21: where a slowdown happened, decoupling suitability, pacing windows named; 2.20: Apple Watch runs and nights, heart-rate-reserve zones without Garmin's, insights on one HRV method; 2.19: Garmin only (no recording app or external sensor, no Samsung night); 2.18: overnight HRV shape and 7-day stability findings; 2.17: lap spread hill-adjusted on hilly runs; 2.16: one partial for a tail of short laps, pacing advice in context; 2.15: Garmin's in-run performance condition, stamina, threshold share; 2.14: the recording app and an external heart-rate sensor; 2.13: our VO2 max per run, the watch that recorded it; 2.12: step length; 2.11: a verdict on each run (verdict.py); 2.10: HR quality skips the warm-up, hill-adjusted; 2.9: heart-rate quality on each run; 2.8: last night with the Samsung watch; 2.7: heat-loosened bars, out-and-back pacing; 2.6: heat on each run; 2.5: "Aerobic decoupling" wording; 2.4: Garmin readiness on the run's day; 2.3: athlete context, intent-aware next focus, data classification; 2.0: plans, run intent, insight novelty/state; 2.1: R1e  # 1.1: boolean check-in flags, wording; 1.2: subjective-only rule R4s; 1.3: wording; 1.4: device eras ; 1.5: sparkline while learning; 1.6: best efforts, run story, GAP splits
 ALGORITHMS = {"report": REPORT_VERSION, "baseline": bl.BASELINE_VERSION, "running": rn.RUNNING_VERSION, "rules": RULES_VERSION}
 
 CORE_METRICS = ("sleep_duration", "resting_hr", "hrv_overnight_avg")
@@ -585,8 +585,13 @@ def build_post_run(conn, source: str, sid: str, synthetic: bool) -> dict | None:
             "statement": (f"Splits varied by {100 * cv:.1f}% ({'hill-adjusted' if graded else 'moving'} pace). "
                           + (f"Second half was {abs(adj):.0f} s/km faster than the first (hill-adjusted)." if adj < -rn.FADE_S_PER_KM else
                              f"Second half was {abs(adj):.0f} s/km slower than the first (hill-adjusted)." if adj > rn.FADE_S_PER_KM else
-                             "Both halves were about even.")),
-            "interpretation": "Describes pacing; hills are adjusted for, stops are not.",
+                             "Both halves were about even.")
+                          + ({"opening": " The difference comes from a quicker start; after it the pace held steady.",
+                              "final": " The slowing came at the end.", "throughout": " The slowing was gradual."}
+                             .get((rn.pacing_shape(adj_paces) or {}).get("where"), ""))),
+            "interpretation": ("Describes pacing over the whole run's complete kilometres (halves of the run, warm-up included); "
+                               "the drift analysis uses a different window (after the first 10 minutes). Hills are adjusted "
+                               "for, stops are not."),
             "evidence": {"record_ids": [f"{source}:{sid}:lap{s.idx}" for s in complete], "date_range": [a["local_date"]] * 2},
             "sample_size": len(complete), "coverage": {"complete_splits": len(complete), "total_splits": len(splits)},
             "limitations": ["Incomplete final split excluded."] if len(complete) < len(splits) else [],
@@ -884,6 +889,13 @@ def next_focus(an: dict, dc: dict, comp: dict, splits=None, details=None, intent
         fade = rn.fade(paces)
         odd = rn.uneven_halves([{"distance_m": s.distance_m, "elevation_gain_m": s.elevation_gain_m,
                                  "elevation_loss_m": d.get("elevation_loss_m")} for s, d in pairs])
+        shape = rn.pacing_shape(paces) or {}
+        if fade > rn.FADE_S_PER_KM and not odd and shape.get("where") == "opening":
+            # Not a fade: a quick start, then a steady effort (the halves read slower only because of the opening)
+            n = shape["laps"]
+            return (f"The second half reads {fade:.0f} s/km slower, but that's the start: the first {n} km went at "
+                    f"{fmt_pace(shape['opening'])} (hill-adjusted), then you held {fmt_pace(shape['after_opening'])} steadily. "
+                    f"If you want even splits, let the first km settle at the pace you held after it.")
         if fade > rn.FADE_S_PER_KM and not odd:
             # A slower second half is a pacing problem only when nothing else explains it: heat, the runner's own report
             # of a good run, or km-to-km variation as big as the fade itself

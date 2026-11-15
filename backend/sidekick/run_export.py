@@ -138,7 +138,7 @@ def recovery_context(conn, source: str, a: dict, s) -> list[tuple[str, str]]:
     """The watch's readings from the morning of the run, only those that exist."""
     day = a["local_date"]
     rows = {r["metric"]: r for r in conn.daily_observation.find({"source": source, "local_date": day, "state": "measured"},
-                                                                {"_id": 0, "metric": 1, "value": 1, "label": 1, "observed_end": 1})}
+                                                                {"_id": 0, "metric": 1, "value": 1, "label": 1, "observed_end": 1, "method": 1})}
     out = []
 
     def v(m):
@@ -154,7 +154,14 @@ def recovery_context(conn, source: str, a: dict, s) -> list[tuple[str, str]]:
         if lo is not None and hi is not None:
             x = v("hrv_overnight_avg")
             band = f", {'within' if lo <= x <= hi else 'below' if x < lo else 'above'} Garmin's baseline {lo:.0f}–{hi:.0f} ms"
-        out.append(("HRV last night", f"{v('hrv_overnight_avg'):.0f} ms" + (f" ({lab})" if lab else "") + band))
+        method = rows["hrv_overnight_avg"].get("method") or ""
+        if method.startswith("apple"):
+            kind = "RMSSD from the watch's beat-to-beat readings" if method == "apple_rmssd" else "SDNN"
+            out.append(("HRV last night", f"{v('hrv_overnight_avg'):.0f} ms" + (f" ({lab})" if lab else "")
+                        + f": Apple Watch spot readings during sleep ({kind}), not an overnight average like Garmin's; "
+                          "compare only with other Apple nights"))
+        else:
+            out.append(("HRV last night", f"{v('hrv_overnight_avg'):.0f} ms" + (f" ({lab})" if lab else "") + band))
     if v("hrv_weekly_avg") is not None:
         out.append(("HRV 7-day average", f"{v('hrv_weekly_avg'):.0f} ms"))
     if v("sleep_duration") is not None:
@@ -238,10 +245,12 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
     if r.get("step_length_m"):
         add(f"Cadence: **{num(a.get('avg_cadence_spm'))} spm** · step length **{r['step_length_m']:.2f} m** (distance ÷ steps)  ")
     if r.get("garmin_vo2max_day"):  # the watch's own estimate
-        add(f"VO₂ max ({maker} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}**  ")
+        add(f"VO₂ max ({maker} estimate, device value): **{r['garmin_vo2max_day']['value']:.1f}** (each watch brand has its own "
+            "estimate: a difference from another brand's isn't a change in fitness)  ")
     ours = r.get("vo2_ours") or {}
     if ours:
-        add(f"VO₂ max (Runner Sidekick, from this run{', hill-adjusted pace' if ours.get('hill_adjusted') else ''}): **{ours['value']:.1f}**  "
+        add(f"VO₂ max (Runner Sidekick, from this run{', hill-adjusted pace' if ours.get('hill_adjusted') else ''}): **{ours['value']:.1f}** "
+            "(one run is noisy; the median of recent runs is what counts)  "
             if ours.get("value") is not None
             else f"VO₂ max (Runner Sidekick, from this run): not calculated ({ours.get('why')})  ")
     hrq = r.get("hr_quality")
@@ -338,8 +347,16 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
                 from .analytics import running as rn
                 first, second = rn.halves([x["pace_s_per_km"] for x in full])
                 adj = rn.fade([x.get("gap_pace_s_per_km") or x["pace_s_per_km"] for x in full])
-                add(f"First half: **{pace(first)}** · Second half: **{pace(second)}** ({signed(second - first, unit=' s/km')}; "
+                add(f"First half: **{pace(first)}** · Second half: **{pace(second)}** (raw {signed(second - first, unit=' s/km')}; "
                     f"hill-adjusted {signed(adj, unit=' s/km')})  ")
+                add("Window: halves of the whole run's complete kilometres, warm-up included (the decoupling section below "
+                    "uses a different window: after the first 10 minutes).  ")
+                sh = rn.pacing_shape([x.get("gap_pace_s_per_km") or x["pace_s_per_km"] for x in full]) or {}
+                if sh.get("where"):
+                    what = {"opening": "a quicker start, then steady", "final": "steady, then slower at the end",
+                            "throughout": "a gradual slowdown"}[sh["where"]]
+                    add(f"Where (hill-adjusted, thirds of the run): first {sh['laps']} km **{pace(sh['opening'])}** · middle "
+                        f"**{pace(sh['middle'])}** · last {sh['laps']} km **{pace(sh['final'])}**: {what}.  ")
             hilly = max(full, key=lambda x: x.get("elevation_gain_m") or 0)
             if (hilly.get("elevation_gain_m") or 0) >= 10 and hilly.get("gap_pace_s_per_km"):
                 add(f"Hilliest km: **km {hilly['idx'] + 1}**, +{hilly['elevation_gain_m']:.0f} m: **{pace(hilly['pace_s_per_km'])}** "
@@ -355,7 +372,9 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
                 f"+{num(x.get('elevation_gain_m'), unit=' m')} |" + (f" −{num(x.get('elevation_loss_m'), unit=' m')} |" if descent else ""))
         add("")
         add("Flat-equivalent: the pace this effort would give on flat ground (Runner Sidekick, Minetti's energy cost of "
-            "running on slopes). * Partial km, with its distance; no pace for a stretch under 100 m.")
+            "running on slopes). It is least reliable downhill (credit capped at 15% easier than flat) and on very steep "
+            "ground (grades beyond ±30% are clamped). * Partial km, with its distance; no pace for a stretch under 100 m; "
+            "partial kms are left out of the halves.")
         add("")
 
     # 8. Decoupling, with the numbers behind it
@@ -380,9 +399,22 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
         else:
             add("Power:HR decoupling: not available (no running power recorded)  ")
         add("")
+        if dc.get("suitability") == "caution":
+            add("Measurement suitability: **interpret with caution**: " + "; ".join(dc.get("suitability_why") or []) + ". "
+                "The numbers are kept as calculated.  ")
+        elif dc.get("suitability") == "good":
+            pc = dc.get("power_change_pct")
+            add(f"Measurement suitability: **good**: the effort held between the halves (hill-adjusted speed "
+                f"{dc['effort_change_pct']:+.1f}%" + (f", power {pc:+.1f}%" if pc is not None else "") + ").  ")
+        if dc.get("power_vs_pace"):
+            add(dc["power_vs_pace"] + "  ")
+        if dc.get("power_decoupling_pct") is not None:
+            add(f"Power: **{'Apple' if apple else 'Garmin'}'s own estimate**; compare it only with runs from the same watch (brands compute "
+                "running power differently, so watts don't carry across).  ")
         on_hills = any(x.startswith("hilly") for x in dc.get("reasons") or [])
-        add("Interpretation: under 5% generally indicates stable aerobic coupling for this run (a coaching heuristic, not a "
-            "validated threshold)." + (" Hilly route: power:HR is the better read here." if on_hills and dc.get("power_decoupling_pct") is not None else "")
+        add("Interpretation: under 5% is a common coaching heuristic for a steady run's aerobic coupling, not a validated "
+            "threshold and not evidence of fitness on its own; it reads as aerobic drift only when the effort held."
+            + (" Hilly route: power:HR is the better read here." if on_hills and dc.get("power_decoupling_pct") is not None else "")
             + ("" if dc.get("eligible") else " Indicative only: " + "; ".join(dc.get("reasons") or []) + "."))
     else:
         add("Not calculated: " + "; ".join(dc.get("reasons") or ["not enough heart-rate data"]) + ".")
@@ -492,13 +524,17 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             deltas.append(f"Pace: **{abs(d):.0f} s/km {'faster' if d < 0 else 'slower'} than the median**" if abs(d) >= 1 else "Pace: **about the median**")
         for label, mine, theirs, unit, better_low in (
                 ("Average HR", a.get("avg_hr"), med([x.get("avg_hr") for x in sims]), " bpm", None),
-                ("Power", g.get("avgPower"), med([x["power"] for x in sims]), " W", None),
+                ("Power", g.get("avgPower"), med([x["power"] for x in sims if x["maker"] == mine]), " W", None),
                 ("Cadence", a.get("avg_cadence_spm"), med([x["cadence"] for x in sims]), " spm", None),
                 ("Aerobic decoupling (pace:HR)", dc.get("decoupling_pct") if dc.get("eligible") else None, med([x["drift"] for x in sims]), " points", True)):
             if mine is not None and theirs is not None:
                 d = mine - theirs
                 deltas.append(f"{label}: **{signed(d, '{:+.1f}' if unit == ' points' else '{:+.0f}', unit)}**"
                               + (f" ({'better' if d < 0 else 'worse'})" if better_low and abs(d) >= 0.5 else ""))
+        if g.get("avgPower") is not None and any(x["power"] is not None and x["maker"] != mine for x in sims) \
+                and not any(x["power"] is not None and x["maker"] == mine for x in sims):
+            deltas.append("Power: **not comparable**: the similar runs' power comes from another watch, and Garmin and "
+                          "Apple Watch estimate running power with different algorithms")
         if deltas:
             add("### Compared with the median of these runs")
             L.extend(f"{x}  " for x in deltas)
@@ -510,7 +546,11 @@ def markdown(conn, source: str, sid: str, app_version: str | None = None, now: d
             f"{num(a.get('avg_cadence_spm'))} |")
         for c in sims:
             add(f"| {c['local_date']} | {num((c.get('distance_m') or 0) / 1000, '{:.2f}', ' km')} | {pace(c.get('pace_s_per_km'))} | "
-                f"{num(c.get('avg_hr'))} | {num(c['power'], unit=' W')} | {num(c['drift'], '{:.1f}', '%')} | {num(c['cadence'])} |")
+                f"{num(c.get('avg_hr'))} | {num(c['power'], unit=' W') + ('†' if c['power'] is not None and c['maker'] != mine else '')} | "
+                f"{num(c['drift'], '{:.1f}', '%')} | {num(c['cadence'])} |")
+        if any(c["power"] is not None and c["maker"] != mine for c in sims):
+            add("")
+            add("† Another watch's power estimate: a different algorithm, not comparable in watts with this run's.")
         add("")
 
     # 14. Recent trend: the fitness progress signals (need enough comparable runs, or they say so)
