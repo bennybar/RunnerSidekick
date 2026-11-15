@@ -240,7 +240,7 @@ def suitability(speed_change_pct: float, power_change_pct: float | None, cls: di
     if pace_dc is not None and power_dc is not None and abs(power_dc - pace_dc) >= POWER_PACE_GAP:
         out["power_vs_pace"] = (f"Power-based drift ({power_dc:.1f}%) differs from pace-based ({pace_dc:.1f}%): the watch's power "
                                 f"{'fell' if (power_change_pct or 0) < 0 else 'rose'} {abs(power_change_pct or 0):.0f}% while the hill-adjusted pace "
-                                f"changed {speed_change_pct:+.0f}%. Power is the watch's own estimate (each brand computes it differently).")
+                                + ("held" if abs(speed_change_pct) < 0.5 else f"changed {speed_change_pct:+.0f}%") + ". Power is the watch's own estimate (each brand computes it differently).")
     return out
 
 

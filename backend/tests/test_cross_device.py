@@ -94,7 +94,7 @@ def test_a_short_finishing_sprint_is_neither_a_fade_nor_unsteady():
 
 def test_power_and_pace_drift_disagreeing_is_explained():
     out = rn.suitability(0.3, -2.6, {"kind": "steady"}, 1.9, 3.9)
-    assert out["suitability"] == "good" and "fell 3%" in out["power_vs_pace"] and "own estimate" in out["power_vs_pace"]
+    assert out["suitability"] == "good" and "fell 3%" in out["power_vs_pace"] and "pace held" in out["power_vs_pace"] and "own estimate" in out["power_vs_pace"]
 
 
 def mixed_history(tmp_path, dynamics=True, power=True):
