@@ -342,12 +342,12 @@ def main(argv=None) -> int:
     if args.cmd == "reprocess-apple":
         # What the phone sent before conversion 2 is redone from what's stored (the phone doesn't resend old data)
         from . import apple
-        from . import reports as rp
+        from .reports import samples_for
         conn = connect(ucfg.db_name)
         src = ucfg.source
         runs = 0
         for a in conn.activity.find({"source": src, "manufacturer": apple.MAKER, "apple_conversion": {"$ne": apple.CONVERSION}}):
-            s = rp.samples_for(conn, a["id"])
+            s = samples_for(conn, a["id"])
             gained = apple.climb(s.t, s.elev) if s else None
             raw = conn.raw_payload.find_one({"kind": "activity_summary", "source_key": a["source_id"]}) or {}
             sent = apple.num((raw.get("payload") or {}).get("elevation_gain_m"))
