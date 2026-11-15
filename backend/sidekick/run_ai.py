@@ -253,6 +253,20 @@ def bundle(conn, source: str, sid: str, today: date) -> ch.Bundle:
     return b
 
 
+NEGATIONS = ("not", "n't", "no ", "rather than", "instead of", "without", "never", "nor", "isn't", "wasn't", "rather")
+
+
+def claims_fade(text: str) -> bool:
+    """Whether the text says the run faded (a negation just before "fade" says the opposite: "not a fade", "rather than
+    fading")."""
+    import re
+    for m in re.finditer(r"\bfad(e|ed|es|ing)\b", text):
+        before = text[max(0, m.start() - 30):m.start()]
+        if not any(n in before for n in NEGATIONS):
+            return True
+    return False
+
+
 def validate(raw: str, b: ch.Bundle) -> dict:
     try:
         d = json.loads(raw)
@@ -268,7 +282,7 @@ def validate(raw: str, b: ch.Bundle) -> dict:
     if b.items.get("run:pacing", {}).get("where") == "opening":
         said = " ".join([d.get("tldr") or "", d.get("summary") or "", nt.get("text") or ""]
                         + [p.get("text") or "" for k in ("went_well", "to_work_on") for p in d[k]]).lower()
-        if any(w in said for w in ("fade", "faded", "fading")):
+        if claims_fade(said):
             raise ch.CoachError("contradicts the pacing analysis: the run started quickly and then held steady; it didn't fade")
     if b.items.get("today:advice", {}).get("intensity_held_back") and nt["direction"] == "harder":
         raise ch.CoachError("next_time: harder while today's advice holds intensity back")

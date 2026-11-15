@@ -291,3 +291,11 @@ def test_an_unrelated_save_never_clears_custom_zones(tmp_path):
     client.put("/v1/settings", json={"hr_zones_custom": [100, 120, 135, 152, 170], "hr_zone_source": "custom"}, headers=h)
     r = client.put("/v1/settings", json={"goal": "x", "hr_zones_custom": None, "hr_zones_effective": None}, headers=h).json()
     assert r["hr_zones_custom"] == [100, 120, 135, 152, 170] and r["hr_zone_source"] == "custom"
+
+
+def test_saying_it_wasnt_a_fade_is_fine():
+    from sidekick.run_ai import claims_fade
+    assert claims_fade("you faded in the second half") and claims_fade("a late fade")
+    for ok in ("this wasn't a fade", "a quick start rather than a fade", "it did not fade", "steady, without fading",
+               "the slower second half reflects the start, not fading"):
+        assert not claims_fade(ok), ok
