@@ -39,11 +39,11 @@ def pacing(report):
 def test_full_run_slowdown_with_a_steady_drift_window_is_explained_not_failed():
     # (2) Halves +16 s/km on the whole run, 5:45 → 5:46 after the warm-up: the start, not a fade
     sh = rn.pacing_shape(NOV15_GAP)
-    assert sh["where"] == "opening" and sh["laps"] == 2 and round(sh["fade"]) == 16
+    assert sh["where"] == "opening" and sh["laps"] == 3 and round(sh["opening"]) == 333 and round(sh["after_opening"]) == 349 and round(sh["fade"]) == 16
     rep = {"splits": splits(NOV15_GAP), "intent": {"kind": "tempo", "effort": "moderate", "feel": "great"},
            "decoupling": drift(345, 346), "activity": {"source_id": "x"}}
     c = pacing(rep)
-    assert c["verdict"] == "ok" and "Quick first 2 km" in c["say"] and "after the first 10 minutes it held (5:45 /km → 5:46 /km)" in c["say"]
+    assert c["verdict"] == "ok" and "Quick first 3 km (5:33 /km hill-adjusted), then steady (5:49 /km)" in c["say"] and "after the first 10 minutes it held (5:45 /km → 5:46 /km)" in c["say"]
     story = rn.run_story([rn.Split(i, 1000.0, p, p, 155.0, 0.0, float(p), True) for i, p in enumerate(NOV15_GAP)],
                          [{"gap_pace_s_per_km": p} for p in NOV15_GAP], rp.fmt_pace)
     assert any("were quicker" in x and "held steady" in x for x in story) and not any("faded" in x for x in story)

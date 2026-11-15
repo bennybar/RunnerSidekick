@@ -347,8 +347,12 @@ def main(argv=None) -> int:
         src = ucfg.source
         runs = 0
         for a in conn.activity.find({"source": src, "manufacturer": apple.MAKER, "apple_conversion": {"$ne": apple.CONVERSION}}):
+            done = a.get("apple_conversion") or 1  # each step once: climb at 2, speed at 3
             s = samples_for(conn, a["id"])
-            gained = apple.climb(s.t, s.elev) if s else None
+            if done < 3 and s is not None:
+                s.speed = apple.calibrate_speed(s.speed, a.get("distance_m"), a.get("moving_s"))
+                conn.activity_samples.update_one({"activity_id": a["id"]}, {"$set": {"samples": s.to_json()}})
+            gained = apple.climb(s.t, s.elev) if s and done < 2 else None
             raw = conn.raw_payload.find_one({"kind": "activity_summary", "source_key": a["source_id"]}) or {}
             sent = apple.num((raw.get("payload") or {}).get("elevation_gain_m"))
             if gained and gained[0] > 0:

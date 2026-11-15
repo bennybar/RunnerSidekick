@@ -12,7 +12,7 @@ from statistics import median, pstdev
 
 from ..connectors.base import Samples
 
-RUNNING_VERSION = "running-1.17"  # 1.17: drift suitability good/limited/unsuitable from minute-by-minute effort; 1.16: wording ("pace held"); 1.15: where a slowdown happened (pacing_shape); decoupling suitability; 1.14: laps placed by their own start times; 1.13: fastest/slowest lap and the lap spread hill-adjusted on hilly runs; 1.12: gradients ease in from 0.5% to 1.5% (no jump at 1%); 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
+RUNNING_VERSION = "running-1.18"  # 1.18: the quick opening counts every quick lap at the start; 1.17: drift suitability good/limited/unsuitable from minute-by-minute effort; 1.16: wording ("pace held"); 1.15: where a slowdown happened (pacing_shape); decoupling suitability; 1.14: laps placed by their own start times; 1.13: fastest/slowest lap and the lap spread hill-adjusted on hilly runs; 1.12: gradients ease in from 0.5% to 1.5% (no jump at 1%); 1.11: altitude smoothed over 30 s, grade over 100 m, under 1% counts as flat (noise no longer adds a climb); 1.10: no fade read across halves that climb differently; 1.9: thinned-out samples (very long runs) keep their analysis; 1.8: gentle linear downhill credit; one fade in focus and the pacing finding; 1.7: downhill credit floored at 85% of flat; decoupling needs halves of similar net grade; 1.6: time-weighted split cadence; 1.5: steady when pace or grade-adjusted pace is even; 1.4: best efforts try end-anchored segments too; 1.1: uniform INTERVAL lap labels no longer imply intervals; 1.2: grade-adjusted drift, 20-min segments; 1.3: drift for every run (eligible = steady) plus power:HR
 
 MOVING_SPEED = 0.5          # m/s; below this a sample counts as stopped
 MAX_SAMPLE_GAP = 10.0       # s; a longer gap between samples is a gap, not weighted time
@@ -546,6 +546,10 @@ def pacing_shape(paces: list[float]) -> dict | None:
     if f is not None and f > FADE_S_PER_KM and middle is not None:
         if middle - opening > FADE_S_PER_KM and abs(final - middle) <= FADE_S_PER_KM:
             where = "opening"
+            # The opening is every lap at the start that was quick against the rest, not a fixed third
+            while k < n - 2 and paces[k] < sum(paces[k + 1:]) / (n - k - 1) - FADE_S_PER_KM:
+                k += 1
+            opening = sum(paces[:k]) / k
         elif final - middle > FADE_S_PER_KM and abs(middle - opening) <= FADE_S_PER_KM:
             where = "final"
         else:

@@ -352,3 +352,16 @@ def test_resting_heart_rate_never_mixes_watches():
     # Under a week of Apple readings: the previous watch's stand in for absolute inputs, never mixed in a trend
     assert cardio.rest_on(conn, "fixture", t) == 50.0
     assert rp.rhr_series(conn, "fixture", (TODAY - timedelta(days=28)).isoformat()) == {}
+
+
+def test_per_second_speed_matches_distance_over_moving_time(tmp_path):
+    # Apple's running speed read about 1% fast against its own distance: scaled to it, as Garmin's samples agree
+    client, h, _ = app(tmp_path)
+    client.put("/v1/settings", json={"watch": "apple"}, headers=h)
+    w = run(TODAY - timedelta(days=4), "spd", km=5.0, pace_s=330.0, pause_at=None, hill=False)
+    w["series"]["speed"] = [[t, round(1000 / 330 * 1.012, 3)] for t in range(0, int(w["elapsed_s"]) + 1, 5)]
+    assert client.post("/v1/apple", json={"workouts": [w]}, headers=h).status_code == 200
+    conn = connect(user_db_name(1, "fixture"))
+    a = conn.activity.find_one({"source_id": "apple-spd"})
+    sp = [v for v in rp.samples_for(conn, a["id"]).speed if v]
+    assert abs(sum(sp) / len(sp) - a["distance_m"] / a["moving_s"]) < 0.005

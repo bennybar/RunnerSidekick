@@ -41,7 +41,7 @@ NIGHT_MARGIN_S = 36 * 3600        # stored stages and readings this far around a
 NAP_MAX_S = 3 * 3600              # a sleep under 3 hours starting between 9:00 and 20:00 is a nap
 MIN_SDNN = 6                      # a night's HRV from Apple's SDNN readings needs 6 inside the sleep (half an hour)
 ASLEEP = ("deep", "core", "rem", "asleep")
-CONVERSION = 2                    # 2: climb, descent and laps from one method, matched to Apple's climb; raised when the way a workout is converted changes, so a workout sent again is redone
+CONVERSION = 3                    # 3: per-second speed matched to distance ÷ moving time; 2: climb, descent and laps from one method, matched to Apple's climb; raised when the way a workout is converted changes, so a workout sent again is redone
 
 
 # ---------------------------------------------------------------- small helpers
@@ -190,6 +190,18 @@ def event_laps(s: Samples, dt: list[float], events: list[dict], start: datetime)
     return laps
 
 
+def calibrate_speed(speed: list[float | None], distance_m: float | None, moving_s: float | None) -> list[float | None]:
+    """Apple's per-second running speed scaled so its average matches the run's distance over its moving time (it read
+    about 1% fast), as Garmin's samples do; within ±10%, else left as it is (a gap in the data, not a scale)."""
+    vals = [v for v in speed if v is not None and v > 0]
+    if not vals or not distance_m or not moving_s:
+        return speed
+    f = (distance_m / moving_s) / (sum(vals) / len(vals))
+    if not 0.9 <= f <= 1.1 or abs(f - 1) < 0.002:
+        return speed
+    return [round(v * f, 3) if v is not None else None for v in speed]
+
+
 def consistent_climb(apple_gain: float | None, gained: tuple[float, float] | None, laps: list[Lap]) -> tuple[float | None, float | None]:
     """The run's climb and descent and its laps' from one method (altitude every 10 s), so laps add up to the total and
     climb minus descent matches where the run ended. When Apple sent its own climb (barometric, the better measure),
@@ -261,6 +273,8 @@ def workout(w: dict, tz: ZoneInfo) -> Activity:
             al.append(run)
         shape = shape_from_track(al, [float(p[1]) for p in route], [float(p[2]) for p in route])
     moving = elapsed - sum(b - a for a, b in paused) if paused else (num(w.get("moving_s")) or elapsed)
+    if samples is not None:
+        samples.speed = calibrate_speed(samples.speed, total, moving)
     hr = [h for h in (samples.hr if samples else []) if h is not None]
     cad = [c for c, v in zip(samples.cad, samples.speed) if c is not None and (v or 0) >= MOVING_SPEED] if samples else []
     gained = climb(samples.t, samples.elev) if samples else None
