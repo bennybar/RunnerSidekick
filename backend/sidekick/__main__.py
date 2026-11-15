@@ -228,6 +228,7 @@ def main(argv=None) -> int:
     p = with_user(sub.add_parser("sync", help="sync every connected user (or --user)")); p.add_argument("--loop", action="store_true")
     with_user(sub.add_parser("rebuild-reports"))
     with_user(sub.add_parser("backfill-intensity", help="intensity minutes from stored Garmin day summaries"))
+    with_user(sub.add_parser("reprocess-apple", help="redo stored Apple Watch climb, activity minutes and nightly HRV with the current rules"))
     with_user(sub.add_parser("backfill-hrv-detail", help="early, late and per-stage overnight HRV from stored Garmin HRV and sleep"))
     with_user(sub.add_parser("backfill-weather", help="Open-Meteo weather estimates for recent runs that have none"))
     with_user(sub.add_parser("backfill-routes", help="simplified routes from stored Garmin details; then drop the full GPS from them"))
@@ -337,6 +338,40 @@ def main(argv=None) -> int:
                 save_day(conn, r["source"], DayBundle(local_date=r["source_key"], observations=obs))
                 days += 1
         print(f"intensity minutes stored for {days} days")
+        return 0
+    if args.cmd == "reprocess-apple":
+        # What the phone sent before conversion 2 is redone from what's stored (the phone doesn't resend old data)
+        from . import apple
+        from . import reports as rp
+        conn = connect(ucfg.db_name)
+        src = ucfg.source
+        runs = 0
+        for a in conn.activity.find({"source": src, "manufacturer": apple.MAKER, "apple_conversion": {"$ne": apple.CONVERSION}}):
+            s = rp.samples_for(conn, a["id"])
+            gained = apple.climb(s.t, s.elev) if s else None
+            raw = conn.raw_payload.find_one({"kind": "activity_summary", "source_key": a["source_id"]}) or {}
+            sent = apple.num((raw.get("payload") or {}).get("elevation_gain_m"))
+            if gained and gained[0] > 0:
+                f = sent / gained[0] if sent is not None else 1.0
+                for lap in conn.activity_lap.find({"activity_id": a["id"]}):
+                    conn.activity_lap.update_one({"_id": lap["_id"]}, {"$set": {
+                        k: round(lap[k] * f, 1) for k in ("elevation_gain_m", "elevation_loss_m") if lap.get(k) is not None}})
+                conn.activity.update_one({"_id": a["_id"]}, {"$set": {"elevation_gain_m": round(gained[0] * f, 1),
+                                                                      "elevation_loss_m": round(gained[1] * f, 1)}})
+            conn.activity.update_one({"_id": a["_id"]}, {"$set": {"apple_conversion": apple.CONVERSION,
+                                                                  "content_hash": f"{a.get('content_hash')}-c{apple.CONVERSION}"}})
+            runs += 1
+        days = set()
+        for o in conn.daily_observation.find({"source": src, "metric": "intensity_minutes_moderate", "method": "apple_exercise_minutes",
+                                              "state": "measured"}):
+            if not conn.daily_observation.find_one({"source": src, "metric": "exercise_minutes", "local_date": o["local_date"]}):
+                conn.daily_observation.insert_one({**{k: v for k, v in o.items() if k != "_id"}, "metric": "exercise_minutes"})
+            days.add(o["local_date"])
+        days |= set(conn.activity.distinct("local_date", {"source": src, "manufacturer": apple.MAKER}))
+        apple.intensity(conn, src, days)
+        st = list(conn.apple_sleep.find({}, {"s": 1, "e": 1}))
+        nights = apple.nights(conn, src, min(x["s"] for x in st), max(x["e"] for x in st)) if st else set()
+        print(f"apple: {runs} runs redone, activity minutes for {len(days)} days, {len(nights)} nights changed")
         return 0
     if args.cmd == "backfill-hrv-detail":
         # Garmin's 5-minute overnight HRV is kept as raw payloads (for 120 days); the night's derived values are stored

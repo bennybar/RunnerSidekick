@@ -291,3 +291,64 @@ def test_switching_keeps_garmin_data_and_starts_new_baselines(tmp_path):
     res = client.app.state.do_sync(c.__class__(**{**c.__dict__, "user_id": 1}), 1)
     assert res["outcome"] != "skipped"
     assert conn.activity.count_documents({}) == garmin_runs
+
+
+def test_nightly_hrv_uses_every_reading_in_the_sleep(tmp_path):
+    # Apple takes an SDNN reading every few minutes asleep; only a few carry the heartbeat series (RMSSD)
+    client, h, _ = app(tmp_path)
+    client.put("/v1/settings", json={"watch": "apple"}, headers=h)
+    wake = TODAY - timedelta(days=1)
+    stages, _ = night(wake)
+    sd = [40.0, 44.0, 52.0, 38.0, 61.0, 47.0, 55.0, 43.0]
+    hrv = [{"time": at(wake, 0, 10 + 5 * i).isoformat(), "sdnn_ms": v, "rmssd_ms": 20.0 if i in (0, 1) else None, "beats": 60}
+           for i, v in enumerate(sd)]
+    assert client.post("/v1/apple", json={"sleep": stages, "hrv": hrv}, headers=h).status_code == 200
+    conn = connect(user_db_name(1, "fixture"))
+    o = conn.daily_observation.find_one({"metric": "hrv_overnight_avg", "local_date": wake.isoformat()})
+    assert o["method"] == "apple_sdnn" and o["value"] == round(sum(sd) / len(sd), 1) and o["label"] == "8 readings"
+
+
+def test_running_minutes_count_as_vigorous(tmp_path):
+    # 60 exercise minutes on a day with a 45-minute Apple run: 45 vigorous (counted double by the WHO part), 15 moderate
+    client, h, _ = app(tmp_path)
+    client.put("/v1/settings", json={"watch": "apple"}, headers=h)
+    d = TODAY - timedelta(days=2)
+    w = run(d, "vig", km=45 * 60 / 330, pace_s=330.0, pause_at=None)
+    assert client.post("/v1/apple", json={"days": [{**day(d), "exercise_min": 60}]}, headers=h).status_code == 200
+    assert client.post("/v1/apple", json={"workouts": [w]}, headers=h).status_code == 200  # the run after the day: still split
+    conn = connect(user_db_name(1, "fixture"))
+    get = lambda m: conn.daily_observation.find_one({"metric": m, "local_date": d.isoformat()})["value"]  # noqa: E731
+    assert get("exercise_minutes") == 60 and get("intensity_minutes_vigorous") == 45 and get("intensity_minutes_moderate") == 15
+
+
+def test_climb_descent_and_laps_agree(tmp_path):
+    # Apple's own climb is kept; descent and the laps come from the same altitude readings, scaled alike
+    client, h, _ = app(tmp_path)
+    client.put("/v1/settings", json={"watch": "apple"}, headers=h)
+    w = run(TODAY - timedelta(days=3), "hill", km=5.0, pause_at=None)
+    w["elevation_gain_m"] = 50.0
+    assert client.post("/v1/apple", json={"workouts": [w]}, headers=h).status_code == 200
+    conn = connect(user_db_name(1, "fixture"))
+    a = conn.activity.find_one({"source_id": "apple-hill"})
+    laps = list(conn.activity_lap.find({"activity_id": a["id"]}))
+    alts = [r[3] for r in w["series"]["route"]]
+    assert a["elevation_gain_m"] == 50.0
+    assert abs(sum(l["elevation_gain_m"] for l in laps) - 50.0) < 1.5
+    assert abs((a["elevation_gain_m"] - a["elevation_loss_m"]) - (alts[-1] - alts[0])) < 3
+
+
+def test_resting_heart_rate_never_mixes_watches():
+    from sidekick import cardio
+    conn = connect(user_db_name(1, "fixture"))
+    for k in range(30, 2, -1):  # Garmin's: 50 bpm
+        conn.daily_observation.insert_one({"source": "fixture", "metric": "resting_hr", "state": "measured", "value": 50.0,
+                                           "method": "garmin_daily_rhr", "local_date": (TODAY - timedelta(days=k)).isoformat()})
+    for k in (2, 1, 0):  # then Apple's, read about 6 bpm higher
+        conn.daily_observation.insert_one({"source": "fixture", "metric": "resting_hr", "state": "measured", "value": 56.0,
+                                           "method": "apple_daily", "local_date": (TODAY - timedelta(days=k)).isoformat()})
+    t = TODAY.isoformat()
+    assert set(rp.rhr_series(conn, "fixture", t).values()) == {56.0}
+    assert len(rp.rhr_series(conn, "fixture", t, all_watches=True)) == 31
+    # Under a week of Apple readings: the previous watch's stand in for absolute inputs, never mixed in a trend
+    assert cardio.rest_on(conn, "fixture", t) == 50.0
+    assert rp.rhr_series(conn, "fixture", (TODAY - timedelta(days=28)).isoformat()) == {}

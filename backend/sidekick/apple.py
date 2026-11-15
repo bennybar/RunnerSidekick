@@ -39,9 +39,9 @@ MOVING_SPEED = 0.5                # m/s; slower counts as standing in a lap's mo
 NIGHT_GAP_S = 90 * 60             # sleep stages further apart than this belong to different sleeps
 NIGHT_MARGIN_S = 36 * 3600        # stored stages and readings this far around an upload are read to rebuild its nights
 NAP_MAX_S = 3 * 3600              # a sleep under 3 hours starting between 9:00 and 20:00 is a nap
-MIN_RMSSD = 2                     # a night's RMSSD needs at least 2 readings in the sleep window, else SDNN
+MIN_SDNN = 6                      # a night's HRV from Apple's SDNN readings needs 6 inside the sleep (half an hour)
 ASLEEP = ("deep", "core", "rem", "asleep")
-CONVERSION = 1                    # raised when the way a workout is converted changes, so a workout sent again is redone
+CONVERSION = 2                    # 2: climb, descent and laps from one method, matched to Apple's climb; raised when the way a workout is converted changes, so a workout sent again is redone
 
 
 # ---------------------------------------------------------------- small helpers
@@ -190,6 +190,21 @@ def event_laps(s: Samples, dt: list[float], events: list[dict], start: datetime)
     return laps
 
 
+def consistent_climb(apple_gain: float | None, gained: tuple[float, float] | None, laps: list[Lap]) -> tuple[float | None, float | None]:
+    """The run's climb and descent and its laps' from one method (altitude every 10 s), so laps add up to the total and
+    climb minus descent matches where the run ended. When Apple sent its own climb (barometric, the better measure),
+    everything is scaled to it: the same factor for climb and descent, since altitude noise inflates both alike."""
+    if not gained or gained[0] <= 0:
+        return apple_gain, None
+    f = apple_gain / gained[0] if apple_gain is not None else 1.0
+    for lap in laps:
+        if lap.elevation_gain_m is not None:
+            lap.elevation_gain_m = round(lap.elevation_gain_m * f, 1)
+        if lap.elevation_loss_m is not None:
+            lap.elevation_loss_m = round(lap.elevation_loss_m * f, 1)
+    return round(gained[0] * f, 1), round(gained[1] * f, 1)
+
+
 def workout(w: dict, tz: ZoneInfo) -> Activity:
     """One Apple Watch workout as a run: samples on a 1-second grid (paused seconds left out), laps, the route's shape."""
     start, end = aware(w["start"], tz), aware(w["end"], tz)
@@ -250,6 +265,7 @@ def workout(w: dict, tz: ZoneInfo) -> Activity:
     cad = [c for c, v in zip(samples.cad, samples.speed) if c is not None and (v or 0) >= MOVING_SPEED] if samples else []
     gained = climb(samples.t, samples.elev) if samples else None
     gain = num(w.get("elevation_gain_m"))
+    gain, loss = consistent_climb(gain, gained, laps or [])
     dyn = w.get("dynamics") or {}
     pw = [p for p in (samples.power or []) if p is not None] if samples else []
     metrics = {k: v for k, v in (("avgStrideLength", round(num(dyn.get("stride_m")) * 100, 1) if num(dyn.get("stride_m")) else None),
@@ -268,7 +284,7 @@ def workout(w: dict, tz: ZoneInfo) -> Activity:
         distance_m=total if total is not None else (samples.dist[-1] if samples and samples.dist and samples.dist[-1] else None),
         elapsed_s=elapsed, moving_s=round(moving, 1), timer_s=round(moving, 1),
         avg_hr=round(sum(hr) / len(hr), 1) if hr else None, max_hr=max(hr) if hr else None,
-        elevation_gain_m=gain if gain is not None else (gained or (None, None))[0], elevation_loss_m=(gained or (None, None))[1],
+        elevation_gain_m=gain, elevation_loss_m=loss,
         avg_cadence_spm=round(sum(cad) / len(cad), 1) if cad else None, garmin_metrics=metrics,
         device_id=w.get("device") or "Apple Watch", manufacturer=MAKER, laps=laps or [], samples=samples, shape=shape,
         raw=[RawPayload("activity_summary", sid, summary)])
@@ -307,13 +323,32 @@ def day_readings(d: dict) -> list[Observation]:
     ds = d["date"].isoformat()
     out = []
     for key, metric, method in (("resting_hr", "resting_hr", "apple_daily"), ("steps", "steps", "apple_daily"),
-                                # Apple's exercise minutes (brisk activity or harder) count as moderate-intensity minutes
-                                ("exercise_min", "intensity_minutes_moderate", "apple_exercise_minutes"),
+                                # Apple's exercise minutes as they are; intensity() splits them into vigorous and moderate
+                                ("exercise_min", "exercise_minutes", "apple_exercise_minutes"),
                                 ("vo2max", "apple_vo2max_running", "apple_cardio_fitness"), ("weight_kg", "weight", "apple_health")):
         v = num(d.get(key))
         if v is not None:
             out.append(Observation(ds, metric, round(v, 1), method=method))
     return out
+
+
+def intensity(conn: Database, source: str, dates: set[str]) -> set[str]:
+    """WHO activity minutes for Apple days. Apple counts exercise minutes without saying how hard: running is vigorous
+    (well over 6 METs), so the day's Apple-run minutes count as vigorous and the rest of its exercise minutes as moderate,
+    as Garmin split them. A day Garmin measured keeps Garmin's."""
+    changed: set[str] = set()
+    for d in sorted(dates):
+        ex = conn.daily_observation.find_one({"source": source, "metric": "exercise_minutes", "local_date": d, "state": "measured"})
+        runs = list(conn.activity.find({"source": source, "manufacturer": MAKER, "local_date": d}, {"moving_s": 1}))
+        if ex is None and not runs:
+            continue
+        run_min = sum((r.get("moving_s") or 0) for r in runs) / 60
+        total = ex["value"] if ex is not None else run_min
+        vig = min(total, run_min)
+        obs = [Observation(d, "intensity_minutes_vigorous", round(vig), method="apple_runs"),
+               Observation(d, "intensity_minutes_moderate", round(max(0.0, total - vig)), method="apple_exercise_minutes")]
+        changed |= save_day(conn, source, DayBundle(local_date=d, observations=not_garmins(conn, source, obs)))
+    return changed
 
 
 # ---------------------------------------------------------------- nights
@@ -394,14 +429,17 @@ def nights(conn: Database, source: str, lo: int, hi: int) -> set[str]:
 
 
 def night_hrv(conn: Database, wake: str, main: list[SleepSession]) -> list[Observation]:
-    """The night's HRV from Apple's readings inside its sleep: the mean RMSSD when 2 or more readings have one (Apple's
-    heartbeat series), else the mean SDNN (what Apple Health reports as HRV). The two are kept apart by their method."""
+    """The night's HRV from Apple's readings inside its sleep: the mean SDNN of all of them (what Apple Health reports as
+    HRV; the watch takes one every few minutes asleep) once there are 6. RMSSD is only on the few readings that carry a
+    heartbeat series, too few for a stable night, so it's the fallback when SDNN is too sparse. Kept apart by method."""
     spans = [(ms(datetime.fromisoformat(s.start_utc.replace("Z", "+00:00"))), ms(datetime.fromisoformat(s.end_utc.replace("Z", "+00:00"))))
              for s in main]
     rs = list(conn.apple_hrv.find({"$or": [{"t": {"$gte": a, "$lte": b}} for a, b in spans]}, {"_id": 0}))
     rmssd = [r["rmssd"] for r in rs if r.get("rmssd")]
     sdnn = [r["sdnn"] for r in rs if r.get("sdnn")]
-    if len(rmssd) >= MIN_RMSSD:
+    if len(sdnn) >= MIN_SDNN:
+        return [Observation(wake, "hrv_overnight_avg", round(sum(sdnn) / len(sdnn), 1), method="apple_sdnn", label=f"{len(sdnn)} readings")]
+    if len(rmssd) >= 2:
         return [Observation(wake, "hrv_overnight_avg", round(sum(rmssd) / len(rmssd), 1), method="apple_rmssd", label=f"{len(rmssd)} readings")]
     if sdnn:
         return [Observation(wake, "hrv_overnight_avg", round(sum(sdnn) / len(sdnn), 1), method="apple_sdnn", label=f"{len(sdnn)} readings")]
@@ -426,12 +464,14 @@ def ingest(conn: Database, source: str, body: dict, tz: ZoneInfo) -> tuple[set[s
         if prev and prev.get("content_hash") == h:
             continue
         if save_activity(conn, source, a, h) is not None:
+            conn.activity.update_one({"source": source, "source_id": a.source_id}, {"$set": {"apple_conversion": CONVERSION}})
             changed_runs.append(a.source_id)
             changed_dates.add(a.local_date)
     for d in body.get("days") or []:
         accepted["days"] += 1
         changed_dates |= save_day(conn, source, DayBundle(local_date=d["date"].isoformat(),
                                                           observations=not_garmins(conn, source, day_readings(d))))
+    changed_dates |= intensity(conn, source, {a for a in changed_dates} | {d["date"].isoformat() for d in body.get("days") or []})
     lo, hi = None, None
     hrv = [(aware(r["time"], tz), r) for r in body.get("hrv") or [] if num(r.get("sdnn_ms")) or num(r.get("rmssd_ms"))]
     if hrv:

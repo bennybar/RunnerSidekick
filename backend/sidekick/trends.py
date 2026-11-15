@@ -62,7 +62,7 @@ def build_trends(conn, source: str, today: date, days: int, synthetic: bool) -> 
         if m == "hrv_overnight_avg":  # comparable HRV only: the latest method in use
             r = conn.daily_observation.find_one({"source": source, "metric": m, "state": "measured"}, sort=[("local_date", -1)])
             method = r["method"] if r else None
-        values = rp.rhr_series(conn, source, today.isoformat()) if m == "resting_hr" else rp.series(conn, source, m, today.isoformat(), method)
+        values = rp.rhr_series(conn, source, today.isoformat(), all_watches=True) if m == "resting_hr" else rp.series(conn, source, m, today.isoformat(), method)
         points, band = [], []
         for ds in dates:
             d = date.fromisoformat(ds)

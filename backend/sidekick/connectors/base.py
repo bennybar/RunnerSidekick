@@ -52,6 +52,7 @@ METRIC_UNITS: dict[str, str] = {
     "active_duration": "s",
     "intensity_minutes_moderate": "min",   # Garmin's moderate-intensity minutes for the day
     "intensity_minutes_vigorous": "min",   # Garmin's vigorous-intensity minutes for the day
+    "exercise_minutes": "min",             # Apple's exercise minutes for the day (split by apple.intensity)
     "avg_stress": "garmin_stress_0_100",
     "body_battery_high": "garmin_body_battery",
     "body_battery_low": "garmin_body_battery",

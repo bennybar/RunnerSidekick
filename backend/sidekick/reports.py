@@ -86,10 +86,25 @@ def daytime_rhr_days(conn, source: str, until: str) -> set[str]:
         {"source": source, "metric": "resting_hr", "method": "garmin_daily_rhr", "local_date": {"$in": off}}, {"local_date": 1})}
 
 
-def rhr_series(conn, source: str, until: str) -> dict[str, float]:
-    """Resting heart rate by day, without the daytime-only days (see daytime_rhr_days)."""
+def watch_family(method: str | None) -> str:
+    """The watch a reading came from, by its method's prefix: "garmin", "apple", "samsung"..."""
+    return (method or "").split("_", 1)[0]
+
+
+def rhr_series(conn, source: str, until: str, all_watches: bool = False) -> dict[str, float]:
+    """Resting heart rate by day, without the daytime-only days (see daytime_rhr_days). Only the current watch's
+    readings (the watch of the newest one): watches define resting heart rate differently (Apple's read about 5 bpm above
+    Garmin's for the same person), so medians, trends and baselines never mix them. all_watches: every reading, for
+    charts and records."""
     skip = daytime_rhr_days(conn, source, until)
-    return {k: v for k, v in series(conn, source, "resting_hr", until).items() if k not in skip}
+    q = {"source": source, "metric": "resting_hr", "state": "measured", "local_date": {"$lte": until}}
+    rows = list(conn.daily_observation.find(q, {"_id": 0, "local_date": 1, "value": 1, "method": 1}))
+    if not all_watches:
+        latest = conn.daily_observation.find_one({"source": source, "metric": "resting_hr", "state": "measured"}, {"method": 1},
+                                                 sort=[("local_date", -1)])
+        fam = watch_family((latest or {}).get("method"))
+        rows = [r for r in rows if watch_family(r.get("method")) == fam]
+    return {r["local_date"]: r["value"] for r in rows if r["local_date"] not in skip}
 
 
 def day_obs(conn, source: str, d: str) -> dict[str, dict]:

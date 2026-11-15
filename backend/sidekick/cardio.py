@@ -71,6 +71,8 @@ def hunt_part(conn, source: str, sex: str | None, age: int | None, today: date) 
     ans = {k: get_setting(conn, k, None) for k in ("hunt_frequency", "hunt_intensity", "hunt_duration")}
     since = (today - timedelta(days=27)).isoformat()
     rhr = [v for k, v in rp.rhr_series(conn, source, today.isoformat()).items() if k >= since]
+    if len(rhr) < 7:  # a new watch without a week of readings yet: the previous watch's stand in until then
+        rhr = [v for k, v in rp.rhr_series(conn, source, today.isoformat(), all_watches=True).items() if k >= since]
     missing = [w for w, ok in (("sex and birth date", sex and age), ("waist", waist), ("the three activity answers", all(ans.values())),
                                ("a resting pulse", seated or len(rhr) >= 7)) if not ok]
     caveat = ("A population formula from who you are and how active you say you are, not from a run. Activity points "
@@ -322,6 +324,8 @@ def rest_on(conn, source: str, day: str) -> float | None:
     them."""
     since = (date.fromisoformat(day) - timedelta(days=27)).isoformat()  # 28 days including the day itself
     vals = [v for k, v in rp.rhr_series(conn, source, day).items() if k >= since]
+    if len(vals) < 7:  # a new watch without a week of readings yet: the previous watch's stand in until then
+        vals = [v for k, v in rp.rhr_series(conn, source, day, all_watches=True).items() if k >= since]
     return median(vals) if len(vals) >= 7 else None
 
 

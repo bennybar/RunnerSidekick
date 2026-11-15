@@ -105,7 +105,7 @@ def build(conn, source: str, today: date) -> dict:
             cmp = {"headline": it.get("headline"), "detail": it.get("detail")} if it.get("status") == "ok" else None
         body.append({"id": "vo2max", "title": "Highest VO₂ max", "value": f"{v:.0f}", "date": d, "source_id": None,
                      "source": f"{rp.watch_maker(conn)}'s estimate", "comparison": cmp})
-    rhr = rp.rhr_series(conn, source, today.isoformat())  # no daytime-only values
+    rhr = rp.rhr_series(conn, source, today.isoformat(), all_watches=True)  # no daytime-only values; every watch's
     if len(rhr) >= 7:
         d, v = min(rhr.items(), key=lambda kv: (kv[1], kv[0]))
         cmp = None
@@ -206,7 +206,7 @@ def progressions(conn, source: str, today: date) -> dict[str, list[dict]]:
         weeks[ws] = weeks.get(ws, 0.0) + (a["distance_m"] or 0)
     track("week", [(w, v, None) for w, v in sorted(weeks.items())], False)
     for rid, metric, lower in (("vo2max", rp.vo2_metric(conn), False), ("resting_hr", "resting_hr", True), ("hrv", "hrv_overnight_avg", False)):
-        s = rp.rhr_series(conn, source, today.isoformat()) if metric == "resting_hr" else \
+        s = rp.rhr_series(conn, source, today.isoformat(), all_watches=True) if metric == "resting_hr" else \
             rp.hrv_series(conn, source, today.isoformat()) if metric == "hrv_overnight_avg" else rp.series(conn, source, metric, today.isoformat())
         track(rid, [(d, v, None) for d, v in sorted(s.items())], lower)
     return out
